@@ -158,7 +158,7 @@ static const uint32_t TRUE_WORD = 0xC35A69A5;
 static const uint32_t FALSE_WORD = 0x3CA5965A;
 
 static void __handle_fault(const char *msg, const char *file, int line);
-#define handle_fault(msg) (__handle_fault(msg, __FILE_NAME__, __LINE__))
+#define handle_fault(msg) (__handle_fault(msg, __FILE__, __LINE__))
 
 static uint32_t pin_to_int(const uint8_t *pin, size_t pin_len);
 static secbool storage_upgrade(void);

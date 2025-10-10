@@ -32,7 +32,7 @@ class SupportItemVersion(TypedDict):
 
 
 SupportData = Dict[str, SupportItemVersion]
-SupportInfoItem = Dict[str, Literal[False] | str]
+SupportInfoItem = Dict[str, Literal[False] ]
 SupportInfo = Dict[str, SupportInfoItem]
 
 
