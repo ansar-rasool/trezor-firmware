@@ -1,18 +1,20 @@
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from apps.common.coininfo import CoinInfo
-    from trezor.messages import VerifyMessage, Success
-    from trezor.wire import Context
     from trezor.enums import InputScriptType
+    from trezor.messages import Success, VerifyMessage
+
+    from apps.common.coininfo import CoinInfo
 
 
 def _address_to_script_type(address: str, coin: CoinInfo) -> InputScriptType:
-    from trezor.crypto import base58
-    from trezor.wire import DataError
-    from trezor.enums import InputScriptType
     from trezor import utils
+    from trezor.crypto import base58
+    from trezor.enums import InputScriptType
+    from trezor.wire import DataError
+
     from apps.common import address_type
+
     from . import common
 
     # Determines the script type from a non-multisig address.
@@ -48,13 +50,13 @@ def _address_to_script_type(address: str, coin: CoinInfo) -> InputScriptType:
     raise DataError("Invalid address")
 
 
-async def verify_message(ctx: Context, msg: VerifyMessage) -> Success:
-    from trezor import utils
-    from trezor.wire import ProcessError
+async def verify_message(msg: VerifyMessage) -> Success:
+    from trezor import TR, utils
     from trezor.crypto.curve import secp256k1
     from trezor.enums import InputScriptType
     from trezor.messages import Success
     from trezor.ui.layouts import confirm_signverify, show_success
+    from trezor.wire import ProcessError
 
     from apps.common import coins
     from apps.common.signverify import decode_message, message_digest
@@ -109,12 +111,10 @@ async def verify_message(ctx: Context, msg: VerifyMessage) -> Success:
         raise ProcessError("Invalid signature")
 
     await confirm_signverify(
-        ctx,
-        coin.coin_shortcut,
         decode_message(message),
         address_short(coin, address),
         verify=True,
     )
 
-    await show_success(ctx, "verify_message", "The signature is valid.")
+    await show_success("verify_message", TR.bitcoin__valid_signature)
     return Success(message="Message verified")

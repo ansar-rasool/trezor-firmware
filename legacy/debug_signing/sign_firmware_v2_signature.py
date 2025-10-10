@@ -6,7 +6,6 @@ import sys
 from hashlib import sha1, sha256
 
 import ecdsa
-
 from fill_t1_fw_signatures import Signatures
 
 secret_keys_hex = [
@@ -54,7 +53,7 @@ assert public_keys_hex == [
 ]
 
 print("Sanity check")
-for (sk, pk_hex) in zip(secret_keys, public_keys_hex):
+for sk, pk_hex in zip(secret_keys, public_keys_hex):
     pk = ecdsa.VerifyingKey.from_string(
         bytes.fromhex(pk_hex), curve=ecdsa.SECP256k1, hashfunc=sha256
     )

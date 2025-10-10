@@ -25,6 +25,8 @@
 #include "crypto.h"
 #include "debug.h"
 #include "ecdsa.h"
+#include "fsm.h"
+#include "gettext.h"
 #include "layout2.h"
 #include "memzero.h"
 #include "messages.pb.h"
@@ -34,9 +36,6 @@
 #include "segwit_addr.h"
 #include "util.h"
 #include "zkp_bip340.h"
-#ifdef USE_SECP256K1_ZKP_ECDSA
-#include "zkp_ecdsa.h"
-#endif
 
 #if !BITCOIN_ONLY
 #include "cash_addr.h"
@@ -369,6 +368,12 @@ uint32_t compile_script_multisig(const CoinInfo *coin,
   const uint32_t n = cryptoMultisigPubkeyCount(multisig);
   if (m < 1 || m > 15) return 0;
   if (n < 1 || n > 15) return 0;
+
+  uint8_t pubkeys[33 * n];
+  if (!cryptoMultisigPubkeys(coin, multisig, pubkeys)) {
+    return 0;
+  }
+
   uint32_t r = 0;
   if (out) {
     out[r] = 0x50 + m;
@@ -376,9 +381,7 @@ uint32_t compile_script_multisig(const CoinInfo *coin,
     for (uint32_t i = 0; i < n; i++) {
       out[r] = 33;
       r++;  // OP_PUSH 33
-      const HDNode *pubnode = cryptoMultisigPubkey(coin, multisig, i);
-      if (!pubnode) return 0;
-      memcpy(out + r, pubnode->public_key, 33);
+      memcpy(out + r, pubkeys + 33 * i, 33);
       r += 33;
     }
     out[r] = 0x50 + n;
@@ -399,6 +402,12 @@ uint32_t compile_script_multisig_hash(const CoinInfo *coin,
   if (m < 1 || m > 15) return 0;
   if (n < 1 || n > 15) return 0;
 
+  // allocate on stack instead of heap
+  uint8_t pubkeys[33 * n];
+  if (!cryptoMultisigPubkeys(coin, multisig, pubkeys)) {
+    return 0;
+  }
+
   Hasher hasher = {0};
   hasher_Init(&hasher, coin->curve->hasher_script);
 
@@ -408,9 +417,7 @@ uint32_t compile_script_multisig_hash(const CoinInfo *coin,
   for (uint32_t i = 0; i < n; i++) {
     d[0] = 33;
     hasher_Update(&hasher, d, 1);  // OP_PUSH 33
-    const HDNode *pubnode = cryptoMultisigPubkey(coin, multisig, i);
-    if (!pubnode) return 0;
-    hasher_Update(&hasher, pubnode->public_key, 33);
+    hasher_Update(&hasher, pubkeys + 33 * i, 33);
   }
   d[0] = 0x50 + n;
   d[1] = 0xAE;
@@ -514,18 +521,8 @@ uint32_t serialize_p2tr_witness(const uint8_t *signature,
 
 bool tx_sign_ecdsa(const ecdsa_curve *curve, const uint8_t *private_key,
                    const uint8_t *hash, uint8_t *out, pb_size_t *size) {
-  int ret = 0;
   uint8_t signature[64] = {0};
-#ifdef USE_SECP256K1_ZKP_ECDSA
-  if (curve == &secp256k1) {
-    ret =
-        zkp_ecdsa_sign_digest(curve, private_key, hash, signature, NULL, NULL);
-  } else
-#endif
-  {
-    ret = ecdsa_sign_digest(curve, private_key, hash, signature, NULL, NULL);
-  }
-  if (ret != 0) {
+  if (ecdsa_sign_digest(curve, private_key, hash, signature, NULL, NULL) != 0) {
     return false;
   }
 
@@ -547,19 +544,16 @@ bool tx_sign_bip340(const uint8_t *private_key, const uint8_t *hash,
 
 // tx methods
 bool tx_input_check_hash(Hasher *hasher, const TxInputType *input) {
-  hasher_Update(hasher, (const uint8_t *)&input->address_n_count,
-                sizeof(input->address_n_count));
-  for (int i = 0; i < input->address_n_count; ++i)
-    hasher_Update(hasher, (const uint8_t *)&input->address_n[i],
-                  sizeof(input->address_n[0]));
-  hasher_Update(hasher, input->prev_hash.bytes, sizeof(input->prev_hash.bytes));
-  hasher_Update(hasher, (const uint8_t *)&input->prev_index,
-                sizeof(input->prev_index));
+  HASHER_UPDATE_INT(hasher, input->address_n_count, uint16_t);
+  for (int i = 0; i < input->address_n_count; ++i) {
+    HASHER_UPDATE_INT(hasher, input->address_n[i], uint32_t);
+  }
+  HASHER_UPDATE_BYTES(hasher, input->prev_hash.bytes, 32);
+  HASHER_UPDATE_INT(hasher, input->prev_index, uint32_t);
   tx_script_hash(hasher, input->script_sig.size, input->script_sig.bytes);
-  hasher_Update(hasher, (const uint8_t *)&input->sequence,
-                sizeof(input->sequence));
-  hasher_Update(hasher, (const uint8_t *)&input->script_type,
-                sizeof(input->script_type));
+  HASHER_UPDATE_INT(hasher, input->sequence, uint32_t);
+  uint32_t script_type = input->script_type;
+  HASHER_UPDATE_INT(hasher, script_type, uint32_t);
   uint8_t multisig_fp[32] = {0};
   if (input->has_multisig) {
     if (cryptoMultisigFingerprint(&input->multisig, multisig_fp) == 0) {
@@ -567,14 +561,12 @@ bool tx_input_check_hash(Hasher *hasher, const TxInputType *input) {
       return false;
     }
   }
-  hasher_Update(hasher, multisig_fp, sizeof(multisig_fp));
-  hasher_Update(hasher, (const uint8_t *)&input->amount, sizeof(input->amount));
+  HASHER_UPDATE_BYTES(hasher, multisig_fp, 32);
+  HASHER_UPDATE_INT(hasher, input->amount, uint64_t);
   tx_script_hash(hasher, input->witness.size, input->witness.bytes);
-  hasher_Update(hasher, (const uint8_t *)&input->has_orig_hash,
-                sizeof(input->has_orig_hash));
-  hasher_Update(hasher, input->orig_hash.bytes, sizeof(input->orig_hash.bytes));
-  hasher_Update(hasher, (const uint8_t *)&input->orig_index,
-                sizeof(input->orig_index));
+  HASHER_UPDATE_INT(hasher, input->has_orig_hash, uint8_t);
+  HASHER_UPDATE_BYTES(hasher, input->orig_hash.bytes, 32);
+  HASHER_UPDATE_INT(hasher, input->orig_index, uint32_t);
   tx_script_hash(hasher, input->script_pubkey.size, input->script_pubkey.bytes);
   return true;
 }
@@ -583,12 +575,12 @@ uint32_t tx_prevout_hash(Hasher *hasher, const TxInputType *input) {
   for (int i = 0; i < 32; i++) {
     hasher_Update(hasher, &(input->prev_hash.bytes[31 - i]), 1);
   }
-  hasher_Update(hasher, (const uint8_t *)&input->prev_index, 4);
+  HASHER_UPDATE_INT(hasher, input->prev_index, uint32_t);
   return 36;
 }
 
 uint32_t tx_amount_hash(Hasher *hasher, const TxInputType *input) {
-  hasher_Update(hasher, (const uint8_t *)&input->amount, 8);
+  HASHER_UPDATE_INT(hasher, input->amount, uint64_t);
   return 8;
 }
 
@@ -599,18 +591,18 @@ uint32_t tx_script_hash(Hasher *hasher, uint32_t size, const uint8_t *data) {
 }
 
 uint32_t tx_sequence_hash(Hasher *hasher, const TxInputType *input) {
-  hasher_Update(hasher, (const uint8_t *)&input->sequence, 4);
+  HASHER_UPDATE_INT(hasher, input->sequence, uint32_t);
   return 4;
 }
 
 uint32_t tx_output_hash(Hasher *hasher, const TxOutputBinType *output,
                         bool decred) {
   uint32_t r = 0;
-  hasher_Update(hasher, (const uint8_t *)&output->amount, 8);
+  HASHER_UPDATE_INT(hasher, output->amount, uint64_t);
   r += 8;
   if (decred) {
     uint16_t script_version = output->decred_script_version & 0xFFFF;
-    hasher_Update(hasher, (const uint8_t *)&script_version, 2);
+    HASHER_UPDATE_INT(hasher, script_version, uint16_t);
     r += 2;
   }
   r += tx_script_hash(hasher, output->script_pubkey.size,
@@ -665,20 +657,20 @@ uint32_t tx_serialize_header_hash(TxStruct *tx) {
 #if !BITCOIN_ONLY
   if (tx->is_zcashlike && tx->version >= 3) {
     uint32_t ver = tx->version | TX_OVERWINTERED;
-    hasher_Update(&(tx->hasher), (const uint8_t *)&ver, 4);
-    hasher_Update(&(tx->hasher), (const uint8_t *)&(tx->version_group_id), 4);
+    HASHER_UPDATE_INT(&(tx->hasher), ver, uint32_t);
+    HASHER_UPDATE_INT(&(tx->hasher), tx->version_group_id, uint32_t);
     r += 4;
   } else
 #endif
   {
-    hasher_Update(&(tx->hasher), (const uint8_t *)&(tx->version), 4);
+    HASHER_UPDATE_INT(&(tx->hasher), tx->version, uint32_t);
 #if !BITCOIN_ONLY
     if (tx->timestamp) {
-      hasher_Update(&(tx->hasher), (const uint8_t *)&(tx->timestamp), 4);
+      HASHER_UPDATE_INT(&(tx->hasher), tx->timestamp, uint32_t);
     }
 #endif
     if (tx->is_segwit) {
-      hasher_Update(&(tx->hasher), segwit_header, 2);
+      HASHER_UPDATE_BYTES(&(tx->hasher), segwit_header, 2);
       r += 2;
     }
   }
@@ -855,14 +847,14 @@ uint32_t tx_serialize_footer(TxStruct *tx, uint8_t *out) {
 }
 
 uint32_t tx_serialize_footer_hash(TxStruct *tx) {
-  hasher_Update(&(tx->hasher), (const uint8_t *)&(tx->lock_time), 4);
+  HASHER_UPDATE_INT(&(tx->hasher), tx->lock_time, uint32_t);
 #if !BITCOIN_ONLY
   if (tx->is_zcashlike && tx->version >= 3) {
-    hasher_Update(&(tx->hasher), (const uint8_t *)&(tx->expiry), 4);
+    HASHER_UPDATE_INT(&(tx->hasher), tx->expiry, uint32_t);
     return 8;
   }
   if (tx->is_decred) {
-    hasher_Update(&(tx->hasher), (const uint8_t *)&(tx->expiry), 4);
+    HASHER_UPDATE_INT(&(tx->hasher), tx->expiry, uint32_t);
     return 8;
   }
 #endif
@@ -1306,19 +1298,9 @@ bool tx_input_verify_nonownership(
       return false;
     }
 
-#ifdef USE_SECP256K1_ZKP_ECDSA
-    if (coin->curve->params == &secp256k1) {
-      if (zkp_ecdsa_verify_digest(coin->curve->params, public_key, signature,
-                                  digest) != 0) {
-        return false;
-      }
-    } else
-#endif
-    {
-      if (ecdsa_verify_digest(coin->curve->params, public_key, signature,
-                              digest) != 0) {
-        return false;
-      }
+    if (ecdsa_verify_digest(coin->curve->params, public_key, signature,
+                            digest) != 0) {
+      return false;
     }
   } else if (txinput->script_pubkey.size == 34 &&
              memcmp(txinput->script_pubkey.bytes, "\x51\x20", 2) == 0) {

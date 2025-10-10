@@ -3,15 +3,13 @@ from typing import TYPE_CHECKING
 from apps.common.keychain import auto_keychain
 
 if TYPE_CHECKING:
-    from trezor.messages import BinanceSignTx, BinanceSignedTx
+    from trezor.messages import BinanceSignedTx, BinanceSignTx
+
     from apps.common.keychain import Keychain
-    from trezor.wire import Context
 
 
 @auto_keychain(__name__)
-async def sign_tx(
-    ctx: Context, envelope: BinanceSignTx, keychain: Keychain
-) -> BinanceSignedTx:
+async def sign_tx(envelope: BinanceSignTx, keychain: Keychain) -> BinanceSignedTx:
     from trezor import wire
     from trezor.crypto.curve import secp256k1
     from trezor.crypto.hashlib import sha256
@@ -23,6 +21,7 @@ async def sign_tx(
         BinanceTransferMsg,
         BinanceTxRequest,
     )
+    from trezor.wire.context import call_any
 
     from apps.common import paths
 
@@ -32,12 +31,12 @@ async def sign_tx(
     if envelope.msg_count > 1:
         raise wire.DataError("Multiple messages not supported.")
 
-    await paths.validate_path(ctx, keychain, envelope.address_n)
+    await paths.validate_path(keychain, envelope.address_n)
     node = keychain.derive(envelope.address_n)
 
     tx_req = BinanceTxRequest()
 
-    msg = await ctx.call_any(
+    msg = await call_any(
         tx_req,
         MessageType.BinanceCancelMsg,
         MessageType.BinanceOrderMsg,
@@ -50,11 +49,11 @@ async def sign_tx(
     msg_json = helpers.produce_json_for_signing(envelope, msg)
 
     if BinanceTransferMsg.is_type_of(msg):
-        await layout.require_confirm_transfer(ctx, msg)
+        await layout.require_confirm_transfer(msg)
     elif BinanceOrderMsg.is_type_of(msg):
-        await layout.require_confirm_order(ctx, msg)
+        await layout.require_confirm_order(msg)
     elif BinanceCancelMsg.is_type_of(msg):
-        await layout.require_confirm_cancel(ctx, msg)
+        await layout.require_confirm_cancel(msg)
     else:
         raise wire.ProcessError("input message unrecognized")
 

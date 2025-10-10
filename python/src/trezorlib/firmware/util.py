@@ -14,6 +14,8 @@
 # You should have received a copy of the License along with this library.
 # If not, see <https://www.gnu.org/licenses/lgpl-3.0.html>.
 
+from __future__ import annotations
+
 import typing as t
 from dataclasses import dataclass
 
@@ -33,11 +35,9 @@ class Unsigned(FirmwareIntegrityError):
 
 
 class DigestCalculator(Protocol):
-    def update(self, __data: bytes) -> None:
-        ...
+    def update(self, __data: bytes) -> None: ...
 
-    def digest(self) -> bytes:
-        ...
+    def digest(self) -> bytes: ...
 
 
 Hasher = t.Callable[[bytes], DigestCalculator]
@@ -47,4 +47,4 @@ Hasher = t.Callable[[bytes], DigestCalculator]
 class FirmwareHashParameters:
     hash_function: Hasher
     chunk_size: int
-    padding_byte: t.Optional[bytes]
+    padding_byte: bytes | None

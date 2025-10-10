@@ -1,24 +1,37 @@
 pub mod bip39;
+#[cfg(feature = "ble")]
+pub mod ble;
 #[macro_use]
 #[allow(unused_macros)]
-pub mod common;
+pub mod fatal_error;
+#[cfg(feature = "ui")]
+pub mod bitblt;
 #[cfg(feature = "ui")]
 pub mod display;
-#[cfg(feature = "dma2d")]
-pub mod dma2d;
 mod ffi;
-pub mod qr;
+#[cfg(feature = "haptic")]
+pub mod haptic;
+
+#[cfg(feature = "button")]
+pub mod button;
+
+#[cfg(feature = "touch")]
+pub mod touch;
+
+#[cfg(feature = "hw_jpeg_decoder")]
+pub mod jpegdec;
+pub mod model;
 pub mod random;
-#[cfg(feature = "model_tr")]
+#[cfg(feature = "rgb_led")]
 pub mod rgb_led;
 pub mod slip39;
 pub mod storage;
+#[cfg(feature = "translations")]
+pub mod translations;
 pub mod usb;
 pub mod uzlib;
+pub mod wordlist;
 
-pub mod buffers;
-#[cfg(not(feature = "micropython"))]
+pub mod secbool;
+
 pub mod time;
-
-#[cfg(feature = "micropython")]
-pub use crate::micropython::time;

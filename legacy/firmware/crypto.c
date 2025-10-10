@@ -18,6 +18,7 @@
  */
 
 #include "crypto.h"
+#include <stdlib.h>
 #include <string.h>
 #include "address.h"
 #include "aes/aes.h"
@@ -368,9 +369,56 @@ uint32_t cryptoMultisigPubkeyCount(const MultisigRedeemScriptType *multisig) {
                                : multisig->pubkeys_count;
 }
 
+static int comparePubkeysLexicographically(const void *first,
+                                           const void *second) {
+  return memcmp(first, second, 33);
+}
+
+uint32_t cryptoMultisigPubkeys(const CoinInfo *coin,
+                               const MultisigRedeemScriptType *multisig,
+                               uint8_t *pubkeys) {
+  const uint32_t n = cryptoMultisigPubkeyCount(multisig);
+  if (n < 1 || n > 15) {
+    return 0;
+  }
+
+  for (uint32_t i = 0; i < n; i++) {
+    const HDNode *pubnode = cryptoMultisigPubkey(coin, multisig, i);
+    if (!pubnode) {
+      return 0;
+    }
+    memcpy(pubkeys + i * 33, pubnode->public_key, 33);
+  }
+
+  if (multisig->has_pubkeys_order &&
+      multisig->pubkeys_order == MultisigPubkeysOrder_LEXICOGRAPHIC) {
+    qsort(pubkeys, n, 33, comparePubkeysLexicographically);
+  }
+
+  return n;
+}
+
 int cryptoMultisigPubkeyIndex(const CoinInfo *coin,
                               const MultisigRedeemScriptType *multisig,
                               const uint8_t *pubkey) {
+  uint32_t n = cryptoMultisigPubkeyCount(multisig);
+
+  uint8_t pubkeys[33 * n];
+  if (!cryptoMultisigPubkeys(coin, multisig, pubkeys)) {
+    return -1;
+  }
+
+  for (size_t i = 0; i < n; i++) {
+    if (memcmp(pubkeys + i * 33, pubkey, 33) == 0) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+int cryptoMultisigXpubIndex(const CoinInfo *coin,
+                            const MultisigRedeemScriptType *multisig,
+                            const uint8_t *pubkey) {
   for (size_t i = 0; i < cryptoMultisigPubkeyCount(multisig); i++) {
     const HDNode *pubnode = cryptoMultisigPubkey(coin, multisig, i);
     if (pubnode && memcmp(pubnode->public_key, pubkey, 33) == 0) {
@@ -380,9 +428,15 @@ int cryptoMultisigPubkeyIndex(const CoinInfo *coin,
   return -1;
 }
 
+static int comparePubnodesLexicographically(const void *first,
+                                            const void *second) {
+  return memcmp(*(const HDNodeType **)first, *(const HDNodeType **)second,
+                sizeof(HDNodeType));
+}
+
 int cryptoMultisigFingerprint(const MultisigRedeemScriptType *multisig,
                               uint8_t *hash) {
-  static const HDNodeType *pubnodes[15], *swap;
+  static const HDNodeType *pubnodes[15];
   const uint32_t n = cryptoMultisigPubkeyCount(multisig);
   if (n < 1 || n > 15) {
     return 0;
@@ -403,32 +457,30 @@ int cryptoMultisigFingerprint(const MultisigRedeemScriptType *multisig,
     if (pubnodes[i]->public_key.size != 33) return 0;
     if (pubnodes[i]->chain_code.size != 32) return 0;
   }
-  // minsort according to pubkey
-  for (uint32_t i = 0; i < n - 1; i++) {
-    for (uint32_t j = n - 1; j > i; j--) {
-      if (memcmp(pubnodes[i]->public_key.bytes, pubnodes[j]->public_key.bytes,
-                 33) > 0) {
-        swap = pubnodes[i];
-        pubnodes[i] = pubnodes[j];
-        pubnodes[j] = swap;
-      }
-    }
+
+  uint32_t pubkeys_order = multisig->has_pubkeys_order
+                               ? multisig->pubkeys_order
+                               : MultisigPubkeysOrder_PRESERVED;
+
+  if (pubkeys_order == MultisigPubkeysOrder_LEXICOGRAPHIC) {
+    // If the order of pubkeys is lexicographic, we don't want the fingerprint
+    // to depend on the order of the pubnodes, so we sort the pubnodes before
+    // hashing.
+    qsort(pubnodes, n, sizeof(HDNodeType *), comparePubnodesLexicographically);
   }
-  // hash sorted nodes
+
   SHA256_CTX ctx = {0};
   sha256_Init(&ctx);
-  sha256_Update(&ctx, (const uint8_t *)&(multisig->m), sizeof(uint32_t));
+  SHA256_UPDATE_INT(&ctx, multisig->m, uint32_t);
+  SHA256_UPDATE_INT(&ctx, pubkeys_order, uint32_t);
   for (uint32_t i = 0; i < n; i++) {
-    sha256_Update(&ctx, (const uint8_t *)&(pubnodes[i]->depth),
-                  sizeof(uint32_t));
-    sha256_Update(&ctx, (const uint8_t *)&(pubnodes[i]->fingerprint),
-                  sizeof(uint32_t));
-    sha256_Update(&ctx, (const uint8_t *)&(pubnodes[i]->child_num),
-                  sizeof(uint32_t));
-    sha256_Update(&ctx, pubnodes[i]->chain_code.bytes, 32);
-    sha256_Update(&ctx, pubnodes[i]->public_key.bytes, 33);
+    SHA256_UPDATE_INT(&ctx, pubnodes[i]->depth, uint32_t);
+    SHA256_UPDATE_INT(&ctx, pubnodes[i]->fingerprint, uint32_t);
+    SHA256_UPDATE_INT(&ctx, pubnodes[i]->child_num, uint32_t);
+    SHA256_UPDATE_BYTES(&ctx, pubnodes[i]->chain_code.bytes, 32);
+    SHA256_UPDATE_BYTES(&ctx, pubnodes[i]->public_key.bytes, 33);
   }
-  sha256_Update(&ctx, (const uint8_t *)&n, sizeof(uint32_t));
+  SHA256_UPDATE_INT(&ctx, n, uint32_t);
   sha256_Final(&ctx, hash);
   layoutProgressUpdate(true);
   return 1;
@@ -437,7 +489,7 @@ int cryptoMultisigFingerprint(const MultisigRedeemScriptType *multisig,
 int cryptoIdentityFingerprint(const IdentityType *identity, uint8_t *hash) {
   SHA256_CTX ctx = {0};
   sha256_Init(&ctx);
-  sha256_Update(&ctx, (const uint8_t *)&(identity->index), sizeof(uint32_t));
+  SHA256_UPDATE_INT(&ctx, identity->index, uint32_t);
   if (identity->has_proto && identity->proto[0]) {
     sha256_Update(&ctx, (const uint8_t *)(identity->proto),
                   strlen(identity->proto));
@@ -517,7 +569,7 @@ bool coin_path_check(const CoinInfo *coin, InputScriptType script_type,
     return valid;
   }
 
-  if (address_n[0] == PATH_HARDENED + 45) {
+  if (address_n[0] == PATH_HARDENED + 45 && address_n_count != 6) {
     if (address_n_count == 4) {
       // m/45' - BIP45 Copay Abandoned Multisig P2SH
       // m / purpose' / cosigner_index / change / address_index
@@ -527,17 +579,7 @@ bool coin_path_check(const CoinInfo *coin, InputScriptType script_type,
       valid = valid && (address_n[2] <= PATH_MAX_CHANGE);
       valid = valid && (address_n[3] <= PATH_MAX_ADDRESS_INDEX);
     } else if (address_n_count == 5) {
-      if (address_n[1] & PATH_HARDENED) {
-        // Unchained Capital compatibility pattern. Will be removed in the
-        // future.
-        // m / 45' / coin_type' / account' / [0-1000000] / address_index
-        valid = valid && check_cointype(coin, address_n[1], full_check);
-        valid = valid && (address_n[2] & PATH_HARDENED);
-        valid =
-            valid && ((address_n[2] & PATH_UNHARDEN_MASK) <= PATH_MAX_ACCOUNT);
-        valid = valid && (address_n[3] <= 1000000);
-        valid = valid && (address_n[4] <= PATH_MAX_ADDRESS_INDEX);
-      } else {
+      if ((address_n[1] & PATH_HARDENED) == 0) {
         // Casa proposed "universal multisig" pattern with unhardened parts.
         // m/45'/coin_type/account/change/address_index
         valid = valid &&
@@ -546,20 +588,6 @@ bool coin_path_check(const CoinInfo *coin, InputScriptType script_type,
         valid = valid && (address_n[3] <= PATH_MAX_CHANGE);
         valid = valid && (address_n[4] <= PATH_MAX_ADDRESS_INDEX);
       }
-    } else if (address_n_count == 6) {
-      // Unchained Capital compatibility pattern. Will be removed in the
-      // future.
-      // m/45'/coin_type'/account'/[0-1000000]/change/address_index
-      // m/45'/coin_type/account/[0-1000000]/change/address_index
-      valid = valid &&
-              check_cointype(coin, PATH_HARDENED | address_n[1], full_check);
-      valid = valid && ((address_n[1] & PATH_HARDENED) ==
-                        (address_n[2] & PATH_HARDENED));
-      valid =
-          valid && ((address_n[2] & PATH_UNHARDEN_MASK) <= PATH_MAX_ACCOUNT);
-      valid = valid && (address_n[3] <= 1000000);
-      valid = valid && (address_n[4] <= PATH_MAX_CHANGE);
-      valid = valid && (address_n[5] <= PATH_MAX_ADDRESS_INDEX);
     } else {
       return false;
     }
@@ -567,6 +595,29 @@ bool coin_path_check(const CoinInfo *coin, InputScriptType script_type,
     if (full_check) {
       valid = valid && (script_type == InputScriptType_SPENDADDRESS ||
                         script_type == InputScriptType_SPENDMULTISIG);
+      valid = valid && has_multisig;
+    }
+
+    return valid;
+  }
+
+  if (address_n[0] == PATH_HARDENED + 45 && address_n_count == 6) {
+    // Unchained Capital compatibility pattern.
+    // m/45'/coin_type'/account'/[0-1000000]/change/address_index
+    // m/45'/coin_type/account/[0-1000000]/change/address_index
+    valid =
+        valid && check_cointype(coin, PATH_HARDENED | address_n[1], full_check);
+    valid = valid &&
+            ((address_n[1] & PATH_HARDENED) == (address_n[2] & PATH_HARDENED));
+    valid = valid && ((address_n[2] & PATH_UNHARDEN_MASK) <= PATH_MAX_ACCOUNT);
+    valid = valid && (address_n[3] <= 1000000);
+    valid = valid && (address_n[4] <= PATH_MAX_CHANGE);
+    valid = valid && (address_n[5] <= PATH_MAX_ADDRESS_INDEX);
+
+    if (full_check) {
+      valid = valid && (script_type == InputScriptType_SPENDADDRESS ||
+                        script_type == InputScriptType_SPENDMULTISIG ||
+                        script_type == InputScriptType_SPENDWITNESS);
       valid = valid && has_multisig;
     }
 
@@ -856,3 +907,71 @@ void slip21_derive_path(Slip21Node *inout, const uint8_t *label,
 }
 
 const uint8_t *slip21_key(const Slip21Node *node) { return &node->data[32]; }
+
+bool cryptoCosiVerify(const ed25519_signature signature, const uint8_t *message,
+                      const size_t message_len, const int threshold,
+                      const ed25519_public_key *pubkeys,
+                      const int pubkeys_count, const uint8_t sigmask)
+
+{
+  if (sigmask == 0 || threshold < 1 || pubkeys_count < 1 || pubkeys_count > 8) {
+    // invalid parameters:
+    // - sigmask must specify at least one signer
+    // - at least one signature must be required
+    // - at least one pubkey must be provided
+    // - at most 8 pubkeys are supported (bit size of sigmask)
+    return false;
+  }
+  if (sigmask >= (1 << pubkeys_count)) {
+    // sigmask indicates more signers than provided pubkeys
+    return false;
+  }
+
+  ed25519_public_key selected_keys[8] = {0};
+  int N = 0;
+  for (int i = 0; i < pubkeys_count; i++) {
+    if (sigmask & (1 << i)) {
+      memcpy(selected_keys[N], pubkeys[i], sizeof(ed25519_public_key));
+      N++;
+    }
+  }
+
+  if (N < threshold) {
+    // not enough signatures
+    return false;
+  }
+
+  ed25519_public_key pk_combined = {0};
+  int res = ed25519_cosi_combine_publickeys(pk_combined, selected_keys, N);
+  if (res != 0) {
+    // error combining public keys
+    return false;
+  }
+
+  res = ed25519_sign_open(message, message_len, pk_combined, signature);
+  return res == 0;
+}
+
+bool multisig_uses_single_path(const MultisigRedeemScriptType *multisig) {
+  if (multisig->pubkeys_count == 0) {
+    // Pubkeys are specified by multisig.nodes and multisig.address_n, in this
+    // case all the pubkeys use the same path
+    return true;
+  } else {
+    // Pubkeys are specified by multisig.pubkeys, in this case we check that all
+    // the pubkeys use the same path
+    for (int i = 0; i < multisig->pubkeys_count; i++) {
+      if (multisig->pubkeys[i].address_n_count !=
+          multisig->pubkeys[0].address_n_count) {
+        return false;
+      }
+      for (int j = 0; j < multisig->pubkeys[i].address_n_count; j++) {
+        if (multisig->pubkeys[i].address_n[j] !=
+            multisig->pubkeys[0].address_n[j]) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+}

@@ -1,11 +1,13 @@
-from common import *
+# flake8: noqa: F403,F405
+from common import *  # isort:skip
 
 if not utils.BITCOIN_ONLY:
-    from trezor.crypto import chacha20poly1305
-    from apps.monero.signing import offloading_keys
-    from apps.monero.signing import step_09_sign_input
-    from apps.monero.signing.state import State
     import ubinascii
+
+    from trezor.crypto import chacha20poly1305
+
+    from apps.monero.signing import offloading_keys, step_09_sign_input
+    from apps.monero.signing.state import State
 
 
 @unittest.skipUnless(not utils.BITCOIN_ONLY, "altcoin")
@@ -39,7 +41,7 @@ class TestMoneroProto(unittest.TestCase):
         mst = ubinascii.unhexlify(
             b"ca3bbe08a178a4508c3992a47ba775799e7626a365ed136e803fe5f2df2ce01c"
         )
-        st = State(None)
+        st = State()
         st.last_step = st.STEP_SIGN
         st.opening_key = mst
         st.current_input_index = 3

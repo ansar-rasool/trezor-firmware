@@ -1,6 +1,6 @@
 use core::{convert::TryFrom, ops::Deref, ptr, slice, str};
 
-use crate::{error::Error, micropython::obj::Obj};
+use crate::{error::Error, micropython::obj::Obj, strutil::hexlify};
 
 use super::ffi;
 
@@ -20,6 +20,7 @@ use super::ffi;
 /// The `off` field represents offset from the `ptr` and allows us to do
 /// substring slices while keeping the head pointer as required by GC.
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct StrBuffer {
     ptr: *const u8,
     len: u16,
@@ -29,6 +30,19 @@ pub struct StrBuffer {
 impl StrBuffer {
     pub fn empty() -> Self {
         Self::from("")
+    }
+
+    // SAFETY:
+    // Caller is responsible for ensuring that data under `ptr` is valid for the
+    // whole lifetime of the result, plus possible copies/clones/offsets.
+    // This generally holds for GC-managed pointers and for static data.
+    // Dangerous with anything else.
+    pub unsafe fn from_ptr_and_len(ptr: *const u8, len: usize) -> Self {
+        Self {
+            ptr,
+            len: unwrap!(len.try_into()),
+            off: 0,
+        }
     }
 
     pub fn alloc(val: &str) -> Result<Self, Error> {
@@ -63,11 +77,8 @@ impl StrBuffer {
             // Null-terminate the string for C ASCIIZ compatibility. This will not be
             // reflected in Rust-visible slice, the zero byte is after the end.
             raw.add(len).write(0);
-            Ok(Self {
-                ptr: raw,
-                len: unwrap!(len.try_into()),
-                off: 0,
-            })
+            // SAFETY: pointer is GC-managed.
+            Ok(Self::from_ptr_and_len(raw, len))
         }
     }
 
@@ -79,7 +90,7 @@ impl StrBuffer {
         }
     }
 
-    pub fn offset(&self, skip_bytes: usize) -> Self {
+    pub fn skip_prefix(&self, skip_bytes: usize) -> Self {
         let off: u16 = unwrap!(skip_bytes.try_into());
         assert!(off <= self.len);
         assert!(self.as_ref().is_char_boundary(skip_bytes));
@@ -107,11 +118,8 @@ impl TryFrom<Obj> for StrBuffer {
     fn try_from(obj: Obj) -> Result<Self, Self::Error> {
         if obj.is_str() {
             let bufinfo = get_buffer_info(obj, ffi::MP_BUFFER_READ)?;
-            let new = Self {
-                ptr: bufinfo.buf as _,
-                len: bufinfo.len.try_into()?,
-                off: 0,
-            };
+            // SAFETY: bufinfo.buf should point to a GC head pointer or static data.
+            let new = unsafe { Self::from_ptr_and_len(bufinfo.buf as _, bufinfo.len) };
 
             // MicroPython _should_ ensure that values of type `str` are UTF-8.
             // Rust seems to be stricter in what it considers UTF-8 though.
@@ -151,11 +159,22 @@ impl AsRef<str> for StrBuffer {
 
 impl From<&'static str> for StrBuffer {
     fn from(val: &'static str) -> Self {
-        Self {
-            ptr: val.as_ptr(),
-            len: unwrap!(val.len().try_into()),
-            off: 0,
-        }
+        // SAFETY: Safe for &'static strs.
+        // Do not try to do it with arbitrary &'a str.
+        unsafe { Self::from_ptr_and_len(val.as_ptr(), val.len()) }
+    }
+}
+
+#[cfg(feature = "debug")]
+impl ufmt::uDebug for StrBuffer {
+    fn fmt<W>(&self, f: &mut ufmt::Formatter<'_, W>) -> Result<(), W::Error>
+    where
+        W: ufmt::uWrite + ?Sized,
+    {
+        f.write_str("StrBuffer(")?;
+        f.write_str(self.as_ref())?;
+        f.write_str(")")?;
+        Ok(())
     }
 }
 
@@ -184,6 +203,8 @@ fn get_buffer_info(obj: Obj, flags: u32) -> Result<ffi::mp_buffer_info_t, Error>
 /// (a) no mutable reference to the same buffer is held at the same time,
 /// (b) the buffer is not modified in MicroPython while the reference to it is
 /// being held.
+/// The returned value is NOT guaranteed to be a head pointer, so the
+/// destination might get GC'd. Do not store the reference.
 pub unsafe fn get_buffer<'a>(obj: Obj) -> Result<&'a [u8], Error> {
     let bufinfo = get_buffer_info(obj, ffi::MP_BUFFER_READ)?;
 
@@ -209,6 +230,8 @@ pub unsafe fn get_buffer<'a>(obj: Obj) -> Result<&'a [u8], Error> {
 /// (a) no other reference to the same buffer is held at the same time,
 /// (b) the buffer is not modified in MicroPython while the reference to it is
 /// being held.
+/// The returned value is NOT guaranteed to be a head pointer, so the
+/// destination might get GC'd. Do not store the reference.
 pub unsafe fn get_buffer_mut<'a>(obj: Obj) -> Result<&'a mut [u8], Error> {
     let bufinfo = get_buffer_info(obj, ffi::MP_BUFFER_WRITE)?;
 
@@ -223,18 +246,6 @@ pub unsafe fn get_buffer_mut<'a>(obj: Obj) -> Result<&'a mut [u8], Error> {
         //  - there are no other references
         //  - the buffer is not mutated outside of Rust's control.
         Ok(unsafe { slice::from_raw_parts_mut(bufinfo.buf as _, bufinfo.len) })
-    }
-}
-
-fn hexlify(data: &[u8], buffer: &mut [u8]) {
-    const HEX_LOWER: [u8; 16] = *b"0123456789abcdef";
-    let mut i: usize = 0;
-    for b in data.iter().take(buffer.len() / 2) {
-        let hi: usize = ((b & 0xf0) >> 4).into();
-        let lo: usize = (b & 0x0f).into();
-        buffer[i] = HEX_LOWER[hi];
-        buffer[i + 1] = HEX_LOWER[lo];
-        i += 2;
     }
 }
 
@@ -257,12 +268,5 @@ pub fn hexlify_bytes(obj: Obj, offset: usize, max_len: usize) -> Result<StrBuffe
     let max_len = max_len & !1;
     let hex_len = (bin_slice.len() * 2).min(max_len);
     let result = StrBuffer::alloc_with(hex_len, move |buffer| hexlify(bin_slice, buffer))?;
-    Ok(result.offset(hex_off))
-}
-
-#[cfg(feature = "ui_debug")]
-impl crate::trace::Trace for StrBuffer {
-    fn trace(&self, t: &mut dyn crate::trace::Tracer) {
-        self.as_ref().trace(t)
-    }
+    Ok(result.skip_prefix(hex_off))
 }

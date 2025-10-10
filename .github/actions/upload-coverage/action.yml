@@ -1,0 +1,17 @@
+name: 'Upload coverage data'
+runs:
+  using: "composite"
+  steps:
+    # add per-job suffix so the .coverage files won't be overwritten during merge (by `core_coverage_report`)
+    - run: |
+        for F in core/src/.coverage*
+        do
+          mv -v $F $F.${{ github.job }}${{ strategy.job-index }} || true
+        done
+      shell: sh
+    - uses: actions/upload-artifact@v4
+      with:
+        name: core-coverage-${{ matrix.model }}-${{ github.job }}-${{ strategy.job-index }}
+        path: core/src/.coverage.*
+        retention-days: 7
+        include-hidden-files: true

@@ -1,12 +1,17 @@
 from typing import TYPE_CHECKING
 
+from trezor.enums import MultisigPubkeysOrder
+
+from apps.common import safety_checks
+
+from .common import multisig_uses_single_path
 from .keychain import with_keychain
 
 if TYPE_CHECKING:
-    from trezor.messages import GetAddress, HDNodeType, Address
-    from trezor import wire
-    from apps.common.keychain import Keychain
+    from trezor.messages import Address, GetAddress, HDNodeType
+
     from apps.common.coininfo import CoinInfo
+    from apps.common.keychain import Keychain
 
 
 def _get_xpubs(
@@ -30,19 +35,24 @@ def _get_xpubs(
 
 
 @with_keychain
-async def get_address(
-    ctx: wire.Context, msg: GetAddress, keychain: Keychain, coin: CoinInfo
-) -> Address:
+async def get_address(msg: GetAddress, keychain: Keychain, coin: CoinInfo) -> Address:
     from trezor.enums import InputScriptType
     from trezor.messages import Address
-    from trezor.ui.layouts import show_address
+    from trezor.ui.layouts import (
+        confirm_multisig_different_paths_warning,
+        confirm_multisig_warning,
+        show_address,
+    )
 
     from apps.common.address_mac import get_address_mac
     from apps.common.paths import address_n_to_str, validate_path
 
     from . import addresses
-    from .keychain import validate_path_against_script_type
-    from .multisig import multisig_pubkey_index
+    from .keychain import (
+        address_n_to_name_or_unknown,
+        validate_path_against_script_type,
+    )
+    from .multisig import multisig_xpub_index
 
     multisig = msg.multisig  # local_cache_attribute
     address_n = msg.address_n  # local_cache_attribute
@@ -51,7 +61,6 @@ async def get_address(
     if msg.show_display:
         # skip soft-validation for silent calls
         await validate_path(
-            ctx,
             keychain,
             address_n,
             validate_path_against_script_type(coin, msg),
@@ -95,30 +104,56 @@ async def get_address(
             mac = get_address_mac(address, coin.slip44, keychain)
 
     if msg.show_display:
+        path = address_n_to_str(address_n)
         if multisig:
             if multisig.nodes:
                 pubnodes = multisig.nodes
             else:
                 pubnodes = [hd.node for hd in multisig.pubkeys]
-            multisig_index = multisig_pubkey_index(multisig, node.public_key())
+            multisig_index = multisig_xpub_index(multisig, node.public_key())
 
-            title = f"Multisig {multisig.m} of {len(pubnodes)}"
+            await confirm_multisig_warning()
+
+            if not multisig_uses_single_path(multisig):
+                # An address that uses different derivation paths for different xpubs
+                # could be difficult to discover if the user did not note all the paths.
+                # The reason is that each path ends with an address index, which can have
+                # 1,000,000 possible values. If the address is a t-out-of-n multisig, the
+                # total number of possible paths is 1,000,000^n. This can be exploited by
+                # an attacker who has compromised the user's computer. The attacker could
+                # randomize the address indices and then demand a ransom from the user to
+                # reveal the paths. To prevent this, we require that all xpubs use the
+                # same derivation path.
+                if safety_checks.is_strict():
+                    raise ValueError(
+                        "Using different paths for different xpubs is not allowed"
+                    )
+                else:
+                    await confirm_multisig_different_paths_warning()
+
+            if multisig.pubkeys_order == MultisigPubkeysOrder.LEXICOGRAPHIC:
+                account = f"Multisig {multisig.m} of {len(pubnodes)}\n(sorted)"
+            else:
+                account = f"Multisig {multisig.m} of {len(pubnodes)}"
+
             await show_address(
-                ctx,
                 address_short,
                 case_sensitive=address_case_sensitive,
-                title=title,
+                path=path,
                 multisig_index=multisig_index,
                 xpubs=_get_xpubs(coin, multisig_xpub_magic, pubnodes),
+                account=account,
+                chunkify=bool(msg.chunkify),
             )
         else:
-            title = address_n_to_str(address_n)
+            account = address_n_to_name_or_unknown(coin, address_n, script_type)
             await show_address(
-                ctx,
                 address_short,
                 address_qr=address,
                 case_sensitive=address_case_sensitive,
-                title=title,
+                path=path,
+                account=account,
+                chunkify=bool(msg.chunkify),
             )
 
     return Address(address=address, mac=mac)

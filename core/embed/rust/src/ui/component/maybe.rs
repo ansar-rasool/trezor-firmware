@@ -1,7 +1,8 @@
 use crate::ui::{
     component::{Component, ComponentExt, Event, EventCtx, Pad},
-    display::{self, Color},
+    display::Color,
     geometry::Rect,
+    shape::Renderer,
 };
 
 pub struct Maybe<T> {
@@ -11,7 +12,8 @@ pub struct Maybe<T> {
 }
 
 impl<T> Maybe<T> {
-    pub fn new(pad: Pad, inner: T, visible: bool) -> Self {
+    pub fn new(bg_color: Color, inner: T, visible: bool) -> Self {
+        let pad = Pad::with_background(bg_color);
         Self {
             inner,
             visible,
@@ -19,12 +21,12 @@ impl<T> Maybe<T> {
         }
     }
 
-    pub fn visible(clear: Color, inner: T) -> Self {
-        Self::new(Pad::with_background(clear), inner, true)
+    pub fn visible(bg_color: Color, inner: T) -> Self {
+        Self::new(bg_color, inner, true)
     }
 
-    pub fn hidden(clear: Color, inner: T) -> Self {
-        Self::new(Pad::with_background(clear), inner, false)
+    pub fn hidden(bg_color: Color, inner: T) -> Self {
+        Self::new(bg_color, inner, false)
     }
 }
 
@@ -86,60 +88,24 @@ where
         }
     }
 
-    fn paint(&mut self) {
-        self.pad.paint();
+    fn render<'s>(&'s self, target: &mut impl Renderer<'s>) {
+        self.pad.render(target);
         if self.visible {
-            self.inner.paint();
+            self.inner.render(target);
         }
     }
-
-    fn bounds(&self, sink: &mut dyn FnMut(Rect)) {
-        sink(self.pad.area);
-        self.inner.bounds(sink);
-    }
 }
 
-pub trait PaintOverlapping {
-    /// Return area that would be cleared during regular paint, along with
-    /// background color, or None if clearing isn't requested.
-    fn cleared_area(&self) -> Option<(Rect, Color)>;
+// DEBUG-ONLY SECTION BELOW
 
-    /// Paint the component but do not clear background beforehand.
-    fn paint_overlapping(&mut self);
-}
-
-impl<T> PaintOverlapping for Maybe<T>
+#[cfg(feature = "ui_debug")]
+impl<T> crate::trace::Trace for Maybe<T>
 where
-    T: Component,
+    T: Component + crate::trace::Trace,
 {
-    fn cleared_area(&self) -> Option<(Rect, Color)> {
-        self.pad.will_paint()
-    }
-
-    fn paint_overlapping(&mut self) {
-        self.pad.cancel_clear();
-        self.paint()
-    }
-}
-
-/// Paint multiple Maybe<T> components, correctly handling clearing of
-/// background in the case the areas overlap, i.e. clear the combined area first
-/// and then paint over it.
-pub fn paint_overlapping(components: &mut [&mut dyn PaintOverlapping]) {
-    let mut area = Rect::zero();
-    let mut color = Color::rgb(0, 0, 0);
-    for component in components.iter() {
-        if let Some((clear_area, clear_color)) = component.cleared_area() {
-            area = area.union(clear_area);
-            color = clear_color;
-        }
-    }
-
-    if area != Rect::zero() {
-        display::rect_fill(area, color)
-    }
-
-    for component in components.iter_mut() {
-        component.paint_overlapping()
+    fn trace(&self, t: &mut dyn crate::trace::Tracer) {
+        t.component("Maybe");
+        t.child("inner", &self.inner);
+        t.bool("visible", self.visible);
     }
 }

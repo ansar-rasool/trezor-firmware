@@ -23,7 +23,7 @@
 
 #include "rand.h"
 
-#ifndef RAND_PLATFORM_INDEPENDENT
+#ifdef USE_INSECURE_PRNG
 
 #pragma message( \
     "NOT SUITABLE FOR PRODUCTION USE! Replace random32() function with your own secure code.")
@@ -48,7 +48,7 @@ uint32_t random32(void) {
   return seed;
 }
 
-#endif /* RAND_PLATFORM_INDEPENDENT */
+#endif /* USE_INSECURE_PRNG */
 
 //
 // The following code is platform independent
@@ -61,6 +61,16 @@ void __attribute__((weak)) random_buffer(uint8_t *buf, size_t len) {
       r = random32();
     }
     buf[i] = (r >> ((i % 4) * 8)) & 0xFF;
+  }
+}
+
+void random_xor(uint8_t *buf, size_t len) {
+  uint8_t r[4] = {0};
+  for (size_t i = 0; i < len; i++) {
+    if (i % sizeof(r) == 0) {
+      random_buffer(r, sizeof(r));
+    }
+    buf[i] ^= r[i % sizeof(r)];
   }
 }
 

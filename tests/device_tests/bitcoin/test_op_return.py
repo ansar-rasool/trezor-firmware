@@ -21,6 +21,7 @@ from trezorlib.debuglink import TrezorClientDebugLink as Client
 from trezorlib.exceptions import TrezorFailure
 from trezorlib.tools import parse_path
 
+from ...common import is_core
 from ...tx_cache import TxCache
 from .signtx import (
     assert_tx_matches,
@@ -63,17 +64,15 @@ def test_opreturn(client: Client):
     )
 
     with client:
-        tt = client.features.model == "T"
         client.set_expected_responses(
             [
                 request_input(0),
                 request_output(0),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                (tt, messages.ButtonRequest(code=B.ConfirmOutput)),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 request_output(1),
                 messages.ButtonRequest(code=B.ConfirmOutput),
                 messages.ButtonRequest(code=B.SignTx),
-                (tt, messages.ButtonRequest(code=B.SignTx)),
                 request_input(0),
                 request_meta(TXHASH_4075a1),
                 request_input(0, TXHASH_4075a1),

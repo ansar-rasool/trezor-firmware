@@ -1,16 +1,17 @@
-use crate::{
-    trezorhal::display::{image, ToifFormat},
-    ui::{
-        component::{Component, Event, EventCtx, Never},
-        display,
-        display::{toif::Toif, Color, Icon},
-        geometry::{Alignment2D, Offset, Point, Rect, CENTER},
+use crate::ui::{
+    component::{Component, Event, EventCtx, Never},
+    display::{
+        toif::{Toif, ToifFormat},
+        Color, Icon,
     },
+    geometry::{Alignment2D, Offset, Point, Rect},
+    shape,
+    shape::Renderer,
 };
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub struct Image {
-    pub toif: Toif,
+    pub toif: Toif<'static>,
     area: Rect,
 }
 
@@ -22,13 +23,6 @@ impl Image {
             toif,
             area: Rect::zero(),
         }
-    }
-
-    /// Display the icon with baseline Point, aligned according to the
-    /// `alignment` argument.
-    pub fn draw(&self, baseline: Point, alignment: Alignment2D) {
-        let r = Rect::snap(baseline, self.toif.size(), alignment);
-        image(r.x0, r.y0, r.width(), r.height(), self.toif.zdata());
     }
 }
 
@@ -44,23 +38,17 @@ impl Component for Image {
         None
     }
 
-    fn paint(&mut self) {
-        self.draw(self.area.center(), CENTER);
-    }
-
-    fn bounds(&self, sink: &mut dyn FnMut(Rect)) {
-        sink(Rect::from_center_and_size(
-            self.area.center(),
-            self.toif.size(),
-        ));
+    fn render<'s>(&'s self, target: &mut impl Renderer<'s>) {
+        shape::ToifImage::new(self.area.center(), self.toif)
+            .with_align(Alignment2D::CENTER)
+            .render(target);
     }
 }
 
 #[cfg(feature = "ui_debug")]
 impl crate::trace::Trace for Image {
     fn trace(&self, t: &mut dyn crate::trace::Tracer) {
-        t.open("Image");
-        t.close();
+        t.component("Image");
     }
 }
 
@@ -87,13 +75,10 @@ impl BlendedImage {
         }
     }
 
-    fn paint_image(&self) {
-        display::icon_over_icon(
-            None,
-            (self.bg, self.bg_top_left.into(), self.bg_color),
-            (self.fg, self.fg_offset, self.fg_color),
-            self.area_color,
-        );
+    // NOTE: currently this function is used too rarely to justify writing special
+    // case for unblended image.
+    pub fn single(icon: Icon, color: Color, area_color: Color) -> Self {
+        Self::new(icon, icon, color, color, area_color)
     }
 }
 
@@ -101,9 +86,16 @@ impl Component for BlendedImage {
     type Msg = Never;
 
     fn place(&mut self, bounds: Rect) -> Rect {
-        self.bg_top_left = self.bg.toif.size().snap(bounds.center(), CENTER);
-
-        let ft_top_left = self.fg.toif.size().snap(bounds.center(), CENTER);
+        self.bg_top_left = self
+            .bg
+            .toif
+            .size()
+            .snap(bounds.center(), Alignment2D::CENTER);
+        let ft_top_left = self
+            .fg
+            .toif
+            .size()
+            .snap(bounds.center(), Alignment2D::CENTER);
         self.fg_offset = ft_top_left - self.bg_top_left;
 
         Rect::from_top_left_and_size(self.bg_top_left, self.bg.toif.size())
@@ -113,22 +105,19 @@ impl Component for BlendedImage {
         None
     }
 
-    fn paint(&mut self) {
-        self.paint_image();
-    }
-
-    fn bounds(&self, sink: &mut dyn FnMut(Rect)) {
-        sink(Rect::from_top_left_and_size(
-            self.bg_top_left,
-            self.bg.toif.size(),
-        ));
+    fn render<'s>(&'s self, target: &mut impl Renderer<'s>) {
+        shape::ToifImage::new(self.bg_top_left, self.bg.toif)
+            .with_fg(self.bg_color)
+            .render(target);
+        shape::ToifImage::new(self.bg_top_left + self.fg_offset, self.fg.toif)
+            .with_fg(self.fg_color)
+            .render(target);
     }
 }
 
 #[cfg(feature = "ui_debug")]
 impl crate::trace::Trace for BlendedImage {
     fn trace(&self, t: &mut dyn crate::trace::Tracer) {
-        t.open("BlendedImage");
-        t.close();
+        t.component("BlendedImage");
     }
 }

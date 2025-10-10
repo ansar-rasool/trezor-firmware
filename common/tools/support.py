@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 import json
 import os
 import re
@@ -9,6 +11,7 @@ import click
 import coin_info
 
 SUPPORT_INFO = coin_info.get_support_data()
+MODELS = coin_info.get_models()
 
 VERSION_RE = re.compile(r"\d+.\d+.\d+")
 
@@ -62,7 +65,7 @@ def set_unsupported(device, key, value):
 
 
 def print_support(coin):
-    def support_value(where, key, missing_means_no=False):
+    def support_value(where, key):
         if "supported" in where and key in where["supported"]:
             val = where["supported"][key]
             if val is True:
@@ -74,8 +77,6 @@ def print_support(coin):
         elif "unsupported" in where and key in where["unsupported"]:
             val = where["unsupported"][key]
             return f"NO (reason: {val})"
-        elif missing_means_no:
-            return "NO"
         else:
             return "support info missing"
 
@@ -84,8 +85,7 @@ def print_support(coin):
     if coin.get("duplicate"):
         print(" * DUPLICATE SYMBOL")
     for dev, where in SUPPORT_INFO.items():
-        missing_means_no = dev in coin_info.MISSING_SUPPORT_MEANS_NO
-        print(" *", dev, ":", support_value(where, key, missing_means_no))
+        print(" *", dev, ":", support_value(where, key))
 
 
 # ====== validation functions ====== #
@@ -109,12 +109,7 @@ def check_support_values():
         else:
             for key, value in supported.items():
                 try:
-                    if device in coin_info.VERSIONED_SUPPORT_INFO:
-                        _check_value_version_soon(value)
-                    else:
-                        if value is not True:
-                            raise ValueError(f"only allowed is True, but found {value}")
-
+                    _check_value_version_soon(value)
                     if key in unsupported:
                         raise ValueError(f"{key} is both supported and unsupported")
 
@@ -133,7 +128,7 @@ def check_support_values():
 
 def find_unsupported_coins(coins_dict):
     result = {}
-    for device in coin_info.VERSIONED_SUPPORT_INFO:
+    for device in MODELS:
         supported, unsupported = support_dicts(device)
         support_set = set(supported.keys())
         support_set.update(unsupported.keys())
@@ -155,69 +150,6 @@ def find_orphaned_support_keys(coins_dict):
     return orphans
 
 
-def find_supported_duplicate_tokens(coins_dict):
-    result = []
-    for _, supported, _ in all_support_dicts():
-        for key in supported:
-            if not key.startswith("erc20:"):
-                continue
-            if coins_dict.get(key, {}).get("duplicate"):
-                result.append(key)
-    return result
-
-
-def process_erc20(coins_dict):
-    """Make sure that:
-    * orphaned ERC20 support info is cleared out
-    * duplicate ERC20 tokens are not listed as supported
-    * non-duplicate ERC20 tokens are cleared out from the unsupported list
-    """
-    erc20_dict = {
-        key: coin.get("duplicate", False)
-        for key, coin in coins_dict.items()
-        if coin_info.is_token(coin)
-    }
-    for device, supported, unsupported in all_support_dicts():
-        nondups = set()
-        dups = set(key for key, value in erc20_dict.items() if value)
-        for key in supported:
-            if key not in erc20_dict:
-                continue
-            if not erc20_dict[key]:
-                dups.discard(key)
-
-        for key in unsupported:
-            if key not in erc20_dict:
-                continue
-            # ignore dups that are unsupported now
-            dups.discard(key)
-
-            if not erc20_dict[key] and unsupported[key] == ERC20_DUPLICATE_KEY:
-                # remove duplicate status
-                nondups.add(key)
-
-        for key in dups:
-            if device in coin_info.MISSING_SUPPORT_MEANS_NO:
-                clear_support(device, key)
-            else:
-                print(f"ERC20 on {device}: adding duplicate {key}")
-                set_unsupported(device, key, ERC20_DUPLICATE_KEY)
-
-        for key in nondups:
-            print(f"ERC20 on {device}: clearing non-duplicate {key}")
-            clear_support(device, key)
-
-
-def clear_erc20_mixed_buckets(buckets):
-    for bucket in buckets.values():
-        tokens = [coin for coin in bucket if coin_info.is_token(coin)]
-        if tokens == bucket:
-            continue
-
-        if len(tokens) == 1:
-            tokens[0]["duplicate"] = False
-
-
 @click.group()
 def cli():
     pass
@@ -228,10 +160,9 @@ def cli():
 def fix(dry_run):
     """Fix expected problems.
 
-    Prunes orphaned keys and ensures that ERC20 duplicate info matches support info.
+    Currently only prunes orphaned keys.
     """
-    all_coins, buckets = coin_info.coin_info_with_duplicates()
-    clear_erc20_mixed_buckets(buckets)
+    all_coins = coin_info.coin_info()
     coins_dict = all_coins.as_dict()
 
     orphaned = find_orphaned_support_keys(coins_dict)
@@ -240,32 +171,25 @@ def fix(dry_run):
         for device in SUPPORT_INFO:
             clear_support(device, orphan)
 
-    process_erc20(coins_dict)
     if not dry_run:
         write_support_info()
 
 
 @cli.command()
 # fmt: off
-@click.option("-T", "--check-tokens", is_flag=True, help="Also check unsupported ERC20 tokens, ignored by default")
 @click.option("-m", "--ignore-missing", is_flag=True, help="Do not fail on missing supportinfo")
 # fmt: on
-def check(check_tokens, ignore_missing):
+def check(ignore_missing):
     """Check validity of support information.
 
     Ensures that `support.json` data is well formed, there are no keys without
     corresponding coins, and there are no coins without corresponding keys.
 
-    If `--check-tokens` is specified, the check will also take into account ERC20 tokens
-    without support info. This is disabled by default, because support info for ERC20
-    tokens is not strictly required.
-
     If `--ignore-missing` is specified, the check will display coins with missing
     support info, but will not fail when missing coins are found. This is
     useful in Travis.
     """
-    all_coins, buckets = coin_info.coin_info_with_duplicates()
-    clear_erc20_mixed_buckets(buckets)
+    all_coins = coin_info.coin_info()
     coins_dict = all_coins.as_dict()
     checks_ok = True
 
@@ -282,20 +206,12 @@ def check(check_tokens, ignore_missing):
 
     missing = find_unsupported_coins(coins_dict)
     for device, values in missing.items():
-        if not check_tokens:
-            values = [coin for coin in values if not coin_info.is_token(coin)]
         if values:
             if not ignore_missing:
                 checks_ok = False
             print(f"Device {device} has missing support infos:")
             for coin in values:
                 print(f"{coin['key']} - {coin['name']}")
-
-    supported_dups = find_supported_duplicate_tokens(coins_dict)
-    for key in supported_dups:
-        coin = coins_dict[key]
-        checks_ok = False
-        print(f"Token {coin['key']} ({coin['name']}) is duplicate but supported")
 
     if not checks_ok:
         print("Some checks have failed")
@@ -304,22 +220,18 @@ def check(check_tokens, ignore_missing):
 
 @cli.command()
 # fmt: off
-@click.option("--v1", help="Version for T1 release (default: guess from latest)")
-@click.option("--v2", help="Version for TT release (default: guess from latest)")
+@click.option("-r", '--releases', multiple=True, type=str, help='Key-value pairs of model and version. E.g. "T2B1=2.6.1"')
 @click.option("-n", "--dry-run", is_flag=True, help="Do not write changes")
 @click.option("-f", "--force", is_flag=True, help="Proceed even with bad version/device info")
-@click.option("-v", "--verbose", is_flag=True, help="Be more verbose")
 @click.option("--skip-testnets/--no-skip-testnets", default=True, help="Automatically exclude testnets")
 # fmt: on
 @click.pass_context
 def release(
     ctx,
-    v1,
-    v2,
-    dry_run,
-    force,
-    verbose,
-    skip_testnets,
+    releases: list[str],
+    dry_run: bool,
+    force: bool,
+    skip_testnets: bool,
 ):
     """Release a new Trezor firmware.
 
@@ -327,30 +239,36 @@ def release(
     By default, marks duplicate tokens and testnets as unsupported, and all coins that
     don't have support info are set to the released firmware version.
 
-    The tool will ask you to confirm each added coin. ERC20 tokens are added
-    automatically. Use `--verbose` to see them.
+    The tool will ask you to confirm each added coin.
     """
-    latest_releases = coin_info.latest_releases()
+    # Transforming the user release input into a dict and validating
+    user_releases_dict = {
+        key: val for key, val in (release.split("=") for release in releases)
+    }
+    for key in user_releases_dict:
+        if key not in MODELS:
+            raise click.ClickException(f"Unknown device: {key} - allowed are: {MODELS}")
 
-    def bump_version(version_tuple):
+    def bump_version(version_tuple: tuple[int]) -> str:
         version_list = list(version_tuple)
         version_list[-1] += 1
         return ".".join(str(n) for n in version_list)
 
-    # guess `version` if not given
-    if not v1:
-        v1 = bump_version(latest_releases["trezor1"])
-    if not v2:
-        v2 = bump_version(latest_releases["trezor2"])
+    latest_releases = coin_info.latest_releases()
 
-    versions = {"trezor1": v1, "trezor2": v2}
+    # Take version either from user or guess it from latest releases info
+    device_release_version: dict[str, str] = {}
+    for device in MODELS:
+        if device in user_releases_dict:
+            device_release_version[device] = user_releases_dict[device]
+        else:
+            device_release_version[device] = bump_version(latest_releases[device])
 
-    for number in "1", "2":
-        device = f"trezor{number}"
-        version = versions[device]
-        if not force and not version.startswith(number + "."):
+    for device, version in device_release_version.items():
+        version_starting_num = device[1]  # "T1B1" -> "1", "T2B1" -> "2"
+        if not force and not version.startswith(version_starting_num + "."):
             raise click.ClickException(
-                f"Device trezor{device} should not be version {version}. "
+                f"Device {device} should not be version {version}. "
                 "Use --force to proceed anyway."
             )
 
@@ -377,7 +295,7 @@ def release(
             if not unsupport_reason:
                 return
 
-        for device, version in versions.items():
+        for device, version in device_release_version.items():
             if add:
                 support_setdefault(device, coin["key"], version)
             else:
@@ -391,19 +309,9 @@ def release(
             if coin not in missing_list:
                 missing_list.append(coin)
 
-    tokens = [coin for coin in missing_list if coin_info.is_token(coin)]
-    nontokens = [coin for coin in missing_list if not coin_info.is_token(coin)]
-    for coin in tokens:
-        key = coin["key"]
-        # assert not coin.get("duplicate"), key
-        if verbose:
-            print(f"Adding missing {key} ({coin['name']})")
-        for device, version in versions.items():
-            support_setdefault(device, key, version)
-
-    for coin in nontokens:
-        if skip_testnets and "testnet" in coin["name"].lower():
-            for device, version in versions.items():
+    for coin in missing_list:
+        if skip_testnets and coin["is_testnet"]:
+            for device, version in device_release_version.items():
                 support_setdefault(device, coin["key"], False, "(AUTO) exclude testnet")
         else:
             maybe_add(coin)
@@ -438,15 +346,18 @@ def set_support_value(key, entries, reason):
     """Set a support info variable.
 
     Examples:
-    support.py set coin:BTC trezor1=1.10.5 trezor2=2.4.7 suite=yes connect=no
-    support.py set coin:LTC trezor1=yes connect=
+    support.py set coin:BTC T1B1=1.10.5 T2T1=2.4.7 T2B1=no
 
-    Setting a variable to "yes", "true" or "1" sets support to true.
-    Setting a variable to "no", "false" or "0" sets support to false.
-    (or null, in case of trezor1/2)
-    Setting variable to empty ("trezor1=") will set to null, or clear the entry.
     Setting a variable to a particular version string (e.g., "2.4.7") will set that
-    particular version.
+    particular version as the earliest supported.
+
+    Setting a variable to "yes", "true" or "1" sets support to the upcoming release,
+    as fetched via `coin_info.latest_releases()`.
+
+    Setting a variable to "no", "false" or "0" sets support to false. You will need to
+    provide a reason for unsupporting, either via the `-r` option, or interactively.
+
+    Setting variable to empty ("T1B1=") will set to null, or clear the entry.
     """
     defs, _ = coin_info.coin_info_with_duplicates()
     coins = defs.as_dict()
@@ -455,9 +366,10 @@ def set_support_value(key, entries, reason):
         click.echo("Use 'support.py show' to search for the right one.")
         sys.exit(1)
 
-    if coins[key].get("duplicate") and coin_info.is_token(coins[key]):
-        shortcut = coins[key]["shortcut"]
-        click.echo(f"Note: shortcut {shortcut} is a duplicate.")
+    latest_releases = coin_info.latest_releases()
+    next_releases = {
+        k: (maj, min, pat + 1) for k, (maj, min, pat) in latest_releases.items()
+    }
 
     for entry in entries:
         try:
@@ -470,11 +382,8 @@ def set_support_value(key, entries, reason):
             raise click.ClickException(f"unknown device: {device}")
 
         if value in ("yes", "true", "1"):
-            set_supported(device, key, True)
+            set_supported(device, key, next_releases[device])
         elif value in ("no", "false", "0"):
-            if device in coin_info.MISSING_SUPPORT_MEANS_NO:
-                click.echo(f"Setting explicitly unsupported for {device}.")
-                click.echo(f"Perhaps you meant removing support, i.e., '{device}=' ?")
             if not reason:
                 reason = click.prompt(f"Enter reason for not supporting on {device}:")
             set_unsupported(device, key, reason)

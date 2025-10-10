@@ -1,74 +1,49 @@
-/// Create an object for an exported function taking no arguments.
-macro_rules! obj_fn_0 {
-    ($f:expr) => {{
+macro_rules! _obj_fn_make_fixed {
+    ($type:ident, $member:ident, $f:expr) => {{
         #[allow(unused_unsafe)]
         unsafe {
             use $crate::micropython::ffi;
 
             ffi::mp_obj_fun_builtin_fixed_t {
                 base: ffi::mp_obj_base_t {
-                    type_: &ffi::mp_type_fun_builtin_0,
+                    type_: &$crate::micropython::ffi::$type,
                 },
-                fun: ffi::_mp_obj_fun_builtin_fixed_t__bindgen_ty_1 { _0: Some($f) },
+                fun: ffi::_mp_obj_fun_builtin_fixed_t__bindgen_ty_1 { $member: Some($f) },
             }
         }
     }};
+}
+
+/// Create an object for an exported function taking no arguments.
+macro_rules! obj_fn_0 {
+    ($f:expr) => {
+        crate::micropython::macros::_obj_fn_make_fixed!(mp_type_fun_builtin_0, _0, $f)
+    };
 }
 
 /// Create an object for an exported function taking 1 arg.
 macro_rules! obj_fn_1 {
-    ($f:expr) => {{
-        #[allow(unused_unsafe)]
-        unsafe {
-            use $crate::micropython::ffi;
-
-            ffi::mp_obj_fun_builtin_fixed_t {
-                base: ffi::mp_obj_base_t {
-                    type_: &ffi::mp_type_fun_builtin_1,
-                },
-                fun: ffi::_mp_obj_fun_builtin_fixed_t__bindgen_ty_1 { _1: Some($f) },
-            }
-        }
-    }};
+    ($f:expr) => {
+        crate::micropython::macros::_obj_fn_make_fixed!(mp_type_fun_builtin_1, _1, $f)
+    };
 }
 
 /// Create an object for an exported function taking 2 args.
 macro_rules! obj_fn_2 {
-    ($f:expr) => {{
-        #[allow(unused_unsafe)]
-        unsafe {
-            use $crate::micropython::ffi;
-
-            ffi::mp_obj_fun_builtin_fixed_t {
-                base: ffi::mp_obj_base_t {
-                    type_: &ffi::mp_type_fun_builtin_2,
-                },
-                fun: ffi::_mp_obj_fun_builtin_fixed_t__bindgen_ty_1 { _2: Some($f) },
-            }
-        }
-    }};
+    ($f:expr) => {
+        crate::micropython::macros::_obj_fn_make_fixed!(mp_type_fun_builtin_2, _2, $f)
+    };
 }
 
 /// Create an object for an exported function taking 3 args.
 macro_rules! obj_fn_3 {
-    ($f:expr) => {{
-        #[allow(unused_unsafe)]
-        unsafe {
-            use $crate::micropython::ffi;
-
-            ffi::mp_obj_fun_builtin_fixed_t {
-                base: ffi::mp_obj_base_t {
-                    type_: &ffi::mp_type_fun_builtin_3,
-                },
-                fun: ffi::_mp_obj_fun_builtin_fixed_t__bindgen_ty_1 { _3: Some($f) },
-            }
-        }
-    }};
+    ($f:expr) => {
+        crate::micropython::macros::_obj_fn_make_fixed!(mp_type_fun_builtin_3, _3, $f)
+    };
 }
 
-/// Create an object for an exported function taking a variable number of args.
-macro_rules! obj_fn_var {
-    ($min:expr, $max:expr, $f:expr) => {{
+macro_rules! _obj_fn_make_var {
+    ($min:expr, $max:expr, takes_kw: $takes_kw:expr, $var_or_kw:ident: $f:expr) => {{
         #[allow(unused_unsafe)]
         unsafe {
             use $crate::micropython::ffi;
@@ -77,37 +52,36 @@ macro_rules! obj_fn_var {
                 base: ffi::mp_obj_base_t {
                     type_: &ffi::mp_type_fun_builtin_var,
                 },
-                sig: ($min << 17u32) | ($max << 1u32) | 0, // min, max, takes_kw
-                fun: ffi::_mp_obj_fun_builtin_var_t__bindgen_ty_1 { var: Some($f) },
+                sig: ($min << 17u32) | ($max << 1u32) | $takes_kw,
+                fun: ffi::_mp_obj_fun_builtin_var_t__bindgen_ty_1 {
+                    $var_or_kw: Some($f),
+                },
             }
         }
     }};
+}
+
+/// Create an object for an exported function taking a variable number of args
+/// between min and max
+macro_rules! obj_fn_var {
+    ($min:expr, $max:expr, $f:expr) => {
+        crate::micropython::macros::_obj_fn_make_var!($min, $max, takes_kw:0, var:$f)
+    };
 }
 
 /// Create an object for an exported function taking key-value args.
 macro_rules! obj_fn_kw {
-    ($min:expr, $f:expr) => {{
-        #[allow(unused_unsafe)]
-        unsafe {
-            use $crate::micropython::ffi;
-
-            ffi::mp_obj_fun_builtin_var_t {
-                base: ffi::mp_obj_base_t {
-                    type_: &ffi::mp_type_fun_builtin_var,
-                },
-                sig: ($min << 17u32) | (0xffff << 1u32) | 1, // min, max, takes_kw
-                fun: ffi::_mp_obj_fun_builtin_var_t__bindgen_ty_1 { kw: Some($f) },
-            }
-        }
-    }};
+    ($min:expr, $f:expr) => {
+        crate::micropython::macros::_obj_fn_make_var!($min, 0xffff, takes_kw:1, kw:$f)
+    };
 }
 
 /// Construct fixed static const `Map` from `key` => `val` pairs.
 macro_rules! obj_map {
     ($($key:expr => $val:expr),*) => ({
-        Map::from_fixed_static(&[
+        $crate::micropython::map::Map::from_fixed_static(&[
             $(
-                Map::at($key, $val),
+                $crate::micropython::map::Map::at($key, $val),
             )*
         ])
     });
@@ -136,15 +110,22 @@ macro_rules! obj_dict {
 /// Compose a `Type` object definition.
 macro_rules! obj_type {
     (name: $name:expr,
+     $(base: $base:expr,)?
      $(locals: $locals:expr,)?
-     $(attr_fn: $attr_fn:ident,)?
-     $(call_fn: $call_fn:ident,)?
+     $(make_new_fn: $make_new_fn:path,)?
+     $(attr_fn: $attr_fn:path,)?
+     $(call_fn: $call_fn:path,)?
     ) => {{
         #[allow(unused_unsafe)]
         unsafe {
             use $crate::micropython::ffi;
 
             let name = $name.to_u16();
+
+            #[allow(unused_mut)]
+            #[allow(unused_assignments)]
+            let mut base_type: &'static ffi::mp_obj_type_t = &ffi::mp_type_type;
+            $(base_type = &$base;)?
 
             #[allow(unused_mut)]
             #[allow(unused_assignments)]
@@ -156,6 +137,11 @@ macro_rules! obj_type {
             let mut call: ffi::mp_call_fun_t = None;
             $(call = Some($call_fn);)?
 
+            #[allow(unused_mut)]
+            #[allow(unused_assignments)]
+            let mut make_new: ffi::mp_make_new_fun_t = None;
+            $(make_new = Some($make_new_fn);)?
+
             // TODO: This is safe only if we pass in `Dict` with fixed `Map` (created by
             // `Map::fixed()`, usually through `obj_map!`), because only then will
             // MicroPython treat `locals_dict` as immutable, and make the mutable cast safe.
@@ -166,12 +152,12 @@ macro_rules! obj_type {
 
             ffi::mp_obj_type_t {
                 base: ffi::mp_obj_base_t {
-                    type_: &ffi::mp_type_type,
+                    type_: base_type,
                 },
                 flags: 0,
                 name,
                 print: None,
-                make_new: None,
+                make_new,
                 call,
                 unary_op: None,
                 binary_op: None,
@@ -188,7 +174,7 @@ macro_rules! obj_type {
     }};
 }
 
-/// Construct an extmod definition.
+/// Construct an upymod definition.
 macro_rules! obj_module {
     ($($key:expr => $val:expr),*) => ({
         #[allow(unused_unsafe)]
@@ -222,26 +208,51 @@ macro_rules! obj_module {
     });
 }
 
-/// Print arbitrary amounts of slices into a terminal.
-/// Does not include a newline at the end.
-/// Does not do anything when not in debugging mode.
-#[allow(unused_macros)] // Should be used only for debugging purposes
-macro_rules! print {
-    ($($string:expr),+) => {
-        #[cfg(feature = "debug")]
-        {
-            $(crate::micropython::print::print($string);)+
+macro_rules! attr_tuple {
+    (@append
+        fields: [$($fields:expr,)*],
+        values: [$($values:expr,)*],
+        rest: {
+            $field:expr => $val:expr,
+            $($rest:tt)*
         }
-    }
+    ) => {
+        attr_tuple! {
+            @append
+            fields: [$($fields,)* $field,],
+            values: [$($values,)* $val,],
+            rest: {$($rest)*}
+        }
+    };
+    (@append
+        fields: [$($fields:expr,)*],
+        values: [$($values:expr,)*],
+        rest: {}
+    ) => {
+        $crate::micropython::util::new_attrtuple(&[$($fields,)*], &[$($values,)*])
+    };
+    // version without trailing comma
+    ($($key:expr => $val:expr),*) => ({
+        attr_tuple!(@append fields: [], values: [], rest: { $($key => $val,)* })
+    });
+    // version with trailing comma
+    ($($key:expr => $val:expr,)*) => ({
+        attr_tuple!(@append fields: [], values: [], rest: { $($key => $val,)* })
+    });
 }
 
-/// Print arbitrary amounts of slices into a terminal.
-/// Includes a newline at the end.
-/// Does not do anything when not in debugging mode.
-#[allow(unused_macros)] // Should be used only for debugging purposes
-macro_rules! println {
-    ($($string:expr),+) => {
-        // Just delegating to print! and adding a newline
-        print!($($string),+, "\n");
-    }
-}
+// required because they are used in expansion of macros below
+pub(crate) use _obj_fn_make_fixed;
+pub(crate) use _obj_fn_make_var;
+
+pub(crate) use attr_tuple;
+pub(crate) use obj_dict;
+pub(crate) use obj_fn_0;
+pub(crate) use obj_fn_1;
+pub(crate) use obj_fn_2;
+pub(crate) use obj_fn_3;
+pub(crate) use obj_fn_kw;
+pub(crate) use obj_fn_var;
+pub(crate) use obj_map;
+pub(crate) use obj_module;
+pub(crate) use obj_type;

@@ -81,12 +81,6 @@
       "https://blockbook.groestlcoin.org"
     ]
   },
-  "bitcoin:KOTO": {
-    "type": "blockbook",
-    "url": [
-      "https://blockbook.kotocoin.info"
-    ]
-  },
   "bitcoin:LTC": {
     "type": "blockbook",
     "url": [
@@ -101,12 +95,6 @@
     "type": "blockbook",
     "url": [
       "https://blockbook.electrum-mona.org"
-    ]
-  },
-  "bitcoin:MUE": {
-    "type": "blockbook",
-    "url": [
-      "https://blockbook.monetaryunit.org"
     ]
   },
   "bitcoin:NMC": {
@@ -143,21 +131,13 @@
   "bitcoin:SYS": {
     "type": "blockbook",
     "url": [
-      "https://blockbook.elint.services"
+      "https://blockbook.syscoin.org"
     ]
   },
   "bitcoin:TEST": {
     "type": "blockbook",
     "url": [
-      "https://tbtc1.trezor.io",
-      "https://tbtc2.trezor.io"
-    ]
-  },
-  "bitcoin:UNO": {
-    "type": "blockbook",
-    "url": [
-      "https://blockbook.flurbo.xyz",
-      "https://blockbook.unobtanium.uno"
+      "https://tbtc4-1.trezor.io"
     ]
   },
   "bitcoin:VIPS": {
@@ -174,19 +154,6 @@
       "https://vtc3.trezor.io",
       "https://vtc4.trezor.io",
       "https://vtc5.trezor.io"
-    ]
-  },
-  "bitcoin:XRC": {
-    "type": "blockbook",
-    "url": [
-      "https://blockbook1.bitcoinrh.org",
-      "https://blockbook2.bitcoinrh.org"
-    ]
-  },
-  "bitcoin:ZCR": {
-    "type": "blockbook",
-    "url": [
-      "https://blockbook.zcore.cash"
     ]
   },
   "bitcoin:ZEC": {
@@ -234,40 +201,88 @@
     "type": "blockbook",
     "url": [
       "https://eth1.trezor.io",
-      "https://eth2.trezor.io"
-    ]
-  },
-  "eth:tROP": {
-    "type": "blockbook",
-    "url": [
-      "https://ropsten1.trezor.io",
-      "https://ropsten2.trezor.io"
+      "https://eth2.trezor.io",
+      "https://eth3.trezor.io",
+      "https://eth4.trezor.io"
     ]
   },
   "misc:XRP": {
     "type": "ripple",
     "url": [
-      "wss://s1.ripple.com",
-      "wss://s-east.ripple.com",
-      "wss://s-west.ripple.com"
+      "wss://xrp1.trezor.io",
+      "wss://xrp2.trezor.io",
+      "wss://xrp3.trezor.io",
+      "wss://xrp4.trezor.io"
     ]
   },
   "misc:tXRP": {
     "type": "ripple",
     "url": [
-      "wss://s.altnet.rippletest.net"
+      "wss://txrp1.trezor.io"
     ]
   },
   "misc:ADA": {
     "type": "blockfrost",
     "url": [
-      "wss://trezor-cardano-mainnet.blockfrost.io"
+      "wss://ada1.trezor.io",
+      "wss://ada2.trezor.io"
     ]
   },
   "misc:tADA": {
     "type": "blockfrost",
     "url": [
-      "wss://trezor-cardano-preview.blockfrost.io"
+      "wss://tada1.trezor.io"
     ]
+  },
+  "misc:SOL": {
+    "type": "solana",
+    "url": [
+      "https://sol1.trezor.io",
+      "https://sol2.trezor.io",
+      "https://sol3.trezor.io",
+      "https://sol4.trezor.io"
+  ]
+  },
+  "misc:DSOL": {
+    "type": "solana",
+    "url": [
+      "https://dsol1.trezor.io"
+    ]
+  },
+  "eth:ETH:1": {
+    "type": "blockbook",
+    "url": ["https://eth1.trezor.io", "https://eth2.trezor.io", "https://eth3.trezor.io", "https://eth4.trezor.io"]
+  },
+  "eth:BSC:56": {
+    "type": "blockbook",
+    "url": ["https://bsc1.trezor.io", "https://bsc2.trezor.io", "https://bsc3.trezor.io", "https://bsc4.trezor.io"]
+  },
+  "eth:ARB:42161": {
+    "type": "blockbook",
+    "url": ["https://arb1.trezor.io", "https://arb2.trezor.io", "https://arb3.trezor.io", "https://arb4.trezor.io"]
+  },
+  "eth:BASE:8453": {
+    "type": "blockbook",
+    "url": ["https://base1.trezor.io", "https://base2.trezor.io", "https://base3.trezor.io", "https://base4.trezor.io"]
+  },
+  "eth:OP:10": {
+    "type": "blockbook",
+    "url": ["https://op1.trezor.io", "https://op2.trezor.io", "https://op3.trezor.io", "https://op4.trezor.io"]
+  },
+  "eth:ETC:61": {
+    "type": "blockbook",
+    "url": ["https://etc1.trezor.io", "https://etc2.trezor.io"]
+  },
+  "eth:POL:137": {
+    "type": "blockbook",
+    "url": ["https://pol1.trezor.io", "https://pol2.trezor.io", "https://pol3.trezor.io", "https://pol4.trezor.io"]
+  },
+  "eth:tHOL:17000": {
+    "type": "blockbook",
+    "url": ["https://holesky1.trezor.io", "https://holesky2.trezor.io"]
+  },
+  "eth:tSEP:11155111": {
+    "type": "blockbook",
+    "url": ["https://sepolia1.trezor.io"]
   }
 }

@@ -2,7 +2,7 @@ from micropython import const
 from typing import TYPE_CHECKING
 
 from trezor.crypto import hashlib
-from trezor.enums import CardanoAddressType, CardanoGovernanceRegistrationFormat
+from trezor.enums import CardanoAddressType, CardanoCVoteRegistrationFormat
 
 from apps.common import cbor
 
@@ -12,20 +12,19 @@ from .helpers.utils import derive_public_key
 
 if TYPE_CHECKING:
     Delegations = list[tuple[bytes, int]]
-    GovernanceRegistrationPayload = dict[int, Delegations | bytes | int]
-    SignedGovernanceRegistrationPayload = tuple[GovernanceRegistrationPayload, bytes]
+    CVoteRegistrationPayload = dict[int, Delegations | bytes | int]
+    SignedCVoteRegistrationPayload = tuple[CVoteRegistrationPayload, bytes]
 
     from trezor import messages
-    from trezor.wire import Context
 
     from . import seed
 
 _AUXILIARY_DATA_HASH_SIZE = const(32)
-_GOVERNANCE_VOTING_PUBLIC_KEY_LENGTH = const(32)
-_GOVERNANCE_REGISTRATION_HASH_SIZE = const(32)
+_CVOTE_PUBLIC_KEY_LENGTH = const(32)
+_CVOTE_REGISTRATION_HASH_SIZE = const(32)
 
-_METADATA_KEY_GOVERNANCE_REGISTRATION = const(61284)
-_METADATA_KEY_GOVERNANCE_REGISTRATION_SIGNATURE = const(61285)
+_METADATA_KEY_CVOTE_REGISTRATION = const(61284)
+_METADATA_KEY_CVOTE_REGISTRATION_SIGNATURE = const(61285)
 
 _MAX_DELEGATION_COUNT = const(32)
 _DEFAULT_VOTING_PURPOSE = const(0)
@@ -38,59 +37,76 @@ def assert_cond(condition: bool) -> None:
         raise wire.ProcessError("Invalid auxiliary data")
 
 
-def validate(auxiliary_data: messages.CardanoTxAuxiliaryData) -> None:
+def validate(
+    auxiliary_data: messages.CardanoTxAuxiliaryData,
+    protocol_magic: int,
+    network_id: int,
+) -> None:
     fields_provided = 0
     if auxiliary_data.hash:
         fields_provided += 1
         # _validate_hash
         assert_cond(len(auxiliary_data.hash) == _AUXILIARY_DATA_HASH_SIZE)
-    if auxiliary_data.governance_registration_parameters:
+    if auxiliary_data.cvote_registration_parameters:
         fields_provided += 1
-        _validate_governance_registration_parameters(
-            auxiliary_data.governance_registration_parameters
+        _validate_cvote_registration_parameters(
+            auxiliary_data.cvote_registration_parameters,
+            protocol_magic,
+            network_id,
         )
     assert_cond(fields_provided == 1)
 
 
-def _validate_governance_registration_parameters(
-    parameters: messages.CardanoGovernanceRegistrationParametersType,
+def _validate_cvote_registration_parameters(
+    parameters: messages.CardanoCVoteRegistrationParametersType,
+    protocol_magic: int,
+    network_id: int,
 ) -> None:
-    voting_key_fields_provided = 0
-    if parameters.voting_public_key is not None:
-        voting_key_fields_provided += 1
-        _validate_voting_public_key(parameters.voting_public_key)
+    vote_key_fields_provided = 0
+    if parameters.vote_public_key is not None:
+        vote_key_fields_provided += 1
+        _validate_vote_public_key(parameters.vote_public_key)
     if parameters.delegations:
-        voting_key_fields_provided += 1
-        assert_cond(parameters.format == CardanoGovernanceRegistrationFormat.CIP36)
+        vote_key_fields_provided += 1
+        assert_cond(parameters.format == CardanoCVoteRegistrationFormat.CIP36)
         _validate_delegations(parameters.delegations)
-    assert_cond(voting_key_fields_provided == 1)
+    assert_cond(vote_key_fields_provided == 1)
 
     assert_cond(SCHEMA_STAKING_ANY_ACCOUNT.match(parameters.staking_path))
 
-    address_parameters = parameters.reward_address_parameters
-    assert_cond(address_parameters.address_type != CardanoAddressType.BYRON)
-    addresses.validate_address_parameters(address_parameters)
+    payment_address_fields_provided = 0
+    if parameters.payment_address is not None:
+        payment_address_fields_provided += 1
+        addresses.validate_cvote_payment_address(
+            parameters.payment_address, protocol_magic, network_id
+        )
+    if parameters.payment_address_parameters:
+        payment_address_fields_provided += 1
+        addresses.validate_cvote_payment_address_parameters(
+            parameters.payment_address_parameters
+        )
+    assert_cond(payment_address_fields_provided == 1)
 
     if parameters.voting_purpose is not None:
-        assert_cond(parameters.format == CardanoGovernanceRegistrationFormat.CIP36)
+        assert_cond(parameters.format == CardanoCVoteRegistrationFormat.CIP36)
 
 
-def _validate_voting_public_key(key: bytes) -> None:
-    assert_cond(len(key) == _GOVERNANCE_VOTING_PUBLIC_KEY_LENGTH)
+def _validate_vote_public_key(key: bytes) -> None:
+    assert_cond(len(key) == _CVOTE_PUBLIC_KEY_LENGTH)
 
 
 def _validate_delegations(
-    delegations: list[messages.CardanoGovernanceDelegation],
+    delegations: list[messages.CardanoCVoteDelegation],
 ) -> None:
     assert_cond(len(delegations) <= _MAX_DELEGATION_COUNT)
     for delegation in delegations:
-        _validate_voting_public_key(delegation.voting_public_key)
+        _validate_vote_public_key(delegation.vote_public_key)
 
 
 def _get_voting_purpose_to_serialize(
-    parameters: messages.CardanoGovernanceRegistrationParametersType,
+    parameters: messages.CardanoCVoteRegistrationParametersType,
 ) -> int | None:
-    if parameters.format == CardanoGovernanceRegistrationFormat.CIP15:
+    if parameters.format == CardanoCVoteRegistrationFormat.CIP15:
         return None
     if parameters.voting_purpose is None:
         return _DEFAULT_VOTING_PURPOSE
@@ -98,17 +114,15 @@ def _get_voting_purpose_to_serialize(
 
 
 async def show(
-    ctx: Context,
     keychain: seed.Keychain,
     auxiliary_data_hash: bytes,
-    parameters: messages.CardanoGovernanceRegistrationParametersType | None,
+    parameters: messages.CardanoCVoteRegistrationParametersType | None,
     protocol_magic: int,
     network_id: int,
     should_show_details: bool,
 ) -> None:
     if parameters:
-        await _show_governance_registration(
-            ctx,
+        await _show_cvote_registration(
             keychain,
             parameters,
             protocol_magic,
@@ -117,49 +131,69 @@ async def show(
         )
 
     if should_show_details:
-        await layout.show_auxiliary_data_hash(ctx, auxiliary_data_hash)
+        await layout.show_auxiliary_data_hash(auxiliary_data_hash)
 
 
-async def _show_governance_registration(
-    ctx: Context,
+def _should_show_payment_warning(address_type: CardanoAddressType) -> bool:
+    # For cvote payment addresses that are actually REWARD addresses, we show a warning that the
+    # address is not eligible for rewards. https://github.com/cardano-foundation/CIPs/pull/373
+    # However, the registration is otherwise valid, so we allow such addresses since we don't
+    # want to prevent the user from voting just because they use an outdated SW wallet.
+    return address_type not in addresses.ADDRESS_TYPES_PAYMENT
+
+
+async def _show_cvote_registration(
     keychain: seed.Keychain,
-    parameters: messages.CardanoGovernanceRegistrationParametersType,
+    parameters: messages.CardanoCVoteRegistrationParametersType,
     protocol_magic: int,
     network_id: int,
     should_show_details: bool,
 ) -> None:
     from .helpers import bech32
+    from .helpers.credential import Credential, should_show_credentials
 
     for delegation in parameters.delegations:
         encoded_public_key = bech32.encode(
-            bech32.HRP_GOVERNANCE_PUBLIC_KEY, delegation.voting_public_key
+            bech32.HRP_CVOTE_PUBLIC_KEY, delegation.vote_public_key
         )
-        await layout.confirm_governance_registration_delegation(
-            ctx, encoded_public_key, delegation.weight
+        await layout.confirm_cvote_registration_delegation(
+            encoded_public_key, delegation.weight
+        )
+
+    if parameters.payment_address:
+        show_payment_warning = _should_show_payment_warning(
+            addresses.get_type(addresses.get_bytes_unsafe(parameters.payment_address))
+        )
+        await layout.confirm_cvote_registration_payment_address(
+            parameters.payment_address, show_payment_warning
+        )
+    else:
+        address_parameters = parameters.payment_address_parameters
+        assert address_parameters  # _validate_cvote_registration_parameters
+        show_both_credentials = should_show_credentials(address_parameters)
+        show_payment_warning = _should_show_payment_warning(
+            address_parameters.address_type
+        )
+        await layout.show_cvote_registration_payment_credentials(
+            Credential.payment_credential(address_parameters),
+            Credential.stake_credential(address_parameters),
+            show_both_credentials,
+            show_payment_warning,
         )
 
     encoded_public_key: str | None = None
-    if parameters.voting_public_key:
+    if parameters.vote_public_key:
         encoded_public_key = bech32.encode(
-            bech32.HRP_GOVERNANCE_PUBLIC_KEY, parameters.voting_public_key
+            bech32.HRP_CVOTE_PUBLIC_KEY, parameters.vote_public_key
         )
-
-    reward_address = addresses.derive_human_readable(
-        keychain,
-        parameters.reward_address_parameters,
-        protocol_magic,
-        network_id,
-    )
 
     voting_purpose: int | None = (
         _get_voting_purpose_to_serialize(parameters) if should_show_details else None
     )
 
-    await layout.confirm_governance_registration(
-        ctx,
+    await layout.confirm_cvote_registration(
         encoded_public_key,
         parameters.staking_path,
-        reward_address,
         parameters.nonce,
         voting_purpose,
     )
@@ -171,23 +205,23 @@ def get_hash_and_supplement(
     protocol_magic: int,
     network_id: int,
 ) -> tuple[bytes, messages.CardanoTxAuxiliaryDataSupplement]:
-    from trezor.enums import CardanoTxAuxiliaryDataSupplementType
     from trezor import messages
+    from trezor.enums import CardanoTxAuxiliaryDataSupplementType
 
-    if parameters := auxiliary_data.governance_registration_parameters:
+    if parameters := auxiliary_data.cvote_registration_parameters:
         (
-            governance_registration_payload,
-            governance_signature,
-        ) = _get_signed_governance_registration_payload(
+            cvote_registration_payload,
+            cvote_registration_signature,
+        ) = _get_signed_cvote_registration_payload(
             keychain, parameters, protocol_magic, network_id
         )
-        auxiliary_data_hash = _get_governance_registration_hash(
-            governance_registration_payload, governance_signature
+        auxiliary_data_hash = _get_cvote_registration_hash(
+            cvote_registration_payload, cvote_registration_signature
         )
         auxiliary_data_supplement = messages.CardanoTxAuxiliaryDataSupplement(
-            type=CardanoTxAuxiliaryDataSupplementType.GOVERNANCE_REGISTRATION_SIGNATURE,
+            type=CardanoTxAuxiliaryDataSupplementType.CVOTE_REGISTRATION_SIGNATURE,
             auxiliary_data_hash=auxiliary_data_hash,
-            governance_signature=governance_signature,
+            cvote_registration_signature=cvote_registration_signature,
         )
         return auxiliary_data_hash, auxiliary_data_supplement
     else:
@@ -197,15 +231,15 @@ def get_hash_and_supplement(
         )
 
 
-def _get_governance_registration_hash(
-    governance_registration_payload: GovernanceRegistrationPayload,
-    governance_registration_payload_signature: bytes,
+def _get_cvote_registration_hash(
+    cvote_registration_payload: CVoteRegistrationPayload,
+    cvote_registration_payload_signature: bytes,
 ) -> bytes:
     # _cborize_catalyst_registration
-    governance_registration_signature = {1: governance_registration_payload_signature}
+    cvote_registration_signature = {1: cvote_registration_payload_signature}
     cborized_catalyst_registration = {
-        _METADATA_KEY_GOVERNANCE_REGISTRATION: governance_registration_payload,
-        _METADATA_KEY_GOVERNANCE_REGISTRATION_SIGNATURE: governance_registration_signature,
+        _METADATA_KEY_CVOTE_REGISTRATION: cvote_registration_payload,
+        _METADATA_KEY_CVOTE_REGISTRATION_SIGNATURE: cvote_registration_signature,
     }
 
     # _get_hash
@@ -222,44 +256,49 @@ def _get_governance_registration_hash(
     ).digest()
 
 
-def _get_signed_governance_registration_payload(
+def _get_signed_cvote_registration_payload(
     keychain: seed.Keychain,
-    parameters: messages.CardanoGovernanceRegistrationParametersType,
+    parameters: messages.CardanoCVoteRegistrationParametersType,
     protocol_magic: int,
     network_id: int,
-) -> SignedGovernanceRegistrationPayload:
+) -> SignedCVoteRegistrationPayload:
     delegations_or_key: Delegations | bytes
     if len(parameters.delegations) > 0:
         delegations_or_key = [
-            (delegation.voting_public_key, delegation.weight)
+            (delegation.vote_public_key, delegation.weight)
             for delegation in parameters.delegations
         ]
-    elif parameters.voting_public_key:
-        delegations_or_key = parameters.voting_public_key
+    elif parameters.vote_public_key:
+        delegations_or_key = parameters.vote_public_key
     else:
-        raise RuntimeError  # should not be reached - _validate_governance_registration_parameters
+        raise RuntimeError  # should not be reached - _validate_cvote_registration_parameters
 
     staking_key = derive_public_key(keychain, parameters.staking_path)
 
-    reward_address = addresses.derive_bytes(
-        keychain,
-        parameters.reward_address_parameters,
-        protocol_magic,
-        network_id,
-    )
+    if parameters.payment_address:
+        payment_address = addresses.get_bytes_unsafe(parameters.payment_address)
+    else:
+        address_parameters = parameters.payment_address_parameters
+        assert address_parameters  # _validate_cvote_registration_parameters
+        payment_address = addresses.derive_bytes(
+            keychain,
+            address_parameters,
+            protocol_magic,
+            network_id,
+        )
 
     voting_purpose = _get_voting_purpose_to_serialize(parameters)
 
-    payload: GovernanceRegistrationPayload = {
+    payload: CVoteRegistrationPayload = {
         1: delegations_or_key,
         2: staking_key,
-        3: reward_address,
+        3: payment_address,
         4: parameters.nonce,
     }
     if voting_purpose is not None:
         payload[5] = voting_purpose
 
-    signature = _create_governance_registration_payload_signature(
+    signature = _create_cvote_registration_payload_signature(
         keychain,
         payload,
         parameters.staking_path,
@@ -268,24 +307,24 @@ def _get_signed_governance_registration_payload(
     return payload, signature
 
 
-def _create_governance_registration_payload_signature(
+def _create_cvote_registration_payload_signature(
     keychain: seed.Keychain,
-    governance_registration_payload: GovernanceRegistrationPayload,
+    cvote_registration_payload: CVoteRegistrationPayload,
     path: list[int],
 ) -> bytes:
     from trezor.crypto.curve import ed25519
 
     node = keychain.derive(path)
 
-    encoded_governance_registration = cbor.encode(
-        {_METADATA_KEY_GOVERNANCE_REGISTRATION: governance_registration_payload}
+    encoded_cvote_registration = cbor.encode(
+        {_METADATA_KEY_CVOTE_REGISTRATION: cvote_registration_payload}
     )
 
-    governance_registration_hash = hashlib.blake2b(
-        data=encoded_governance_registration,
-        outlen=_GOVERNANCE_REGISTRATION_HASH_SIZE,
+    cvote_registration_hash = hashlib.blake2b(
+        data=encoded_cvote_registration,
+        outlen=_CVOTE_REGISTRATION_HASH_SIZE,
     ).digest()
 
     return ed25519.sign_ext(
-        node.private_key(), node.private_key_ext(), governance_registration_hash
+        node.private_key(), node.private_key_ext(), cvote_registration_hash
     )

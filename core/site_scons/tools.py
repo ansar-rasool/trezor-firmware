@@ -1,102 +1,188 @@
-import os.path
+from __future__ import annotations
 
+import shlex
 import subprocess
+import zlib
+from pathlib import Path
+
+HERE = Path(__file__).parent.resolve()
+
+# go up from site_scons to core/
+PROJECT_ROOT = HERE.parent.resolve()
 
 
-def add_font(font_name, font, defines, sources):
-    if font is not None:
-        defines += [
-            'TREZOR_FONT_' + font_name + '_ENABLE=' + font,
-            'TREZOR_FONT_' + font_name + '_INCLUDE=\\"' + font.lower() + '.h\\"',
-        ]
-        sourcefile = 'embed/extmod/modtrezorui/fonts/' + font.lower() + '.c'
-        if sourcefile not in sources:
-            sources.append(sourcefile)
-
-
-def get_hw_model_as_number(hw_model):
-    return int.from_bytes(hw_model.encode(), 'little')
-
-
-def configure_board(model, env, defines, sources):
-    model_r_version = 4
-
-    if model in ('1',):
-        board = 'trezor_1.h'
-        display = 'vg-2864ksweg01.c'
-        hw_model = get_hw_model_as_number('T1B1')
-        hw_revision = 0
-    elif model in ('T',):
-        board = 'trezor_t.h'
-        display = 'st7789v.c'
-        hw_model = get_hw_model_as_number('T2T1')
-        hw_revision = 0
-    elif model in ('R',):
-        hw_model = get_hw_model_as_number('T2B1')
-        hw_revision = model_r_version
-        if model_r_version == 3:
-            board = 'trezor_r_v3.h'
-            display = "ug-2828tswig01.c"
-        else:
-            board = 'trezor_r_v4.h'
-            display = 'vg-2864ksweg01.c'
-    else:
-        raise Exception("Unknown model")
-
-    defines += [f'TREZOR_BOARD=\\"boards/{board}\\"', ]
-    defines += [f'HW_MODEL={hw_model}', ]
-    defines += [f'HW_REVISION={hw_revision}', ]
-    sources += [f'embed/trezorhal/displays/{display}', ]
-    env.get('ENV')['TREZOR_BOARD'] = board
-
-
-def get_model_identifier(model):
-    if model == '1':
-        return "T1B1"
-    elif model == 'T':
-        return "T2T1"
-    elif model == 'R':
-        return "T2B1"
-    else:
-        raise Exception("Unknown model")
-
-
-def get_version(file):
+def get_version(file: str) -> str:
     major = 0
     minor = 0
     patch = 0
 
-    if not os.path.exists(file):
-        file = os.path.join("..", "..", file)
-
-    with open(file, 'r') as f:
+    file_path = PROJECT_ROOT / file
+    with open(file_path, "r") as f:
         for line in f:
-            if line.startswith('#define VERSION_MAJOR '):
-                major = line.split('VERSION_MAJOR')[1].strip()
-            if line.startswith('#define VERSION_MINOR '):
-                minor = line.split('VERSION_MINOR')[1].strip()
-            if line.startswith('#define VERSION_PATCH '):
-                patch = line.split('VERSION_PATCH')[1].strip()
-        return f'{major}.{minor}.{patch}'
+            if line.startswith("#define VERSION_MAJOR "):
+                major = line.split("VERSION_MAJOR")[1].strip()
+            if line.startswith("#define VERSION_MINOR "):
+                minor = line.split("VERSION_MINOR")[1].strip()
+            if line.startswith("#define VERSION_PATCH "):
+                patch = line.split("VERSION_PATCH")[1].strip()
+        return f"{major}.{minor}.{patch}"
 
 
 def get_git_revision_hash() -> str:
-    return subprocess.check_output(['git', 'rev-parse', 'HEAD']).decode('ascii').strip()
+    return subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("ascii").strip()
 
 
 def get_git_revision_short_hash() -> str:
-    return subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('ascii').strip()
+    return (
+        subprocess.check_output(["git", "rev-parse", "--verify", "HEAD"])
+        .decode("ascii")
+        .strip()[:7]
+    )
 
 
 def get_git_modified() -> bool:
-    return subprocess.check_output(['git', 'diff', '--name-status']).decode('ascii').strip() != ''
+    return (
+        subprocess.check_output(["git", "diff", "--name-status"])
+        .decode("ascii")
+        .strip()
+        != ""
+    )
 
 
-def get_defs_for_cmake(defs):
-    result = []
+def get_defs_for_cmake(defs: list[str | tuple[str, str]]) -> list[str]:
+    result: list[str] = []
     for d in defs:
         if type(d) is tuple:
-            result.append(d[0] + "=" + d[1])
+            val = d[1].replace('"', '\\"').replace("(", "\\(").replace(")", "\\)")
+            result.append(f'{d[0]}="{val}"')
         else:
             result.append(d)
     return result
+
+
+def _compress(data: bytes) -> bytes:
+    z = zlib.compressobj(level=9, wbits=-10)
+    return z.compress(data) + z.flush()
+
+
+def get_bindgen_defines(defines: list[str | tuple[str, str]], paths: list[str]) -> str:
+    rest_defs = []
+    for d in defines:
+        if type(d) is tuple:
+            d = f"-D{d[0]}={d[1]}"
+        else:
+            d = f"-D{d}"
+        rest_defs.append(d)
+    for d in paths:
+        rest_defs.append(f"-I../../{d}")
+
+    return ",".join(rest_defs)
+
+
+def embed_compressed_binary(obj_program, env, section, target_, file, build, symbol):
+    _in = f"embedded_{section}.bin.deflated"
+
+    def redefine_sym(suffix):
+        src = (
+            f"_binary_build_{build}_"
+            + _in.replace("/", "_").replace(".", "_")
+            + "_"
+            + suffix
+        )
+        dest = f"_deflated_{symbol}_{suffix}"
+        return f" --redefine-sym {src}={dest}"
+
+    def compress_action(target, source, env):
+        srcf = Path(str(source[0]))
+        dstf = Path(str(target[0]))
+        compressed = _compress(srcf.read_bytes())
+        dstf.write_bytes(compressed)
+        return 0
+
+    compress = env.Command(target=_in, source=file, action=compress_action)
+
+    obj_program.extend(
+        env.Command(
+            target=target_,
+            source=_in,
+            action="$OBJCOPY -I binary -O elf32-littlearm -B arm"
+            f" --rename-section .data=.{section}"
+            + redefine_sym("start")
+            + redefine_sym("end")
+            + redefine_sym("size")
+            + " $SOURCE $TARGET",
+        )
+    )
+
+    env.Depends(obj_program, compress)
+
+
+def embed_raw_binary(obj_program, env, section, target_, file):
+    obj_program.extend(
+        env.Command(
+            target=target_,
+            source=file,
+            action="$OBJCOPY -I binary -O elf32-littlearm -B arm"
+            f" --rename-section .data=.{section}" + " $SOURCE $TARGET",
+        )
+    )
+
+
+def add_rust_lib(*, env, build, profile, features, all_paths, build_dir):
+    RUST_LIB = "trezor_lib"
+    RUST_TARGET = env.get("ENV")["RUST_TARGET"]
+
+    # Determine the profile build flags.
+    if profile == "release":
+        profile = "--release"
+        RUST_LIBDIR = f"build/{build}/rust/{RUST_TARGET}/release"
+    else:
+        profile = ""
+        RUST_LIBDIR = f"build/{build}/rust/{RUST_TARGET}/debug"
+    RUST_LIBPATH = f"{RUST_LIBDIR}/lib{RUST_LIB}.a"
+
+    def cargo_build():
+        lib_features = []
+        lib_features.extend(features)
+        lib_features.append("ui")
+
+        cargo_opts = [
+            f"--target={RUST_TARGET}",
+            f"--target-dir=../../build/{build}/rust",
+            "--no-default-features",
+            "--features " + ",".join(lib_features),
+            "-Z build-std=core",
+            "-Z build-std-features=panic_immediate_abort",
+        ]
+        build_cmd = f"cargo build {profile} " + " ".join(cargo_opts)
+
+        unstable_rustc_flags = [
+            # see https://nnethercote.github.io/perf-book/type-sizes.html#measuring-type-sizes for more details
+            "print-type-sizes",
+            # Adds an ELF section with Rust functions' stack sizes. See the following links for more details:
+            # - https://doc.rust-lang.org/nightly/unstable-book/compiler-flags/emit-stack-sizes.html
+            # - https://blog.japaric.io/stack-analysis/
+            # - https://github.com/japaric/stack-sizes/
+            "emit-stack-sizes",
+        ]
+
+        env.Append(ENV={"RUSTFLAGS": " ".join(f"-Z {f}" for f in unstable_rustc_flags)})
+
+        bindgen_macros = get_bindgen_defines(env.get("CPPDEFINES"), all_paths)
+
+        return (
+            f"export BINDGEN_MACROS={shlex.quote(bindgen_macros)}; "
+            f"export BUILD_DIR='{build_dir}'; "
+            f"cd embed/rust; {build_cmd} > {build_dir}/rust-type-sizes.log"
+        )
+
+    rust = env.Command(
+        target=RUST_LIBPATH,
+        source="",
+        action=cargo_build(),
+    )
+
+    env.Append(LINKFLAGS=[f"-L{RUST_LIBDIR}"])
+    env.Append(LINKFLAGS=[f"-l{RUST_LIB}"])
+
+    return rust

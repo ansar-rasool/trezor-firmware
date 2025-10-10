@@ -28,7 +28,7 @@ TEZOS_PATH_15 = parse_path("m/44h/1729h/15h")
 pytestmark = [
     pytest.mark.altcoin,
     pytest.mark.tezos,
-    pytest.mark.skip_t1,
+    pytest.mark.models("core"),
 ]
 
 
@@ -166,7 +166,8 @@ def test_tezos_sing_tx_ballot_pass(client: Client):
     )
 
 
-def test_tezos_sign_tx_tranasaction(client: Client):
+@pytest.mark.parametrize("chunkify", (True, False))
+def test_tezos_sign_tx_tranasaction(client: Client, chunkify: bool):
     resp = tezos.sign_tx(
         client,
         TEZOS_PATH_10,
@@ -188,6 +189,7 @@ def test_tezos_sign_tx_tranasaction(client: Client):
                 },
             },
         ),
+        chunkify=chunkify,
     )
     assert (
         resp.signature

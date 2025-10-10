@@ -1,19 +1,31 @@
 from typing import TYPE_CHECKING
 from ubinascii import hexlify
 
+from trezor import TR
+
+from . import networks
+
 if TYPE_CHECKING:
-    from trezor.messages import EthereumFieldType
-    from .networks import NetworkInfo
+    from typing import Iterable
+
+    from trezor.messages import EthereumFieldType, EthereumTokenInfo
+
+    from .networks import EthereumNetworkInfo
+
+RSKIP60_NETWORKS = (30, 31)
 
 
-def address_from_bytes(address_bytes: bytes, network: NetworkInfo | None = None) -> str:
+def address_from_bytes(
+    address_bytes: bytes, network: EthereumNetworkInfo = networks.UNKNOWN_NETWORK
+) -> str:
     """
     Converts address in bytes to a checksummed string as defined
     in https://github.com/ethereum/EIPs/blob/master/EIPS/eip-55.md
     """
     from trezor.crypto.hashlib import sha3_256
 
-    if network is not None and network.rskip60:
+    if network.chain_id in RSKIP60_NETWORKS:
+        # rskip60 is a different way to calculate checksum
         prefix = str(network.chain_id) + "0x"
     else:
         prefix = ""
@@ -41,6 +53,7 @@ def address_from_bytes(address_bytes: bytes, network: NetworkInfo | None = None)
 
 def bytes_from_address(address: str) -> bytes:
     from ubinascii import unhexlify
+
     from trezor import wire
 
     if len(address) == 40:
@@ -114,6 +127,88 @@ def decode_typed_data(data: bytes, type_name: str) -> str:
         return str(_from_bytes_bigendian_signed(data))
 
     raise ValueError  # Unsupported data type for direct field decoding
+
+
+def get_fee_items_regular(
+    gas_price: int, gas_limit: int, network: EthereumNetworkInfo
+) -> Iterable[tuple[str, str]]:
+    # regular
+    gas_limit_str = TR.ethereum__units_template.format(gas_limit)
+    gas_price_str = format_ethereum_amount(
+        gas_price, None, network, force_unit_gwei=True
+    )
+
+    return (
+        (TR.ethereum__gas_limit, gas_limit_str),
+        (TR.ethereum__gas_price, gas_price_str),
+    )
+
+
+def get_fee_items_eip1559(
+    max_gas_fee: int,
+    max_priority_fee: int,
+    gas_limit: int,
+    network: EthereumNetworkInfo,
+) -> Iterable[tuple[str, str]]:
+    # EIP-1559
+    gas_limit_str = TR.ethereum__units_template.format(gas_limit)
+    max_gas_fee_str = format_ethereum_amount(
+        max_gas_fee, None, network, force_unit_gwei=True
+    )
+    max_priority_fee_str = format_ethereum_amount(
+        max_priority_fee, None, network, force_unit_gwei=True
+    )
+
+    return (
+        (TR.ethereum__gas_limit, gas_limit_str),
+        (TR.ethereum__max_gas_price, max_gas_fee_str),
+        (TR.ethereum__priority_fee, max_priority_fee_str),
+    )
+
+
+def format_ethereum_amount(
+    value: int,
+    token: EthereumTokenInfo | None,
+    network: EthereumNetworkInfo,
+    force_unit_gwei: bool = False,
+) -> str:
+    from trezor.strings import format_amount
+
+    if token:
+        suffix = token.symbol
+        decimals = token.decimals
+    else:
+        suffix = network.symbol
+        decimals = 18
+
+    if force_unit_gwei:
+        assert token is None
+        assert decimals >= 9
+        decimals = decimals - 9
+        suffix = "Gwei"
+    elif decimals > 9 and value < 10 ** (decimals - 9):
+        # Don't want to display wei values for tokens with small decimal numbers
+        suffix = "Wei " + suffix
+        decimals = 0
+
+    amount = format_amount(value, decimals)
+    return f"{amount} {suffix}"
+
+
+def get_account_and_path(address_n: list[int]) -> tuple[str | None, str | None]:
+    from apps.common import paths
+
+    from .keychain import PATTERNS_ADDRESS
+
+    if not address_n or len(address_n) < 2:
+        return (None, None)
+
+    slip44_id = address_n[1]  # it depends on the network (ETH vs ETC...)
+
+    account = paths.get_account_name("ETH", address_n, PATTERNS_ADDRESS, slip44_id)
+    account_path = paths.address_n_to_str(address_n)
+
+    return (account, account_path)
 
 
 def _from_bytes_bigendian_signed(b: bytes) -> int:

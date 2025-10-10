@@ -1,5 +1,6 @@
 from typing import TYPE_CHECKING
 
+from trezor import TR
 from trezor.enums import CardanoAddressType
 
 from .paths import SCHEMA_PAYMENT
@@ -41,7 +42,7 @@ class Credential:
         key_hash: bytes | None,
         script_hash: bytes | None,
         pointer: messages.CardanoBlockchainPointerType | None,
-    ):
+    ) -> None:
         self.type_name = type_name
         self.address_type = address_type
         self.path = path
@@ -163,13 +164,13 @@ class Credential:
 
     def get_title(self) -> str:
         if self.path:
-            return "path"
+            return TR.cardano__path
         elif self.key_hash:
-            return "key hash"
+            return TR.cardano__key_hash
         elif self.script_hash:
-            return "script"
+            return TR.cardano__script
         elif self.pointer:
-            return "pointer"
+            return TR.cardano__pointer
         else:
             return ""
 
@@ -192,9 +193,9 @@ class Credential:
             return [(None, bech32.encode(bech32.HRP_SCRIPT_HASH, self.script_hash))]
         elif pointer:
             return [
-                (f"Block: {pointer.block_index}", None),
-                (f"Transaction: {pointer.tx_index}", None),
-                (f"Certificate: {pointer.certificate_index}", None),
+                (f"{TR.cardano__block}: {pointer.block_index}", None),
+                (f"{TR.cardano__transaction}: {pointer.tx_index}", None),
+                (f"{TR.cardano__certificate}: {pointer.certificate_index}", None),
             ]
         else:
             return []
@@ -220,5 +221,7 @@ def _do_base_address_credentials_match(
     from .paths import CHAIN_STAKING_KEY
     from .utils import to_account_path
 
+    # Note: This checks that the account matches and the staking path address_index is 0.
+    # (Even though other values are allowed, we want to display them to the user.)
     path_to_staking_path = to_account_path(address_n) + [CHAIN_STAKING_KEY, 0]
     return address_n_staking == path_to_staking_path

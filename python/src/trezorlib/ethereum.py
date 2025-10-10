@@ -17,13 +17,12 @@
 import re
 from typing import TYPE_CHECKING, Any, AnyStr, Dict, List, Optional, Tuple
 
-from . import exceptions, messages
-from .tools import expect, prepare_message_bytes, session
+from . import definitions, exceptions, messages
+from .tools import prepare_message_bytes, session, unharden
 
 if TYPE_CHECKING:
     from .client import TrezorClient
     from .tools import Address
-    from .protobuf import MessageType
 
 
 def int_to_big_endian(value: int) -> bytes:
@@ -141,24 +140,52 @@ def encode_data(value: Any, type_name: str) -> bytes:
     raise ValueError(f"Unsupported data type for direct field encoding: {type_name}")
 
 
+def network_from_address_n(
+    address_n: "Address",
+    source: definitions.Source,
+) -> Optional[bytes]:
+    """Get network definition bytes based on address_n.
+
+    Tries to extract the slip44 identifier and lookup the network definition.
+    Returns None on failure.
+    """
+    if len(address_n) < 2:
+        return None
+
+    # unharden the slip44 part if needed
+    slip44 = unharden(address_n[1])
+    return source.get_network_by_slip44(slip44)
+
+
 # ====== Client functions ====== #
 
 
-@expect(messages.EthereumAddress, field="address", ret_type=str)
 def get_address(
-    client: "TrezorClient", n: "Address", show_display: bool = False
-) -> "MessageType":
-    return client.call(
-        messages.EthereumGetAddress(address_n=n, show_display=show_display)
+    client: "TrezorClient",
+    n: "Address",
+    show_display: bool = False,
+    encoded_network: Optional[bytes] = None,
+    chunkify: bool = False,
+) -> str:
+    resp = client.call(
+        messages.EthereumGetAddress(
+            address_n=n,
+            show_display=show_display,
+            encoded_network=encoded_network,
+            chunkify=chunkify,
+        ),
+        expect=messages.EthereumAddress,
     )
+    assert resp.address is not None
+    return resp.address
 
 
-@expect(messages.EthereumPublicKey)
 def get_public_node(
     client: "TrezorClient", n: "Address", show_display: bool = False
-) -> "MessageType":
+) -> messages.EthereumPublicKey:
     return client.call(
-        messages.EthereumGetPublicKey(address_n=n, show_display=show_display)
+        messages.EthereumGetPublicKey(address_n=n, show_display=show_display),
+        expect=messages.EthereumPublicKey,
     )
 
 
@@ -174,6 +201,8 @@ def sign_tx(
     data: Optional[bytes] = None,
     chain_id: Optional[int] = None,
     tx_type: Optional[int] = None,
+    definitions: Optional[messages.EthereumDefinitions] = None,
+    chunkify: bool = False,
 ) -> Tuple[int, bytes, bytes]:
     if chain_id is None:
         raise exceptions.TrezorException("Chain ID cannot be undefined")
@@ -187,6 +216,8 @@ def sign_tx(
         to=to,
         chain_id=chain_id,
         tx_type=tx_type,
+        definitions=definitions,
+        chunkify=chunkify,
     )
 
     if data is None:
@@ -231,6 +262,8 @@ def sign_tx_eip1559(
     max_gas_fee: int,
     max_priority_fee: int,
     access_list: Optional[List[messages.EthereumAccessList]] = None,
+    definitions: Optional[messages.EthereumDefinitions] = None,
+    chunkify: bool = False,
 ) -> Tuple[int, bytes, bytes]:
     length = len(data)
     data, chunk = data[1024:], data[:1024]
@@ -246,6 +279,8 @@ def sign_tx_eip1559(
         access_list=access_list,
         data_length=length,
         data_initial_chunk=chunk,
+        definitions=definitions,
+        chunkify=chunkify,
     )
 
     response = client.call(msg)
@@ -263,25 +298,32 @@ def sign_tx_eip1559(
     return response.signature_v, response.signature_r, response.signature_s
 
 
-@expect(messages.EthereumMessageSignature)
 def sign_message(
-    client: "TrezorClient", n: "Address", message: AnyStr
-) -> "MessageType":
+    client: "TrezorClient",
+    n: "Address",
+    message: AnyStr,
+    encoded_network: Optional[bytes] = None,
+    chunkify: bool = False,
+) -> messages.EthereumMessageSignature:
     return client.call(
         messages.EthereumSignMessage(
-            address_n=n, message=prepare_message_bytes(message)
-        )
+            address_n=n,
+            message=prepare_message_bytes(message),
+            encoded_network=encoded_network,
+            chunkify=chunkify,
+        ),
+        expect=messages.EthereumMessageSignature,
     )
 
 
-@expect(messages.EthereumTypedDataSignature)
 def sign_typed_data(
     client: "TrezorClient",
     n: "Address",
     data: Dict[str, Any],
     *,
     metamask_v4_compat: bool = True,
-) -> "MessageType":
+    definitions: Optional[messages.EthereumDefinitions] = None,
+) -> messages.EthereumTypedDataSignature:
     data = sanitize_typed_data(data)
     types = data["types"]
 
@@ -289,6 +331,7 @@ def sign_typed_data(
         address_n=n,
         primary_type=data["primaryType"],
         metamask_v4_compat=metamask_v4_compat,
+        definitions=definitions,
     )
     response = client.call(request)
 
@@ -344,36 +387,44 @@ def sign_typed_data(
         request = messages.EthereumTypedDataValueAck(value=encoded_data)
         response = client.call(request)
 
-    return response
+    return messages.EthereumTypedDataSignature.ensure_isinstance(response)
 
 
 def verify_message(
-    client: "TrezorClient", address: str, signature: bytes, message: AnyStr
+    client: "TrezorClient",
+    address: str,
+    signature: bytes,
+    message: AnyStr,
+    chunkify: bool = False,
 ) -> bool:
     try:
-        resp = client.call(
+        client.call(
             messages.EthereumVerifyMessage(
                 address=address,
                 signature=signature,
                 message=prepare_message_bytes(message),
-            )
+                chunkify=chunkify,
+            ),
+            expect=messages.Success,
         )
+        return True
     except exceptions.TrezorFailure:
         return False
-    return isinstance(resp, messages.Success)
 
 
-@expect(messages.EthereumTypedDataSignature)
 def sign_typed_data_hash(
     client: "TrezorClient",
     n: "Address",
     domain_hash: bytes,
     message_hash: Optional[bytes],
-) -> "MessageType":
+    encoded_network: Optional[bytes] = None,
+) -> messages.EthereumTypedDataSignature:
     return client.call(
         messages.EthereumSignTypedHash(
             address_n=n,
             domain_separator_hash=domain_hash,
             message_hash=message_hash,
-        )
+            encoded_network=encoded_network,
+        ),
+        expect=messages.EthereumTypedDataSignature,
     )

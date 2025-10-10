@@ -1,15 +1,17 @@
-from common import *
+# flake8: noqa: F403,F405
+from common import *  # isort:skip
 
 if not utils.BITCOIN_ONLY:
     from trezor.enums import TezosContractType
     from trezor.messages import TezosContractID
-    from apps.tezos.helpers import base58_encode_check, write_bool, CONTRACT_ID_SIZE
+
+    from apps.tezos.helpers import CONTRACT_ID_SIZE, base58_encode_check, write_bool
     from apps.tezos.sign_tx import (
-        write_uint8,
-        write_bytes_fixed,
         _encode_data_with_bool_prefix,
-        _encode_zarith,
         _encode_natural,
+        _encode_zarith,
+        write_bytes_fixed,
+        write_uint8,
     )
 
 
@@ -89,7 +91,15 @@ class TestTezosEncoding(unittest.TestCase):
 
     def test_tezos_encode_natural(self):
         inputs = [200000000000, 2000000, 159066, 200, 60000, 157000000, 0]
-        outputs = ["0080c0ee8ed20b", "008092f401", "009ab513", "008803", "00a0a907", "008085dd9501", "0000"]
+        outputs = [
+            "0080c0ee8ed20b",
+            "008092f401",
+            "009ab513",
+            "008803",
+            "00a0a907",
+            "008085dd9501",
+            "0000",
+        ]
 
         for i, o in zip(inputs, outputs):
             w = bytearray()

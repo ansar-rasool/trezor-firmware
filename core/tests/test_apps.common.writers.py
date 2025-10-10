@@ -1,4 +1,5 @@
-from common import *
+# flake8: noqa: F403,F405
+from common import *  # isort:skip
 
 import apps.common.writers as writers
 
@@ -26,7 +27,7 @@ class TestSeed(unittest.TestCase):
 
     def test_write_uint64_le(self):
         buf = bytearray()
-        writers.write_uint64_le(buf, 0x1234567890abcdef)
+        writers.write_uint64_le(buf, 0x1234567890ABCDEF)
         self.assertEqual(buf, b"\xef\xcd\xab\x90\x78\x56\x34\x12")
 
     def test_write_uint32_be(self):
@@ -36,7 +37,7 @@ class TestSeed(unittest.TestCase):
 
     def test_write_uint64_be(self):
         buf = bytearray()
-        writers.write_uint64_be(buf, 0x1234567890abcdef)
+        writers.write_uint64_be(buf, 0x1234567890ABCDEF)
         self.assertEqual(buf, b"\x12\x34\x56\x78\x90\xab\xcd\xef")
 
 

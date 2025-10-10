@@ -70,7 +70,6 @@ WIPE_CODE_TAG_SIZE = 8
 WIPE_CODE_EMPTY = "\0\0\0\0"
 
 # Size of counter. 4B integer and 8B tail.
-COUNTER_TAIL = 12
 COUNTER_TAIL_SIZE = 8
 COUNTER_MAX_TAIL = 64
 
@@ -78,23 +77,6 @@ COUNTER_MAX_TAIL = 64
 
 # Storage key of the PIN entry log and PIN success log.
 PIN_LOG_KEY = (PIN_APP_ID << 8) | 0x01
-
-# Length of items in the PIN entry log
-PIN_LOG_GUARD_KEY_SIZE = 4
-
-# Values used for the guard key integrity check.
-GUARD_KEY_MODULUS = 6311
-GUARD_KEY_REMAINDER = 15
-GUARD_KEY_RANDOM_MAX = (0xFFFFFFFF // GUARD_KEY_MODULUS) + 1
-
-# Length of both success log and entry log
-PIN_LOG_SIZE = 64
-
-# Used for in guard bits operations.
-LOW_MASK = 0x55555555
-
-# Log initialized to all FFs.
-ALL_FF_LOG = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
 
 # ----- Bytes -----
 
@@ -131,7 +113,7 @@ NORCOW_SECTOR_SIZE = 64 * 1024
 NORCOW_MAGIC = b"NRC2"
 
 # Norcow version, set in the storage header, but also as an encrypted item.
-NORCOW_VERSION = b"\x03\x00\x00\x00"
+NORCOW_VERSION = b"\x05\x00\x00\x00"
 
 # Norcow magic combined with the version, which is stored as its negation.
 NORCOW_MAGIC_AND_VERSION = NORCOW_MAGIC + bytes(

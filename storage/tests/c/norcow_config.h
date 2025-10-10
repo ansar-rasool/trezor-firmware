@@ -21,17 +21,16 @@
 #define __NORCOW_CONFIG_H__
 
 #include "flash.h"
+#include "test_layout.h"
 
 #define NORCOW_SECTOR_COUNT 2
 #define NORCOW_SECTOR_SIZE (64 * 1024)
-#define NORCOW_SECTORS \
-  { 4, 16 }
 
 /*
  * The length of the sector header in bytes. The header is preserved between
  * sector erasures.
  */
-#if defined TREZOR_MODEL_T
+#if defined TREZOR_MODEL_T2T1
 #define NORCOW_HEADER_LEN 0
 #elif defined TREZOR_MODEL_1
 #define NORCOW_HEADER_LEN (0x100)
@@ -42,6 +41,6 @@
 /*
  * Current storage version.
  */
-#define NORCOW_VERSION ((uint32_t)0x00000003)
+#define NORCOW_VERSION ((uint32_t)0x00000005)
 
 #endif

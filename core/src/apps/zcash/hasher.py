@@ -22,10 +22,12 @@ from apps.bitcoin.writers import (
 
 if TYPE_CHECKING:
     from typing import Sequence
-    from trezor.messages import TxInput, TxOutput, SignTx, PrevTx
-    from trezor.utils import Writer, HashWriter
-    from apps.common.coininfo import CoinInfo
+
+    from trezor.messages import PrevTx, SignTx, TxInput, TxOutput
+    from trezor.utils import HashWriter, Writer
+
     from apps.bitcoin.common import SigHashType
+    from apps.common.coininfo import CoinInfo
 
 
 def write_hash(w: Writer, hash: bytes) -> None:
@@ -44,7 +46,7 @@ def blake_hash_writer_32(personal: bytes) -> HashWriter:
 
 
 class ZcashHasher:
-    def __init__(self, tx: SignTx | PrevTx):
+    def __init__(self, tx: SignTx | PrevTx) -> None:
         from trezor.utils import empty_bytearray
 
         self.header = HeaderHasher(tx)
@@ -128,7 +130,7 @@ class ZcashHasher:
 
 
 class HeaderHasher:
-    def __init__(self, tx: SignTx | PrevTx):
+    def __init__(self, tx: SignTx | PrevTx) -> None:
         h = blake_hash_writer_32(b"ZTxIdHeadersHash")
 
         assert tx.version_group_id is not None

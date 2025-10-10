@@ -2,7 +2,9 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from trezor.messages import SignTx
+
     from apps.common.coininfo import CoinInfo
+
     from .tx_info import OriginalTxInfo
 
 # Checking previous transactions typically requires the following pieces of
@@ -12,10 +14,11 @@ _PREV_TX_MULTIPLIER = 5
 
 
 class Progress:
-    def __init__(self):
+    def __init__(self) -> None:
         self.progress = 0
         self.steps = 0
         self.signing = False
+        self.is_coinjoin = False
 
         # We don't know how long it will take to fetch the previous transactions,
         # so for each one we reserve _PREV_TX_MULTIPLIER steps in the signing
@@ -24,9 +27,10 @@ class Progress:
         # prev_tx input or output in the overall signing progress.
         self.prev_tx_step = 0
 
-    def init(self, tx: SignTx) -> None:
+    def init(self, tx: SignTx, is_coinjoin: bool = False) -> None:
         self.progress = 0
         self.signing = False
+        self.is_coinjoin = is_coinjoin
 
         # Step 1 and 2 - load inputs and outputs
         self.steps = tx.inputs_count + tx.outputs_count
@@ -93,9 +97,6 @@ class Progress:
         if serialize and not coin.decred:
             self.steps += tx.outputs_count
 
-        self.report_init()
-        self.report()
-
     def init_prev_tx(self, inputs: int, outputs: int) -> None:
         self.prev_tx_step = _PREV_TX_MULTIPLIER / (inputs + outputs)
 
@@ -108,20 +109,19 @@ class Progress:
         self.report()
 
     def report_init(self) -> None:
-        from trezor import workflow
-        from trezor.ui.layouts import bitcoin_progress
+        from trezor import TR, workflow
+        from trezor.ui.layouts.progress import bitcoin_progress, coinjoin_progress
 
+        progress_layout = coinjoin_progress if self.is_coinjoin else bitcoin_progress
         workflow.close_others()
-        if self.signing:
-            self.progress_layout = bitcoin_progress("Signing transaction")
-        else:
-            self.progress_layout = bitcoin_progress("Loading transaction")
+        text = (
+            TR.progress__signing_transaction
+            if self.signing
+            else TR.progress__loading_transaction
+        )
+        self.progress_layout = progress_layout(text)
 
     def report(self) -> None:
-        from trezor import utils
-
-        if utils.DISABLE_ANIMATION:
-            return
         p = int(1000 * self.progress / self.steps)
         self.progress_layout.report(p)
 

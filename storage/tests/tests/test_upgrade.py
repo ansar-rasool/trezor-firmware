@@ -1,5 +1,9 @@
+import pytest
 from c0.storage import Storage as StorageC0
+from c3.storage import Storage as StorageC3
 from c.storage import Storage as StorageC
+
+from python.src.norcow import NorcowBitwise
 from python.src.storage import Storage as StoragePy
 
 from . import common
@@ -50,15 +54,31 @@ def test_upgrade():
     for _ in range(10):
         assert not sc0.unlock("3")
 
-    sc1 = StorageC()
+    sc1 = StorageC("libtrezor-storage.so")
     sc1._set_flash_buffer(sc0._get_flash_buffer())
     sc1.init(common.test_uid)
     assert sc1.get_pin_rem() == 6
     check_values(sc1)
 
 
-def test_python_set_sectors():
-    sp0 = StoragePy()
+def test_upgrade_from_3():
+    sc3 = StorageC3("libtrezor-storage3.so")
+    sc3.init(common.test_uid)
+    assert sc3.unlock("")
+    set_values(sc3)
+    for _ in range(10):
+        assert not sc3.unlock("3")
+
+    sc = StorageC("libtrezor-storage.so")
+    sc._set_flash_buffer(sc3._get_flash_buffer())
+    sc.init(common.test_uid)
+    assert sc.get_pin_rem() == 6
+    check_values(sc)
+
+
+@pytest.mark.parametrize("nc_class", [NorcowBitwise])
+def test_python_set_sectors(nc_class):
+    sp0 = StoragePy(nc_class)
     sp0.init(common.test_uid)
     assert sp0.unlock("")
     set_values(sp0)
@@ -66,7 +86,7 @@ def test_python_set_sectors():
         assert not sp0.unlock("3")
     assert sp0.get_pin_rem() == 6
 
-    sp1 = StoragePy()
+    sp1 = StoragePy(nc_class)
     sp1.nc._set_sectors(sp0._dump())
     sp1.init(common.test_uid)
     common.memory_equals(sp0, sp1)

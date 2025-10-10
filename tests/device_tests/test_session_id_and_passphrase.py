@@ -19,10 +19,13 @@ import random
 import pytest
 
 from trezorlib import device, exceptions, messages
+from trezorlib.debuglink import LayoutType
 from trezorlib.debuglink import TrezorClientDebugLink as Client
 from trezorlib.exceptions import TrezorFailure
 from trezorlib.messages import FailureType, SafetyCheckLevel
 from trezorlib.tools import parse_path
+
+from .. import translations as TR
 
 XPUB_PASSPHRASES = {
     "A": "xpub6CekxGcnqnJ6osfY4Rrq7W5ogFtR54KUvz4H16XzaQuukMFZCGebEpVznfq4yFcKEmYyShwj2UKjL7CazuNSuhdkofF4mHabHkLxCMVvsqG",
@@ -239,7 +242,7 @@ def test_session_enable_passphrase(client: Client):
     assert _get_xpub(client, passphrase="A") == XPUB_PASSPHRASES["A"]
 
 
-@pytest.mark.skip_t1
+@pytest.mark.models("core")
 @pytest.mark.setup_client(passphrase=True)
 def test_passphrase_on_device(client: Client):
     _init_session(client)
@@ -278,7 +281,7 @@ def test_passphrase_on_device(client: Client):
     assert response.xpub == XPUB_PASSPHRASES["A"]
 
 
-@pytest.mark.skip_t1
+@pytest.mark.models("core")
 @pytest.mark.setup_client(passphrase=True)
 def test_passphrase_always_on_device(client: Client):
     # Let's start the communication by calling Initialize.
@@ -312,7 +315,7 @@ def test_passphrase_always_on_device(client: Client):
     assert response.xpub == XPUB_PASSPHRASES["A"]
 
 
-@pytest.mark.skip_t2
+@pytest.mark.models("legacy")
 @pytest.mark.setup_client(passphrase="")
 def test_passphrase_on_device_not_possible_on_t1(client: Client):
     # This setting makes no sense on T1.
@@ -376,7 +379,7 @@ def test_passphrase_length(client: Client):
     call(passphrase="A" * 49 + "š", expected_result=False)
 
 
-@pytest.mark.skip_t1
+@pytest.mark.models("core")
 @pytest.mark.setup_client(passphrase=True)
 def test_hide_passphrase_from_host(client: Client):
     # Without safety checks, turning it on fails
@@ -394,12 +397,16 @@ def test_hide_passphrase_from_host(client: Client):
 
         def input_flow():
             yield
-            layout = client.debug.wait_layout()
-            assert (
-                "Passphrase provided by host will be used but will not be displayed due to the device settings."
-                in layout.get_content()
-            )
-            client.debug.press_yes()
+            content = client.debug.read_layout().text_content().lower()
+            assert TR.passphrase__from_host_not_shown[:50].lower() in content
+            if client.layout_type in (LayoutType.Bolt, LayoutType.Delizia):
+                client.debug.press_yes()
+            elif client.layout_type is LayoutType.Caesar:
+                client.debug.press_right()
+                client.debug.press_right()
+                client.debug.press_yes()
+            else:
+                raise KeyError
 
         client.watch_layout()
         client.set_input_flow(input_flow)
@@ -425,14 +432,15 @@ def test_hide_passphrase_from_host(client: Client):
 
         def input_flow():
             yield
-            layout = client.debug.wait_layout()
-            assert "Next screen will show the passphrase!" in layout.get_content()
+            assert (
+                TR.passphrase__next_screen_will_show_passphrase
+                in client.debug.read_layout().text_content()
+            )
             client.debug.press_yes()
 
             yield
-            layout = client.debug.wait_layout()
-            assert "Use this passphrase?" in layout.get_content()
-            assert passphrase in layout.get_content()
+            assert client.debug.read_layout().title() == TR.passphrase__title_confirm
+            assert passphrase in client.debug.read_layout().text_content()
             client.debug.press_yes()
 
         client.watch_layout()
@@ -466,7 +474,7 @@ def _get_xpub_cardano(client: Client, passphrase):
     return response.xpub
 
 
-@pytest.mark.skip_t1
+@pytest.mark.models("core")
 @pytest.mark.altcoin
 @pytest.mark.setup_client(passphrase=True)
 def test_cardano_passphrase(client: Client):

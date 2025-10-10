@@ -27,8 +27,6 @@ HERE = Path(__file__).resolve().parent
 MICROPYTHON = HERE / "build" / "unix" / "trezor-emu-core"
 SRC_DIR = HERE / "src"
 
-PROFILING_WRAPPER = HERE / "prof" / "prof.py"
-
 PROFILE_BASE = Path.home() / ".trezoremu"
 
 TREZOR_STORAGE_FILES = (
@@ -67,20 +65,31 @@ def watch_emulator(emulator: CoreEmulator) -> int:
     return 0
 
 
-def run_debugger(emulator: CoreEmulator) -> None:
+def run_debugger(emulator: CoreEmulator, gdb_script_file: str | Path | None, valgrind: bool = False, run_command: list[str] = []) -> None:
     os.chdir(emulator.workdir)
     env = emulator.make_env()
-    if platform.system() == "Darwin":
+    if valgrind:
+        dbg_command = ["valgrind", "-v", "--tool=callgrind", "--read-inline-info=yes", str(emulator.executable)] + emulator.make_args()
+    elif platform.system() == "Darwin":
         env["PATH"] = "/usr/bin"
-        os.execvpe(
-            "lldb",
-            ["lldb", "-f", str(emulator.executable), "--"] + emulator.make_args(),
-            env,
-        )
+        dbg_command = ["lldb", "-f", str(emulator.executable), "--"] + emulator.make_args()
     else:
-        os.execvpe(
-            "gdb", ["gdb", "--args", str(emulator.executable)] + emulator.make_args(), env
-        )
+        # Optionally run a gdb script from a file
+        if gdb_script_file is None:
+            dbg_command = ["gdb"]
+        else:
+            dbg_command = ["gdb", "-x", str(HERE / gdb_script_file)]
+        dbg_command += ["--args", str(emulator.executable)]
+        dbg_command += emulator.make_args()
+
+    if not run_command:
+        os.execvpe(dbg_command[0], dbg_command, env)
+    else:
+        dbg_process = subprocess.Popen(dbg_command, env=env)
+        run_process = subprocess.Popen(run_command, env=env, shell=True)
+        rc = run_process.wait()
+        dbg_process.send_signal(signal.SIGINT)
+        sys.exit(rc)
 
 
 def _from_env(name: str) -> bool:
@@ -110,6 +119,8 @@ def _from_env(name: str) -> bool:
 @click.option("-q", "--quiet", is_flag=True, help="Silence emulator output")
 @click.option("-r", "--record-dir", help="Directory where to record screen changes")
 @click.option("-s", "--slip0014", is_flag=True, help="Initialize device with SLIP-14 seed (all all all...)")
+@click.option("-S", "--script-gdb-file", type=click.Path(exists=True, dir_okay=False), help="Run gdb with an init file")
+@click.option("-V", "--valgrind", is_flag=True, help="Use valgrind instead of debugger (-D)")
 @click.option("-t", "--temporary-profile", is_flag=True, help="Create an empty temporary profile")
 @click.option("-w", "--watch", is_flag=True, help="Restart emulator if sources change")
 @click.option("-X", "--extra-arg", "extra_args", multiple=True, help="Extra argument to pass to micropython")
@@ -135,6 +146,8 @@ def cli(
     quiet: bool,
     record_dir: Optional[str],
     slip0014: bool,
+    script_gdb_file: str | Path | None,
+    valgrind: bool,
     temporary_profile: bool,
     watch: bool,
     extra_args: list[str],
@@ -153,6 +166,12 @@ def cli(
 
     By default, emulator output goes to stdout. If silenced with -q, it is redirected
     to $TREZOR_PROFILE_DIR/trezor.log. You can also specify a custom path with -o.
+
+    This emulator is for development purposes only. Any other usage of the emulator is
+    discouraged. Doing so runs the risk of losing funds. It uses a pseudo random number
+    generator, and thus no guarantee on its entropy is made. Security and hardening
+    efforts are only made available on physical Trezor hardware.
+
     """
     if executable:
         executable = Path(executable)
@@ -184,7 +203,7 @@ def cli(
         raise click.ClickException("Cannot load mnemonics in production mode")
 
     if profiling or alloc_profiling:
-        main_args = [str(PROFILING_WRAPPER)]
+        main_args = ["-m", "prof"]
     elif main:
         main_args = [main]
     else:
@@ -252,8 +271,8 @@ def cli(
     if alloc_profiling:
         os.environ["TREZOR_MEMPERF"] = "1"
 
-    if debugger:
-        run_debugger(emulator)
+    if debugger or valgrind:
+        run_debugger(emulator, script_gdb_file, valgrind, command)
         raise RuntimeError("run_debugger should not return")
 
     emulator.start()

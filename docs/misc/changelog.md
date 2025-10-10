@@ -7,9 +7,9 @@ at the time a new version is released. There are currently 8 such changelogs
 for different components of the repository:
 
 * **[`core/CHANGELOG.md`](https://github.com/trezor/trezor-firmware/blob/master/core/CHANGELOG.md)** for Trezor T firmware
-* **[`core/embed/boardloader/CHANGELOG.md`](https://github.com/trezor/trezor-firmware/blob/master/core/embed/boardloader/CHANGELOG.md)** for Trezor T boardloader
-* **[`core/embed/bootloader/CHANGELOG.md`](https://github.com/trezor/trezor-firmware/blob/master/core/embed/bootloader/CHANGELOG.md)** for Trezor T bootloader
-* **[`core/embed/bootloader_ci/CHANGELOG.md`](https://github.com/trezor/trezor-firmware/blob/master/core/embed/bootloader_ci/CHANGELOG.md)** for Trezor T CI bootloader
+* **[`core/embed/projects/boardloader/CHANGELOG.md`](https://github.com/trezor/trezor-firmware/blob/master/core/embed/projects/boardloader/CHANGELOG.md)** for Trezor T boardloader
+* **[`core/embed/projects/bootloader/CHANGELOG.md`](https://github.com/trezor/trezor-firmware/blob/master/core/embed/projects/bootloader/CHANGELOG.md)** for Trezor T bootloader
+* **[`core/embed/projects/bootloader_ci/CHANGELOG.md`](https://github.com/trezor/trezor-firmware/blob/master/core/embed/projects/bootloader_ci/CHANGELOG.md)** for Trezor T CI bootloader
 * **[`legacy/firmware/CHANGELOG.md`](https://github.com/trezor/trezor-firmware/blob/master/legacy/firmware/CHANGELOG.md)** for Trezor 1 firmware
 * **[`legacy/bootloader/CHANGELOG.md`](https://github.com/trezor/trezor-firmware/blob/master/legacy/bootloader/CHANGELOG.md)** for Trezor 1 bootloader
 * **[`legacy/intermediate_fw/CHANGELOG.md`](https://github.com/trezor/trezor-firmware/blob/master/legacy/intermediate_fw/CHANGELOG.md)** for Trezor 1 intermediate firmware
@@ -39,7 +39,8 @@ Changelog](https://keepachangelog.com/en/1.0.0/) format:
 * `incompatible` (for backwards incompatible changes)
 
 Entries are added by creating files in the `.changelog.d` directory where the
-file name is `<number>.<type>` and contains single line describing the change.
+file name is `<number>.<type>` and contains single line describing the change,
+ending with a period.
 As an example, an entry describing bug fix for issue 1234 in Trezor T firmware
 is added by creating file `core/.changelog.d/1234.fixed`. The file can be
 formatted with markdown. If more entries are desired for single issue number and
@@ -47,6 +48,13 @@ type you can add numeral suffix, e.g. `1234.fixed.1`, `1234.fixed.2`, etc.
 
 You can also add this entry using your `$VISUAL` editor by running `towncrier
 create --edit 1234.fixed` in the `core` directory.
+
+### Changes that only affect a subset of hardware models
+
+If an entry is only relevant for certain model, put the internal name in square
+brackets at the beginning of the entry. If there are multiple relevant models,
+separate them by comas. Examples: `[T2T1] Fix some bug.`, `[T2T1,T2W1] Fix all
+bugs.`.
 
 ## Not adding changelog entry
 
@@ -58,12 +66,12 @@ message to exclude that commit from the check.
 ## Generating changelog at the time of release
 
 When it's time to release new version of a repository component the formatted
-changelog needs to be generated using the `tools/generate-changelog.py` script.
+changelog needs to be generated using the `tools/changelog.py generate` command.
 It accepts repo subdirectory and the version number as arguments and you can
 specify the release date if it's different from today's date:
 
 ```
-tools/generate-changelog.py --date "20th April 2021" legacy/firmware 1.10.0
+tools/changelog.py generate --date "20th April 2021" legacy/firmware 1.10.0
 ```
 
 ## Cherry-picking changes to release branch

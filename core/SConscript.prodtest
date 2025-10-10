@@ -1,115 +1,168 @@
 # pylint: disable=E0602
 
 import os
-import tools
+import tools, models, ui
 
-TREZOR_MODEL = ARGUMENTS.get('TREZOR_MODEL', 'T')
+TREZOR_MODEL = ARGUMENTS.get('TREZOR_MODEL', 'T2T1')
 CMAKELISTS = int(ARGUMENTS.get('CMAKELISTS', 0))
+PRODUCTION = ARGUMENTS.get('PRODUCTION', '0') == '1'
+BOOTLOADER_DEVEL = ARGUMENTS.get('BOOTLOADER_DEVEL', '0') == '1'
+HW_REVISION = ARGUMENTS.get('HW_REVISION', None)
+UI_DEBUG_OVERLAY = ARGUMENTS.get('UI_DEBUG_OVERLAY', '0') == '1'
+
+FEATURE_FLAGS = {
+    "AES_GCM": True,
+}
+
+FEATURES_WANTED = ["input", "sbu", "nfc", "sd_card", "rgb_led", "usb", "consumption_mask", "optiga", "haptic", "tropic", "ble", "hw_revision"]
 
 CCFLAGS_MOD = ''
 CPPPATH_MOD = []
-CPPDEFINES_MOD = []
+CPPDEFINES_MOD = [
+    'KERNEL_MODE',
+    'AES_128',
+    'USE_INSECURE_PRNG',
+]
 SOURCE_MOD = []
-
-if TREZOR_MODEL in ('1', 'R'):
-    FONT_NORMAL=None
-    FONT_DEMIBOLD=None
-    FONT_BOLD='Font_PixelOperator_Bold_8'
-    FONT_MONO=None
-if TREZOR_MODEL in ('T', ):
-    FONT_NORMAL=None
-    FONT_DEMIBOLD=None
-    FONT_BOLD='Font_Roboto_Bold_20'
-    FONT_MONO=None
+SOURCE_MOD_CRYPTO = []
+CPPDEFINES_HAL = []
+SOURCE_HAL = []
+PATH_HAL = []
+RUST_UI_FEATURES = []
 
 # modtrezorcrypto
 CPPPATH_MOD += [
     'vendor/trezor-crypto',
+    'vendor/trezor-storage',
 ]
 SOURCE_MOD += [
+    'vendor/trezor-storage/flash_area.c',
+]
+SOURCE_MOD_CRYPTO += [
+    'vendor/trezor-crypto/aes/aes_modes.c',
+    'vendor/trezor-crypto/aes/aesccm.c',
+    'vendor/trezor-crypto/aes/aescrypt.c',
+    'vendor/trezor-crypto/aes/aeskey.c',
+    'vendor/trezor-crypto/aes/aestab.c',
+    'vendor/trezor-crypto/bignum.c',
+    'vendor/trezor-crypto/blake256.c',
+    'vendor/trezor-crypto/blake2b.c',
+    'vendor/trezor-crypto/buffer.c',
     'vendor/trezor-crypto/chacha_drbg.c',
     'vendor/trezor-crypto/chacha20poly1305/chacha_merged.c',
+    'vendor/trezor-crypto/der.c',
+    'vendor/trezor-crypto/ecdsa.c',
+    'vendor/trezor-crypto/ed25519-donna/curve25519-donna-32bit.c',
+    'vendor/trezor-crypto/ed25519-donna/curve25519-donna-helpers.c',
+    'vendor/trezor-crypto/ed25519-donna/curve25519-donna-scalarmult-base.c',
+    'vendor/trezor-crypto/ed25519-donna/ed25519-donna-32bit-tables.c',
+    'vendor/trezor-crypto/ed25519-donna/ed25519-donna-basepoint-table.c',
+    'vendor/trezor-crypto/ed25519-donna/ed25519-donna-impl-base.c',
+    'vendor/trezor-crypto/ed25519-donna/ed25519-keccak.c',
+    'vendor/trezor-crypto/ed25519-donna/ed25519-sha3.c',
+    'vendor/trezor-crypto/ed25519-donna/ed25519.c',
+    'vendor/trezor-crypto/ed25519-donna/modm-donna-32bit.c',
+    'vendor/trezor-crypto/groestl.c',
+    'vendor/trezor-crypto/hasher.c',
+    'vendor/trezor-crypto/hmac.c',
+    'vendor/trezor-crypto/hmac_drbg.c',
     'vendor/trezor-crypto/memzero.c',
+    'vendor/trezor-crypto/nist256p1.c',
     'vendor/trezor-crypto/rand.c',
+    'vendor/trezor-crypto/ripemd160.c',
+    'vendor/trezor-crypto/rfc6979.c',
+    'vendor/trezor-crypto/secp256k1.c',
     'vendor/trezor-crypto/sha2.c',
+    'vendor/trezor-crypto/sha3.c',
+    'vendor/trezor-crypto/tls_prf.c',
 ]
+
+# AES-GCM
+if FEATURE_FLAGS["AES_GCM"]:
+    CPPDEFINES_MOD += [
+        'USE_AES_GCM',
+        'AES_VAR',
+    ]
+    SOURCE_MOD_CRYPTO += [
+        'vendor/trezor-crypto/aes/gf128mul.c',
+        'vendor/trezor-crypto/aes/aesgcm.c',
+    ]
+
 
 # modtrezorui
 CPPPATH_MOD += [
-        'vendor/micropython/lib/uzlib',
+        'vendor/micropython/lib/uzlib'
 ]
 
 SOURCE_MOD += [
-    'embed/extmod/modtrezorui/display.c',
-    'embed/extmod/modtrezorui/colors.c',
-    'embed/extmod/modtrezorui/fonts/fonts.c',
-    'embed/extmod/modtrezorui/fonts/font_bitmap.c',
-    'embed/extmod/modtrezorui/qr-code-generator/qrcodegen.c',
+    'embed/gfx/bitblt/gfx_bitblt.c',
+    'embed/gfx/bitblt/gfx_bitblt_rgb565.c',
+    'embed/gfx/bitblt/gfx_bitblt_rgba8888.c',
+    'embed/gfx/bitblt/gfx_bitblt_mono8.c',
+    'embed/gfx/fonts/font_bitmap.c',
+    'embed/gfx/gfx_color.c',
+    'embed/gfx/gfx_draw.c',
+    'embed/gfx/terminal.c',
+    'embed/io/display/display_utils.c',
+    'embed/util/image/image.c',
+    'embed/util/rsod/rsod.c',
+    'embed/util/scm_revision/scm_revision.c',
+    'embed/rtl/cli.c',
+    'embed/rtl/error_handling.c',
+    'embed/rtl/mini_printf.c',
+    'embed/rtl/strutils.c',
+    'embed/rtl/unit_test.c',
     'vendor/micropython/lib/uzlib/adler32.c',
     'vendor/micropython/lib/uzlib/crc32.c',
     'vendor/micropython/lib/uzlib/tinflate.c',
 ]
 
-SOURCE_STMHAL = [
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_cortex.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_dma.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_flash.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_flash_ex.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_gpio.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_i2c.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_pcd.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_pcd_ex.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_pwr.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_rcc.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_spi.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sram.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_tim.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_tim_ex.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_ll_fmc.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_ll_sdmmc.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_ll_usb.c',
-]
+ui.init_ui(TREZOR_MODEL, "prodtest", RUST_UI_FEATURES)
+
+env = Environment(
+    ENV=os.environ,
+    CFLAGS='%s -DPRODUCTION=%s' % (ARGUMENTS.get('CFLAGS', ''), ARGUMENTS.get('PRODUCTION', '0')),
+    CPPDEFINES_IMPLICIT=[],
+    CPPDEFPREFIX="-D'",
+    CPPDEFSUFFIX="'",
+)
+
+FEATURES_AVAILABLE = models.configure_board(TREZOR_MODEL, HW_REVISION, FEATURES_WANTED, env, CPPDEFINES_HAL, SOURCE_HAL, PATH_HAL)
 
 SOURCE_PRODTEST = [
-    'embed/prodtest/startup.s',
-    'embed/prodtest/header.S',
-    'embed/prodtest/main.c',
+    'embed/projects/prodtest/header.S',
+    'embed/projects/prodtest/main.c',
+    'embed/projects/prodtest/cmd/prodtest_boardloader.c',
+    'embed/projects/prodtest/cmd/prodtest_ble.c',
+    'embed/projects/prodtest/cmd/prodtest_bootloader.c',
+    'embed/projects/prodtest/cmd/prodtest_button.c',
+    'embed/projects/prodtest/cmd/prodtest_display.c',
+    'embed/projects/prodtest/cmd/prodtest_prodtest.c',
+    'embed/projects/prodtest/cmd/prodtest_get_cpuid.c',
+    'embed/projects/prodtest/cmd/prodtest_haptic.c',
+    'embed/projects/prodtest/cmd/prodtest_help.c',
+    'embed/projects/prodtest/cmd/prodtest_hw_revision.c',
+    'embed/projects/prodtest/cmd/prodtest_nfc.c',
+    'embed/projects/prodtest/cmd/prodtest_nrf.c',
+    'embed/projects/prodtest/cmd/prodtest_optiga.c',
+    'embed/projects/prodtest/cmd/prodtest_otp_batch.c',
+    'embed/projects/prodtest/cmd/prodtest_otp_variant.c',
+    'embed/projects/prodtest/cmd/prodtest_ping.c',
+    'embed/projects/prodtest/cmd/prodtest_pmic.c',
+    'embed/projects/prodtest/cmd/prodtest_powerctl.c',
+    'embed/projects/prodtest/cmd/prodtest_reboot.c',
+    'embed/projects/prodtest/cmd/prodtest_rgbled.c',
+    'embed/projects/prodtest/cmd/prodtest_sdcard.c',
+    'embed/projects/prodtest/cmd/prodtest_tamper.c',
+    'embed/projects/prodtest/cmd/prodtest_sbu.c',
+    'embed/projects/prodtest/cmd/prodtest_touch.c',
+    'embed/projects/prodtest/cmd/prodtest_tropic.c',
+    'embed/projects/prodtest/cmd/prodtest_unit_test.c',
+    'embed/projects/prodtest/cmd/prodtest_wpc.c',
 ]
-
-SOURCE_TREZORHAL = [
-    'embed/trezorhal/common.c',
-    'embed/trezorhal/dma.c',
-    'embed/trezorhal/flash.c',
-    'embed/trezorhal/mini_printf.c',
-    'embed/trezorhal/random_delays.c',
-    'embed/trezorhal/rng.c',
-    'embed/trezorhal/sbu.c',
-    'embed/trezorhal/sdcard.c',
-    'embed/trezorhal/stm32.c',
-    'embed/trezorhal/systick.c',
-    'embed/trezorhal/touch.c',
-    'embed/trezorhal/usb.c',
-    'embed/trezorhal/usbd_conf.c',
-    'embed/trezorhal/usbd_core.c',
-    'embed/trezorhal/usbd_ctlreq.c',
-    'embed/trezorhal/usbd_ioreq.c',
-    'embed/trezorhal/util.s',
-    'embed/trezorhal/vectortable.s',
-]
-
-# fonts
-tools.add_font('NORMAL', FONT_NORMAL, CPPDEFINES_MOD, SOURCE_MOD)
-tools.add_font('BOLD', FONT_BOLD, CPPDEFINES_MOD, SOURCE_MOD)
-tools.add_font('DEMIBOLD', FONT_DEMIBOLD, CPPDEFINES_MOD, SOURCE_MOD)
-tools.add_font('MONO', FONT_MONO, CPPDEFINES_MOD, SOURCE_MOD)
-
-env = Environment(ENV=os.environ, CFLAGS='%s -DPRODUCTION=%s' % (ARGUMENTS.get('CFLAGS', ''), ARGUMENTS.get('PRODUCTION', '0')))
-
-tools.configure_board(TREZOR_MODEL, env, CPPDEFINES_MOD, SOURCE_TREZORHAL)
 
 env.Replace(
+    CAT='cat',
     CP='cp',
     AS='arm-none-eabi-as',
     AR='arm-none-eabi-ar',
@@ -124,54 +177,54 @@ env.Replace(
 env.Replace(
     TREZOR_MODEL=TREZOR_MODEL, )
 
-if TREZOR_MODEL in ('T', 'R'):
-    CPU_ASFLAGS = '-mthumb -mcpu=cortex-m4 -mfloat-abi=hard -mfpu=fpv4-sp-d16'
-    CPU_CCFLAGS = '-mthumb -mcpu=cortex-m4 -mfloat-abi=hard -mfpu=fpv4-sp-d16 -mtune=cortex-m4 '
-    CPU_MODEL   = 'STM32F427xx'
-elif TREZOR_MODEL in ('1',):
-    CPU_ASFLAGS = '-mthumb -mcpu=cortex-m3 -mfloat-abi=soft'
-    CPU_CCFLAGS = '-mthumb -mtune=cortex-m3 -mcpu=cortex-m3 -mfloat-abi=soft '
-    CPU_MODEL   = 'STM32F405xx'
-else:
-    raise ValueError('Unknown Trezor model')
+ALLPATHS = [
+        'embed/rust',
+        'embed/projects/prodtest',
+        'embed/rtl/inc',
+        'embed/models',
+        'embed/gfx/inc',
+        'embed/sys/bsp/inc',
+        'embed/util/image/inc',
+        'embed/util/rsod/inc',
+        'embed/util/scm_revision/inc',
+        'embed/util/translations/inc',
+        'embed/upymod/modtrezorui',
+    ]
+
+ALLPATHS += CPPPATH_MOD + PATH_HAL
+
 
 env.Replace(
     COPT=env.get('ENV').get('OPTIMIZE', '-Os'),
     CCFLAGS='$COPT '
     '-g3 '
     '-nostdlib '
-    '-std=gnu99 -Wall -Werror -Wdouble-promotion -Wpointer-arith -Wno-missing-braces -fno-common '
+    '-std=gnu11 -Wall -Werror -Wdouble-promotion -Wpointer-arith -Wno-missing-braces -fno-common '
     '-fsingle-precision-constant -fdata-sections -ffunction-sections '
     '-ffreestanding '
     '-fstack-protector-all '
-    + CPU_CCFLAGS + CCFLAGS_MOD,
+    +  env.get('ENV')["CPU_CCFLAGS"] + CCFLAGS_MOD,
     CCFLAGS_QSTR='-DNO_QSTR -DN_X64 -DN_X86 -DN_THUMB',
-    LINKFLAGS='-T embed/prodtest/memory.ld -Wl,--gc-sections -Wl,-Map=build/prodtest/prodtest.map -Wl,--warn-common',
-    CPPPATH=[
-        'embed/prodtest',
-        'embed/trezorhal',
-        'embed/extmod/modtrezorui',
-        'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Inc',
-        'vendor/micropython/lib/stm32lib/CMSIS/STM32F4xx/Include',
-        'vendor/micropython/lib/cmsis/inc',
-    ] + CPPPATH_MOD,
+    LINKFLAGS=['-Tbuild/prodtest/memory.ld', '-Wl,--gc-sections', '-Wl,--print-memory-usage', '-Wl,-Map=build/prodtest/prodtest.map', '-Wl,--warn-common'],
+    CPPPATH=ALLPATHS,
     CPPDEFINES=[
+        'TREZOR_PRODTEST',
         'TREZOR_MODEL_'+TREZOR_MODEL,
-        CPU_MODEL,
+        'ARM_USER_MODE',
         'USE_HAL_DRIVER',
-        ('STM32_HAL_H', '"<stm32f4xx.h>"'),
-    ] + CPPDEFINES_MOD,
-    ASFLAGS=CPU_ASFLAGS,
-    ASPPFLAGS='$CFLAGS $CCFLAGS', )
+    ] + CPPDEFINES_MOD + CPPDEFINES_HAL,
+    ASFLAGS=env.get('ENV')['CPU_ASFLAGS'],
+    ASPPFLAGS='$CFLAGS $CCFLAGS',
+    )
 
 env.Replace(
-    HEADERTOOL='tools/headertool.py',
+    HEADERTOOL='headertool',
 )
 
 
 env.Replace(
-    ALLSOURCES=SOURCE_MOD + SOURCE_PRODTEST + SOURCE_STMHAL + SOURCE_TREZORHAL,
-    ALLDEFS=tools.get_defs_for_cmake(env['CPPDEFINES']))
+    ALLSOURCES=SOURCE_MOD + SOURCE_MOD_CRYPTO + SOURCE_PRODTEST + SOURCE_HAL,
+    ALLDEFS=tools.get_defs_for_cmake(env['CPPDEFINES'] + env['CPPDEFINES_IMPLICIT']))
 
 cmake_gen = env.Command(
     target='CMakeLists.txt',
@@ -186,29 +239,71 @@ cmake_gen = env.Command(
 
 obj_program = []
 obj_program.extend(env.Object(source=SOURCE_MOD))
+obj_program.extend(env.Object(source=SOURCE_MOD_CRYPTO, CCFLAGS='$CCFLAGS -ftrivial-auto-var-init=zero'))
 obj_program.extend(env.Object(source=SOURCE_PRODTEST))
-obj_program.extend(env.Object(source=SOURCE_STMHAL))
-obj_program.extend(env.Object(source=SOURCE_TREZORHAL))
+obj_program.extend(env.Object(source=SOURCE_HAL))
 
-VENDORHEADER = 'embed/vendorheader/vendorheader_' + ('unsafe_signed_prod.bin' if ARGUMENTS.get('PRODUCTION', '0') == '0' else 'satoshilabs_signed_prod.bin')
+#
+# Rust library
+#
+features = ['prodtest',] + FEATURES_AVAILABLE + RUST_UI_FEATURES
 
-obj_program.extend(
-    env.Command(
-        target='embed/prodtest/vendorheader.o',
-        source=VENDORHEADER,
-        action='$OBJCOPY -I binary -O elf32-littlearm -B arm'
-        ' --rename-section .data=.vendorheader,alloc,load,readonly,contents'
-        ' $SOURCE $TARGET', ))
+if UI_DEBUG_OVERLAY:
+    features.append('ui_debug_overlay')
+
+
+rust = tools.add_rust_lib(
+    env=env,
+    build='prodtest',
+    profile='release',
+    features=features,
+    all_paths=ALLPATHS,
+    build_dir=str(Dir('.').abspath),
+)
+
+
+if (vh := ARGUMENTS.get("VENDOR_HEADER", None)):
+    VENDORHEADER = vh
+elif (vh := os.environ.get("VENDOR_HEADER", None)):
+    # TODO looking at envvars in a build script is not very nice. But justifiable in case
+    # of vendor header which does not affect reproducibility of the build. Nonetheless,
+    # we should figure out a cleaner way to pass in this argument, without having to teach
+    # the Makefile about it.
+    VENDORHEADER = f'embed/models/{TREZOR_MODEL}/vendorheader/{vh}'
+elif PRODUCTION:
+    VENDORHEADER = f'embed/models/{TREZOR_MODEL}/vendorheader/vendorheader_prodtest_signed_prod.bin'
+elif BOOTLOADER_DEVEL:
+    VENDORHEADER = f'embed/models/{TREZOR_MODEL}/vendorheader/vendorheader_dev_DO_NOT_SIGN_signed_dev.bin'
+else:
+    VENDORHEADER = f'embed/models/{TREZOR_MODEL}/vendorheader/vendorheader_unsafe_signed_prod.bin'
+
+
+tools.embed_raw_binary(
+        obj_program,
+        env,
+        'vendorheader',
+        'embed/projects/firmware/vendorheader.o',
+        VENDORHEADER,
+        )
+
+linkerscript_gen = env.Command(
+    target='memory.ld',
+    source=[f'embed/models/{TREZOR_MODEL}/memory.ld', env.get('ENV')['LINKER_SCRIPT'].format(target='prodtest')],
+    action='$CAT $SOURCES > $TARGET',
+)
 
 program_elf = env.Command(
     target='prodtest.elf',
     source=obj_program,
     action=
-    '$LINK -o $TARGET $CCFLAGS $CFLAGS $LINKFLAGS $SOURCES -lc_nano -lgcc',
+    '$LINK -o $TARGET $CCFLAGS $CFLAGS $SOURCES $LINKFLAGS -lc_nano -lgcc -lm',
 )
 
-BINARY_NAME = f"build/prodtest/prodtest-{tools.get_model_identifier(TREZOR_MODEL)}"
-BINARY_NAME += "-" + tools.get_version('embed/prodtest/version.h')
+env.Depends(program_elf, linkerscript_gen)
+env.Depends(program_elf, rust)
+
+BINARY_NAME = f"build/prodtest/prodtest-{TREZOR_MODEL}"
+BINARY_NAME += "-" + tools.get_version('embed/projects/prodtest/version.h')
 BINARY_NAME += "-" + tools.get_git_revision_short_hash()
 BINARY_NAME += "-dirty" if tools.get_git_modified() else ""
 BINARY_NAME += ".bin"
@@ -220,7 +315,7 @@ program_bin = env.Command(
     target='prodtest.bin',
     source=program_elf,
     action=[
-        '$OBJCOPY -O binary -j .vendorheader -j .header -j .flash -j .data $SOURCE $TARGET',
+        '$OBJCOPY -O binary -j .vendorheader -j .header -j .flash -j .data -j .confidential $SOURCE $TARGET',
         '$HEADERTOOL $TARGET ' + ('-D' if ARGUMENTS.get('PRODUCTION', '0') == '0' else ''),
         '$CP $TARGET ' + BINARY_NAME,
     ], )

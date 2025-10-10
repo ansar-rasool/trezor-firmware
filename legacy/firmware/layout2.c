@@ -876,6 +876,40 @@ void layoutResetWord(const char *word, int pass, int word_pos, bool last) {
 
 #define QR_MAX_VERSION 9
 
+static void renderQR(const char *text) {
+  uint8_t codedata[qrcodegen_BUFFER_LEN_FOR_VERSION(QR_MAX_VERSION)] = {0};
+  uint8_t tempdata[qrcodegen_BUFFER_LEN_FOR_VERSION(QR_MAX_VERSION)] = {0};
+
+  int side = 0;
+  if (qrcodegen_encodeText(text, tempdata, codedata, qrcodegen_Ecc_LOW,
+                           qrcodegen_VERSION_MIN, QR_MAX_VERSION,
+                           qrcodegen_Mask_AUTO, true)) {
+    side = qrcodegen_getSize(codedata);
+  }
+
+  oledInvert(0, 0, 63, 63);
+  if (side > 0 && side <= 29) {
+    int offset = 32 - side;
+    for (int i = 0; i < side; i++) {
+      for (int j = 0; j < side; j++) {
+        if (qrcodegen_getModule(codedata, i, j)) {
+          oledBox(offset + i * 2, offset + j * 2, offset + 1 + i * 2,
+                  offset + 1 + j * 2, false);
+        }
+      }
+    }
+  } else if (side > 0 && side <= 60) {
+    int offset = 32 - (side / 2);
+    for (int i = 0; i < side; i++) {
+      for (int j = 0; j < side; j++) {
+        if (qrcodegen_getModule(codedata, i, j)) {
+          oledClearPixel(offset + i, offset + j);
+        }
+      }
+    }
+  }
+}
+
 void layoutAddress(const char *address, const char *desc, bool qrcode,
                    bool ignorecase, const uint32_t *address_n,
                    size_t address_n_count, bool address_is_account) {
@@ -897,37 +931,7 @@ void layoutAddress(const char *address, const char *desc, bool qrcode,
                                 : address[i];
       }
     }
-    uint8_t codedata[qrcodegen_BUFFER_LEN_FOR_VERSION(QR_MAX_VERSION)] = {0};
-    uint8_t tempdata[qrcodegen_BUFFER_LEN_FOR_VERSION(QR_MAX_VERSION)] = {0};
-
-    int side = 0;
-    if (qrcodegen_encodeText(ignorecase ? address_upcase : address, tempdata,
-                             codedata, qrcodegen_Ecc_LOW, qrcodegen_VERSION_MIN,
-                             QR_MAX_VERSION, qrcodegen_Mask_AUTO, true)) {
-      side = qrcodegen_getSize(codedata);
-    }
-
-    oledInvert(0, 0, 63, 63);
-    if (side > 0 && side <= 29) {
-      int offset = 32 - side;
-      for (int i = 0; i < side; i++) {
-        for (int j = 0; j < side; j++) {
-          if (qrcodegen_getModule(codedata, i, j)) {
-            oledBox(offset + i * 2, offset + j * 2, offset + 1 + i * 2,
-                    offset + 1 + j * 2, false);
-          }
-        }
-      }
-    } else if (side > 0 && side <= 60) {
-      int offset = 32 - (side / 2);
-      for (int i = 0; i < side; i++) {
-        for (int j = 0; j < side; j++) {
-          if (qrcodegen_getModule(codedata, i, j)) {
-            oledClearPixel(offset + i, offset + j);
-          }
-        }
-      }
-    }
+    renderQR(ignorecase ? address_upcase : address);
   } else {
     if (desc) {
       oledDrawString(0, 0 * 9, desc, FONT_STANDARD);
@@ -963,14 +967,8 @@ void layoutAddress(const char *address, const char *desc, bool qrcode,
 }
 
 void layoutPublicKey(const uint8_t *pubkey) {
-  char desc[16] = {0};
-  strlcpy(desc, "Public Key: 00", sizeof(desc));
-  if (pubkey[0] == 1) {
-    /* ed25519 public key */
-    // pass - leave 00
-  } else {
-    data2hex(pubkey, 1, desc + 12);
-  }
+  char desc[] = "Public Key: 00";
+  data2hex(pubkey, 1, desc + 12);
   const char **str = split_message_hex(pubkey + 1, 32 * 2);
   layoutDialogSwipe(&bmp_icon_question, NULL, _("Continue"), NULL, desc, str[0],
                     str[1], str[2], str[3], NULL);
@@ -987,17 +985,21 @@ static void _layout_xpub(const char *xpub, const char *desc, int page) {
   }
 }
 
-void layoutXPUB(const char *xpub, int page) {
+void layoutXPUB(const char *xpub, int page, bool qrcode) {
   if (layoutLast != layoutAddress && layoutLast != layoutXPUB) {
     layoutSwipe();
   } else {
     oledClear();
   }
   layoutLast = layoutXPUB;
-  char desc[] = "XPUB _/2";
-  desc[5] = '1' + page;
-  _layout_xpub(xpub, desc, page);
-  layoutButtonNo(_("Cancel"), &bmp_btn_cancel);
+  if (qrcode) {
+    renderQR(xpub);
+  } else {
+    char desc[] = "XPUB _/2";
+    desc[5] = '1' + page;
+    _layout_xpub(xpub, desc, page);
+    layoutButtonNo(_("QR Code"), NULL);
+  }
   layoutButtonYes(_("Confirm"), &bmp_btn_confirm);
   oledRefresh();
 }
@@ -1338,39 +1340,6 @@ void layoutNEMLevy(const NEMMosaicDefinition *definition, uint8_t network) {
 }
 
 #endif
-
-static inline bool is_slip18(const uint32_t *address_n,
-                             size_t address_n_count) {
-  // m / 10018' / [0-9]'
-  return address_n_count == 2 && address_n[0] == (PATH_HARDENED + 10018) &&
-         (address_n[1] & PATH_HARDENED) &&
-         (address_n[1] & PATH_UNHARDEN_MASK) <= 9;
-}
-
-void layoutCosiSign(const uint32_t *address_n, size_t address_n_count,
-                    const uint8_t *data, uint32_t len) {
-  char *desc = _("CoSi sign message?");
-  char desc_buf[32] = {0};
-  if (is_slip18(address_n, address_n_count)) {
-    strlcpy(desc_buf, _("CoSi sign index #?"), sizeof(desc_buf));
-    desc_buf[16] = '0' + (address_n[1] & PATH_UNHARDEN_MASK);
-    desc = desc_buf;
-  }
-  char str[4][17] = {0};
-  if (len == 32) {
-    data2hex(data, 8, str[0]);
-    data2hex(data + 8, 8, str[1]);
-    data2hex(data + 16, 8, str[2]);
-    data2hex(data + 24, 8, str[3]);
-  } else {
-    strlcpy(str[0], "Data", sizeof(str[0]));
-    strlcpy(str[1], "of", sizeof(str[1]));
-    strlcpy(str[2], "unsupported", sizeof(str[2]));
-    strlcpy(str[3], "length", sizeof(str[3]));
-  }
-  layoutDialogSwipe(&bmp_icon_question, _("Cancel"), _("Confirm"), desc, str[0],
-                    str[1], str[2], str[3], NULL, NULL);
-}
 
 void layoutConfirmAutoLockDelay(uint32_t delay_ms) {
   char line[sizeof("after 4294967296 minutes?")] = {0};

@@ -19,7 +19,10 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from .. import buttons, common
+from trezorlib import models
+from trezorlib.debuglink import LayoutType
+
+from .. import common
 
 if TYPE_CHECKING:
     from ..device_handler import BackgroundDeviceHandler
@@ -32,36 +35,63 @@ PIN4 = "1234"
 def test_hold_to_lock(device_handler: "BackgroundDeviceHandler"):
     debug = device_handler.debuglink()
 
-    def hold(duration: int, wait: bool = True) -> None:
-        debug.input(x=13, y=37, hold_ms=duration, wait=wait)
-        time.sleep(duration / 1000 + 0.5)
+    short_duration = {
+        models.T1B1: 500,
+        models.T2B1: 500,
+        models.T3B1: 500,
+        models.T2T1: 1000,
+        models.T3T1: 1000,
+    }[debug.model]
+    lock_duration = {
+        models.T1B1: 1200,
+        models.T2B1: 1200,
+        models.T3B1: 1200,
+        models.T2T1: 3500,
+        models.T3T1: 3500,
+    }[debug.model]
+
+    def hold(duration: int) -> None:
+        if debug.layout_type is LayoutType.Caesar:
+            debug.press_right(hold_ms=duration)
+        elif debug.layout_type is LayoutType.Delizia:
+            debug.click(debug.screen_buttons.tap_to_confirm(), hold_ms=duration)
+        else:
+            debug.click((13, 37), hold_ms=duration)
 
     assert device_handler.features().unlocked is False
 
     # unlock with message
     device_handler.run(common.get_test_address)
-    layout = debug.wait_layout()
-    assert layout.text == "< PinKeyboard >"
-    debug.input("1234", wait=True)
+
+    assert "PinKeyboard" in debug.read_layout().all_components()
+    debug.input("1234")
     assert device_handler.result()
 
     assert device_handler.features().unlocked is True
 
     # short touch
-    hold(1000, wait=False)
+    hold(short_duration)
+
+    time.sleep(0.5)  # so that the homescreen appears again (hacky)
     assert device_handler.features().unlocked is True
 
     # lock
-    hold(3500)
+    hold(lock_duration)
     assert device_handler.features().unlocked is False
 
     # unlock by touching
-    layout = debug.click(buttons.INFO, wait=True)
-    assert layout.text == "< PinKeyboard >"
-    debug.input("1234", wait=True)
+    if debug.layout_type is LayoutType.Caesar:
+        debug.press_right()
+    elif debug.layout_type is LayoutType.Delizia:
+        debug.click(debug.screen_buttons.tap_to_confirm())
+    else:
+        debug.click(debug.screen_buttons.info())
+    layout = debug.read_layout()
+    assert "PinKeyboard" in layout.all_components()
+    debug.input("1234")
 
     assert device_handler.features().unlocked is True
 
     # lock
-    hold(3500)
+    hold(lock_duration)
     assert device_handler.features().unlocked is False

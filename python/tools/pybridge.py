@@ -20,28 +20,28 @@
 #        python3 pybridge.py
 # 7. Start Suite again, or use any other Trezor-compatible software.
 # 8. Output of pybridge goes to console and also to file `pybridge.log`
-from __future__ import annotations  # type: ignore [unknown import symbol]
+from __future__ import annotations
 
 from gevent import monkey
 
 monkey.patch_all()
 
 import json
+import logging
 import struct
 import time
 import typing as t
-import logging
 
 import click
-from bottle import run, post, request, response
+from bottle import post, request, response, run
 
-import trezorlib.transport
 import trezorlib.mapping
 import trezorlib.models
+import trezorlib.transport
 from trezorlib.client import TrezorClient
-from trezorlib.ui import TrezorClientUI
 from trezorlib.protobuf import format_message
 from trezorlib.transport.bridge import BridgeTransport
+from trezorlib.ui import TrezorClientUI
 
 # ignore bridge. we are the bridge
 BridgeTransport.ENABLED = False
@@ -104,9 +104,7 @@ class Transport:
         self.transport = transport
 
         client = TrezorClient(transport, ui=SilentUI())
-        self.model = (
-            trezorlib.models.by_name(client.features.model) or trezorlib.models.TREZOR_T
-        )
+        self.model = client.model
         client.end_session()
 
     def acquire(self, sid: str) -> str:
@@ -213,7 +211,7 @@ def do_enumerate():
 def do_acquire(path: str, sid: str):
     check_origin()
     if sid == "null":
-        sid = None  # type: ignore [cannot be assigned to declared type]
+        sid = None  # type: ignore [is incompatible with declared type]
     trezor = Transport.find(path)
     if trezor is None:
         response.status = 404

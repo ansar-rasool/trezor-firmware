@@ -3,32 +3,88 @@ use std::ffi::OsStr;
 use std::{env, path::PathBuf, process::Command};
 
 fn main() {
+    println!("cargo:rustc-env=BUILD_DIR={}", build_dir());
     #[cfg(feature = "micropython")]
     generate_qstr_bindings();
     #[cfg(feature = "micropython")]
     generate_micropython_bindings();
     generate_trezorhal_bindings();
+    #[cfg(feature = "crypto")]
+    generate_crypto_bindings();
     #[cfg(feature = "test")]
     link_core_objects();
 }
 
-fn model() -> String {
-    match env::var("TREZOR_MODEL") {
-        Ok(model) => model,
-        Err(_) => String::from("T"),
-    }
+fn build_dir() -> String {
+    let build_dir_str = env::var("BUILD_DIR").unwrap_or(String::from("../../build/unix"));
+    PathBuf::from(build_dir_str)
+        .canonicalize()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string()
 }
 
-fn board() -> String {
-    if !is_firmware() {
-        return String::from("board-unix.h");
+const DEFAULT_BINDGEN_MACROS_COMMON: &[&str] = &[
+    "-I../projects/unix",
+    "-I../../build/unix",
+    "-I../../vendor/micropython/ports/unix",
+    "-I../../../crypto",
+    "-I../../../storage",
+    "-I../../vendor/micropython",
+    "-I../../vendor/micropython/lib/uzlib",
+    "-I../rtl/inc",
+    "-I../gfx/inc",
+    "-I../io/ble/inc",
+    "-I../io/button/inc",
+    "-I../io/display/inc",
+    "-I../io/haptic/inc",
+    "-I../io/touch/inc",
+    "-I../io/rgb_led/inc",
+    "-I../io/usb/inc",
+    "-I../sec/entropy/inc",
+    "-I../sys/time/inc",
+    "-I../util/flash/inc",
+    "-I../util/translations/inc",
+    "-I../models",
+    "-DTREZOR_EMULATOR",
+    "-DUSE_BUTTON",
+    "-DUSE_TOUCH",
+    "-DUSE_HAPTIC",
+    "-DUSE_RGB_LED",
+    "-DUSE_BLE",
+    "-DUSE_HW_JPEG_DECODER",
+];
+
+fn add_bindgen_macros<'a>(
+    clang_args: &mut Vec<String>,
+    envvar: Option<&'a str>,
+    test_envvar: Option<&'a str>,
+) {
+    if let Some(envvar) = envvar {
+        clang_args.extend(envvar.split(',').map(String::from));
+        return;
+    }
+    clang_args.extend(DEFAULT_BINDGEN_MACROS_COMMON.iter().map(|s| s.to_string()));
+    if let Some(envvar) = test_envvar {
+        clang_args.extend(envvar.split(',').map(String::from));
+        return;
     }
 
-    match env::var("TREZOR_BOARD") {
-        Ok(board) => {
-            format!("boards/{}", board)
-        }
-        Err(_) => String::from("boards/trezor_t.h"),
+    let mut model_dirs: Vec<&str> = vec![];
+    // always include Bolt as the baseline
+    model_dirs.push("../models/T2T1");
+    #[cfg(feature = "layout_caesar")]
+    model_dirs.push("../models/T3B1");
+    #[cfg(feature = "layout_delizia")]
+    model_dirs.push("../models/T3T1");
+    #[cfg(feature = "layout_eckhart")]
+    model_dirs.push("../models/T3W1");
+    for model_dir in model_dirs {
+        let macros = PathBuf::from(model_dir).join("test_bindgen_macros.txt");
+        let contents = std::fs::read_to_string(&macros)
+            .unwrap_or_else(|_| panic!("Failed to read {:?}", macros));
+        clang_args.extend(contents.split(",\n").map(String::from));
     }
 }
 
@@ -40,19 +96,17 @@ fn generate_qstr_bindings() {
     // Tell cargo to invalidate the built crate whenever the header changes.
     println!("cargo:rerun-if-changed=qstr.h");
 
+    let dest_file = PathBuf::from(out_path).join("qstr.rs");
+
     bindgen::Builder::default()
         .header("qstr.h")
         // Build the Qstr enum as a newtype so we can define method on it.
-        .default_enum_style(bindgen::EnumVariation::NewType { is_bitfield: false })
+        .default_enum_style(bindgen::EnumVariation::NewType {
+            is_bitfield: false,
+            is_global: false,
+        })
         // Pass in correct include paths.
-        .clang_args(&[
-            "-I",
-            if is_firmware() {
-                "../../build/firmware"
-            } else {
-                "../../build/unix"
-            },
-        ])
+        .clang_args(&["-I", &build_dir()])
         // Customize the standard types.
         .use_core()
         .ctypes_prefix("cty")
@@ -62,38 +116,46 @@ fn generate_qstr_bindings() {
         .parse_callbacks(Box::new(bindgen::CargoCallbacks))
         .generate()
         .expect("Unable to generate Rust QSTR bindings")
-        .write_to_file(PathBuf::from(out_path).join("qstr.rs"))
+        .write_to_file(&dest_file)
         .unwrap();
+
+    // rewrite the file to change internal representation of the qstr newtype
+    let qstr_generated = std::fs::read_to_string(&dest_file).unwrap();
+    let qstr_modified = qstr_generated.replace(
+        "pub struct Qstr(pub cty::c_uint);",
+        "pub struct Qstr(pub usize);",
+    );
+    assert_ne!(qstr_generated, qstr_modified, "Failed to rewrite type of Qstr in qstr.rs file.\nThis indicates that the generated file has changed. Please update the rewriting code.");
+    std::fs::write(&dest_file, qstr_modified).unwrap();
 }
 
 fn prepare_bindings() -> bindgen::Builder {
     let mut bindings = bindgen::Builder::default();
 
-    // Common include paths and defines
-    bindings = bindings.clang_args([
-        "-I../../../crypto",
-        "-I../../../storage",
-        "-I../../vendor/micropython",
-        "-I../../vendor/micropython/lib/uzlib",
-        "-I../extmod/modtrezorui", // for display.h
-        format!("-DTREZOR_MODEL_{}", model()).as_str(),
-        format!("-DTREZOR_BOARD=\"{}\"", board()).as_str(),
-    ]);
+    let build_dir_include = format!("-I{}", build_dir());
+
+    let mut clang_args: Vec<String> = Vec::new();
+
+    let bindgen_macros_env = env::var("BINDGEN_MACROS").ok();
+    let test_macros_env = env::var("TEST_BINDGEN_MACROS").ok();
+    add_bindgen_macros(
+        &mut clang_args,
+        bindgen_macros_env.as_deref(),
+        test_macros_env.as_deref(),
+    );
+
+    #[cfg(feature = "framebuffer")]
+    {
+        bindings = bindings.clang_args(&["-DFRAMEBUFFER"]);
+    }
+
+    clang_args.push(build_dir_include);
 
     // Pass in correct include paths and defines.
     if is_firmware() {
-        bindings = bindings.clang_args(&[
-            "-nostdinc",
-            "-I../firmware",
-            "-I../trezorhal",
-            "-I../../build/firmware",
-            "-I../../vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Inc",
-            "-I../../vendor/micropython/lib/stm32lib/CMSIS/STM32F4xx/Include",
-            "-I../../vendor/micropython/lib/cmsis/inc",
-            "-DSTM32F427xx",
-            "-DUSE_HAL_DRIVER",
-            "-DSTM32_HAL_H=<stm32f4xx.h>",
-        ]);
+        clang_args.push("-nostdinc".to_string());
+        clang_args.push("-fshort-enums".to_string()); // Make sure enums use the same size as in C
+
         // Append gcc-arm-none-eabi's include paths.
         let cc_output = Command::new("arm-none-eabi-gcc")
             .arg("-E")
@@ -115,13 +177,10 @@ fn prepare_bindings() -> bindgen::Builder {
 
         bindings = bindings.clang_args(include_args);
     } else {
-        bindings = bindings.clang_args(&[
-            "-I../unix",
-            "-I../../build/unix",
-            "-I../../vendor/micropython/ports/unix",
-            "-DTREZOR_EMULATOR",
-        ]);
+        clang_args.push("-fno-short-enums".to_string());
     }
+
+    bindings = bindings.clang_args(&clang_args);
 
     bindings
         // Customize the standard types.
@@ -156,17 +215,16 @@ fn generate_micropython_bindings() {
         .allowlist_function("mp_obj_new_bytes")
         .allowlist_function("mp_obj_new_str")
         .allowlist_function("mp_obj_new_tuple")
+        .allowlist_function("mp_obj_new_attrtuple")
         .allowlist_function("mp_obj_get_int_maybe")
         .allowlist_function("mp_obj_is_true")
         .allowlist_function("mp_call_function_n_kw")
         .allowlist_function("trezor_obj_get_ll_checked")
-        .allowlist_function("trezor_obj_get_ull_checked")
         .allowlist_function("trezor_obj_str_from_rom_text")
         // buffer
         .allowlist_function("mp_get_buffer")
         .allowlist_var("MP_BUFFER_READ")
         .allowlist_var("MP_BUFFER_WRITE")
-        .allowlist_var("MP_BUFFER_RW")
         .allowlist_var("mp_type_str")
         .allowlist_var("mp_type_bytes")
         .allowlist_var("mp_type_bytearray")
@@ -174,7 +232,6 @@ fn generate_micropython_bindings() {
         // dict
         .allowlist_type("mp_obj_dict_t")
         .allowlist_function("mp_obj_new_dict")
-        .allowlist_function("mp_obj_dict_store")
         .allowlist_var("mp_type_dict")
         // fun
         .allowlist_type("mp_obj_fun_builtin_fixed_t")
@@ -186,6 +243,8 @@ fn generate_micropython_bindings() {
         .allowlist_var("mp_type_fun_builtin_var")
         // gc
         .allowlist_function("gc_alloc")
+        .allowlist_function("gc_free")
+        .allowlist_var("GC_ALLOC_FLAG_HAS_FINALISER")
         // iter
         .allowlist_type("mp_obj_iter_buf_t")
         .allowlist_function("mp_getiter")
@@ -199,7 +258,6 @@ fn generate_micropython_bindings() {
         .allowlist_var("mp_type_list")
         // map
         .allowlist_type("mp_map_elem_t")
-        .allowlist_type("mp_map_lookup_kind_t")
         .allowlist_function("mp_map_init")
         .allowlist_function("mp_map_init_fixed_table")
         .allowlist_function("mp_map_lookup")
@@ -209,12 +267,14 @@ fn generate_micropython_bindings() {
         .allowlist_function("mp_obj_new_exception_args")
         .allowlist_function("trezor_obj_call_protected")
         .allowlist_var("mp_type_AttributeError")
+        .allowlist_var("mp_type_EOFError")
         .allowlist_var("mp_type_IndexError")
         .allowlist_var("mp_type_KeyError")
         .allowlist_var("mp_type_MemoryError")
         .allowlist_var("mp_type_OverflowError")
         .allowlist_var("mp_type_ValueError")
         .allowlist_var("mp_type_TypeError")
+        .allowlist_var("mp_type_RuntimeError")
         // time
         .allowlist_function("mp_hal_ticks_ms")
         .allowlist_function("mp_hal_delay_ms")
@@ -226,6 +286,10 @@ fn generate_micropython_bindings() {
         // module
         .allowlist_type("mp_obj_module_t")
         .allowlist_var("mp_type_module")
+        // qstr
+        .allowlist_function("qstr_data")
+        // tuple
+        .allowlist_type("mp_obj_tuple_t")
         // `ffi::mp_map_t` type is not allowed to be `Clone` or `Copy` because we tie it
         // to the data lifetimes with the `MapRef` type, see `src/micropython/map.rs`.
         // TODO: We should disable `Clone` and `Copy` for all types and only allow-list
@@ -248,8 +312,12 @@ fn generate_trezorhal_bindings() {
 
     let bindings = prepare_bindings()
         .header("trezorhal.h")
-        // common
-        .allowlist_var("HW_ENTROPY_DATA")
+        // model
+        .allowlist_var("MODEL_INTERNAL_NAME")
+        .allowlist_var("MODEL_FULL_NAME")
+        // entropy
+        .allowlist_var("HW_ENTROPY_LEN")
+        .allowlist_function("entropy_get")
         // secbool
         .allowlist_type("secbool")
         .must_use_type("secbool")
@@ -259,10 +327,6 @@ fn generate_trezorhal_bindings() {
         .allowlist_function("flash_init")
         // storage
         .allowlist_var("EXTERNAL_SALT_SIZE")
-        .allowlist_var("FLAG_PUBLIC")
-        .allowlist_var("FLAGS_WRITE")
-        .allowlist_var("MAX_APPID")
-        .allowlist_type("PIN_UI_WAIT_CALLBACK")
         .allowlist_function("storage_init")
         .allowlist_function("storage_wipe")
         .allowlist_function("storage_is_unlocked")
@@ -278,31 +342,40 @@ fn generate_trezorhal_bindings() {
         .allowlist_function("storage_delete")
         .allowlist_function("storage_set_counter")
         .allowlist_function("storage_next_counter")
+        .allowlist_function("translations_read")
+        .allowlist_function("translations_write")
+        .allowlist_function("translations_erase")
+        .allowlist_function("translations_area_bytesize")
         // display
-        .allowlist_function("display_init")
-        .allowlist_function("display_offset")
         .allowlist_function("display_refresh")
-        .allowlist_function("display_backlight")
-        .allowlist_function("display_text")
-        .allowlist_function("display_text_render_buffer")
-        .allowlist_function("display_text_width")
-        .allowlist_function("display_bar")
-        .allowlist_function("display_bar_radius")
-        .allowlist_function("display_bar_radius_buffer")
-        .allowlist_function("display_image")
-        .allowlist_function("display_loader")
-        .allowlist_function("display_pixeldata")
-        .allowlist_function("display_pixeldata_dirty")
-        .allowlist_function("display_set_window")
-        .allowlist_function("display_sync")
-        .allowlist_var("DISPLAY_CMD_ADDRESS")
-        .allowlist_var("DISPLAY_DATA_ADDRESS")
-        .allowlist_type("toif_format_t")
-        // fonts
-        .allowlist_function("font_height")
-        .allowlist_function("font_max_height")
-        .allowlist_function("font_baseline")
-        .allowlist_function("font_get_glyph")
+        .allowlist_function("display_set_backlight")
+        .allowlist_function("display_get_backlight")
+        .allowlist_function("display_wait_for_sync")
+        .allowlist_var("DISPLAY_RESX_")
+        .allowlist_var("DISPLAY_RESY_")
+        .allowlist_type("display_fb_info_t")
+        .allowlist_function("display_get_frame_buffer")
+        .allowlist_function("display_fill")
+        .allowlist_function("display_copy_rgb565")
+        // gfx_bitblt
+        .allowlist_type("gfx_bitblt_t")
+        .allowlist_function("gfx_rgb565_fill")
+        .allowlist_function("gfx_rgb565_copy_mono4")
+        .allowlist_function("gfx_rgb565_copy_rgb565")
+        .allowlist_function("gfx_rgb565_blend_mono4")
+        .allowlist_function("gfx_rgb565_blend_mono8")
+        .allowlist_function("gfx_rgba8888_fill")
+        .allowlist_function("gfx_rgba8888_copy_mono4")
+        .allowlist_function("gfx_rgba8888_copy_rgb565")
+        .allowlist_function("gfx_rgba8888_copy_rgba8888")
+        .allowlist_function("gfx_rgba8888_blend_mono4")
+        .allowlist_function("gfx_rgba8888_blend_mono8")
+        .allowlist_function("gfx_mono8_fill")
+        .allowlist_function("gfx_mono8_copy_mono1p")
+        .allowlist_function("gfx_mono8_copy_mono4")
+        .allowlist_function("gfx_mono8_blend_mono1p")
+        .allowlist_function("gfx_mono8_blend_mono4")
+        .allowlist_function("gfx_bitblt_wait")
         // uzlib
         .allowlist_function("uzlib_uncompress_init")
         .allowlist_function("uzlib_uncompress")
@@ -313,31 +386,56 @@ fn generate_trezorhal_bindings() {
         // slip39
         .allowlist_function("slip39_word_completion_mask")
         .allowlist_function("button_sequence_to_word")
+        .allowlist_var("SLIP39_WORDLIST")
+        .allowlist_var("SLIP39_WORD_COUNT")
         // random
         .allowlist_function("random_uniform")
         // rgb led
         .allowlist_function("rgb_led_set_color")
-        // time
-        .allowlist_function("hal_delay")
-        .allowlist_function("hal_ticks_ms")
-        // dma2d
-        .allowlist_function("dma2d_setup_4bpp")
-        .allowlist_function("dma2d_setup_4bpp_over_4bpp")
-        .allowlist_function("dma2d_setup_4bpp_over_16bpp")
-        .allowlist_function("dma2d_start")
-        .allowlist_function("dma2d_start_blend")
-        .allowlist_function("dma2d_wait_for_transfer")
-        //buffers
-        .allowlist_function("buffers_get_line_buffer_16bpp")
-        .allowlist_function("buffers_get_line_buffer_4bpp")
-        .allowlist_function("buffers_get_text_buffer")
-        .allowlist_function("buffers_get_jpeg_buffer")
-        .allowlist_function("buffers_get_jpeg_work_buffer")
-        .allowlist_function("buffers_get_blurring_buffer")
-        .allowlist_var("text_buffer_height")
-        .allowlist_var("buffer_width")
+        // systick
+        .allowlist_function("systick_delay_ms")
+        .allowlist_function("systick_ms")
+        .allowlist_function("systick_us")
+        // toif
+        .allowlist_type("toif_format_t")
         //usb
-        .allowlist_function("usb_configured");
+        .allowlist_type("usb_event_t")
+        .allowlist_function("usb_get_state")
+        // ble
+        .allowlist_var("BLE_PAIRING_CODE_LEN")
+        .allowlist_var("BLE_RX_PACKET_SIZE")
+        .allowlist_var("BLE_TX_PACKET_SIZE")
+        .allowlist_var("BLE_ADV_NAME_LEN")
+        .allowlist_function("ble_get_state")
+        .allowlist_function("ble_issue_command")
+        .allowlist_function("ble_start")
+        .allowlist_function("ble_write")
+        .allowlist_function("ble_read")
+        .allowlist_type("ble_command_t")
+        .allowlist_type("ble_state_t")
+        // touch
+        .allowlist_function("touch_get_event")
+        // button
+        .allowlist_type("button_t")
+        .allowlist_function("button_get_event")
+        // haptic
+        .allowlist_type("haptic_effect_t")
+        .allowlist_function("haptic_play")
+        .allowlist_function("haptic_play_custom")
+        // jpegdec
+        .allowlist_var("JPEGDEC_RGBA8888_BUFFER_SIZE")
+        .allowlist_var("JPEGDEC_MONO8_BUFFER_SIZE")
+        .allowlist_type("jpegdec_state_t")
+        .allowlist_type("jpegdec_image_t")
+        .allowlist_type("jpegdec_image_format_t")
+        .allowlist_type("jpegdec_slice_t")
+        .allowlist_function("jpegdec_open")
+        .allowlist_function("jpegdec_close")
+        .allowlist_function("jpegdec_process")
+        .allowlist_function("jpegdec_get_info")
+        .allowlist_function("jpegdec_get_slice_rgba8888")
+        .allowlist_function("jpegdec_get_slice_mono8");
+
     // Write the bindings to a file in the OUR_DIR.
     bindings
         .generate()
@@ -346,9 +444,41 @@ fn generate_trezorhal_bindings() {
         .unwrap();
 }
 
+#[cfg(feature = "crypto")]
+fn generate_crypto_bindings() {
+    let out_path = env::var("OUT_DIR").unwrap();
+
+    // Tell cargo to invalidate the built crate whenever the header changes.
+    println!("cargo:rerun-if-changed=crypto.h");
+
+    let bindings = prepare_bindings()
+        .header("crypto.h")
+        // ed25519
+        .allowlist_type("ed25519_signature")
+        .allowlist_type("ed25519_public_key")
+        .allowlist_function("ed25519_cosi_combine_publickeys")
+        // incorrect signature from bindgen, see crypto::ed25519:ffi_override
+        //.allowlist_function("ed25519_sign_open")
+        // sha256
+        .allowlist_var("SHA256_DIGEST_LENGTH")
+        .allowlist_type("SHA256_CTX")
+        .no_copy("SHA256_CTX")
+        .allowlist_function("sha256_Init")
+        .allowlist_function("sha256_Update")
+        .allowlist_function("sha256_Final");
+
+    // Write the bindings to a file in the OUR_DIR.
+    bindings
+        .clang_arg("-fgnuc-version=0") // avoid weirdness with ed25519.h CONST definition
+        .generate()
+        .expect("Unable to generate bindings")
+        .write_to_file(PathBuf::from(out_path).join("crypto.rs"))
+        .unwrap();
+}
+
 fn is_firmware() -> bool {
     let target = env::var("TARGET").unwrap();
-    target.starts_with("thumbv7")
+    target.starts_with("thumbv7") || target.starts_with("thumbv8")
 }
 
 #[cfg(feature = "test")]

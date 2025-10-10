@@ -41,8 +41,34 @@
 extern const uint8_t *PIN_EMPTY;
 #define PIN_EMPTY_LEN 0
 
+// Maximum number of failed unlock attempts.
+// NOTE: The PIN counter logic relies on this constant being less than or equal
+// to 16.
+#define PIN_MAX_TRIES 16
+
+// The length of the random salt in bytes.
+#if USE_OPTIGA
+#define STORAGE_SALT_SIZE 32
+#else
+#define STORAGE_SALT_SIZE 4
+#endif
+
+enum storage_ui_message_t {
+  NO_MSG = 0,
+  VERIFYING_PIN_MSG,
+  PROCESSING_MSG,
+  STARTING_MSG,
+  WRONG_PIN_MSG,
+};
+
+typedef enum {
+  STORAGE_PIN_OP_SET = 0,
+  STORAGE_PIN_OP_VERIFY,
+  STORAGE_PIN_OP_CHANGE,
+} storage_pin_op_t;
+
 typedef secbool (*PIN_UI_WAIT_CALLBACK)(uint32_t wait, uint32_t progress,
-                                        const char *message);
+                                        enum storage_ui_message_t message);
 
 void storage_init(PIN_UI_WAIT_CALLBACK callback, const uint8_t *salt,
                   const uint16_t salt_len);

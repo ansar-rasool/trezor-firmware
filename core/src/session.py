@@ -1,3 +1,4 @@
+# isort: skip_file
 from trezor import log, loop, utils, wire, workflow
 
 import apps.base
@@ -19,11 +20,16 @@ if __debug__:
 apps.base.set_homescreen()
 workflow.start_default()
 
-# initialize the wire codec
+# initialize the wire codec over USB
 wire.setup(usb.iface_wire)
-if __debug__:
-    wire.setup(usb.iface_debug, is_debug_session=True)
 
+if utils.USE_BLE:
+    import trezorble as ble
+
+    # initialize the wire codec over BLE
+    wire.setup(ble.interface)
+
+# start the event loop
 loop.run()
 
 if __debug__:

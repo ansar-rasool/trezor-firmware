@@ -88,10 +88,23 @@ int cryptoMultisigPubkeyIndex(const CoinInfo *coin,
                               const MultisigRedeemScriptType *multisig,
                               const uint8_t *pubkey);
 
+int cryptoMultisigXpubIndex(const CoinInfo *coin,
+                            const MultisigRedeemScriptType *multisig,
+                            const uint8_t *pubkey);
+
+uint32_t cryptoMultisigPubkeys(const CoinInfo *coin,
+                               const MultisigRedeemScriptType *multisig,
+                               uint8_t *pubkeys);
+
 int cryptoMultisigFingerprint(const MultisigRedeemScriptType *multisig,
                               uint8_t *hash);
 
 int cryptoIdentityFingerprint(const IdentityType *identity, uint8_t *hash);
+
+bool cryptoCosiVerify(const ed25519_signature signature, const uint8_t *message,
+                      const size_t message_len, const int threshold,
+                      const ed25519_public_key *pubkeys,
+                      const int pubkeys_count, const uint8_t sigmask);
 
 bool coin_path_check(const CoinInfo *coin, InputScriptType script_type,
                      uint32_t address_n_count, const uint32_t *address_n,
@@ -110,5 +123,6 @@ void slip21_from_seed(const uint8_t *seed, int seed_len, Slip21Node *out);
 void slip21_derive_path(Slip21Node *inout, const uint8_t *label,
                         size_t label_len);
 const uint8_t *slip21_key(const Slip21Node *node);
+bool multisig_uses_single_path(const MultisigRedeemScriptType *multisig);
 
 #endif

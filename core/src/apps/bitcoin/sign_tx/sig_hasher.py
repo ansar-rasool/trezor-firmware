@@ -3,23 +3,26 @@ from typing import TYPE_CHECKING
 from ..writers import (
     TX_HASH_SIZE,
     write_bytes_fixed,
+    write_bytes_prefixed,
     write_bytes_reversed,
+    write_tx_output,
     write_uint32,
     write_uint64,
 )
 
 if TYPE_CHECKING:
     from typing import Protocol, Sequence
-    from ..common import SigHashType
+
     from trezor.messages import PrevTx, SignTx, TxInput, TxOutput
+
     from apps.common import coininfo
 
-    class SigHasher(Protocol):
-        def add_input(self, txi: TxInput, script_pubkey: bytes) -> None:
-            ...
+    from ..common import SigHashType
 
-        def add_output(self, txo: TxOutput, script_pubkey: bytes) -> None:
-            ...
+    class SigHasher(Protocol):
+        def add_input(self, txi: TxInput, script_pubkey: bytes) -> None: ...
+
+        def add_output(self, txo: TxOutput, script_pubkey: bytes) -> None: ...
 
         def hash143(
             self,
@@ -29,23 +32,20 @@ if TYPE_CHECKING:
             tx: SignTx | PrevTx,
             coin: coininfo.CoinInfo,
             hash_type: int,
-        ) -> bytes:
-            ...
+        ) -> bytes: ...
 
         def hash341(
             self,
             i: int,
             tx: SignTx | PrevTx,
             sighash_type: SigHashType,
-        ) -> bytes:
-            ...
+        ) -> bytes: ...
 
         def hash_zip244(
             self,
             txi: TxInput | None,
             script_pubkey: bytes | None,
-        ) -> bytes:
-            ...
+        ) -> bytes: ...
 
 
 # BIP-0143 hash
@@ -61,8 +61,6 @@ class BitcoinSigHasher:
         self.h_outputs = HashWriter(sha256())
 
     def add_input(self, txi: TxInput, script_pubkey: bytes) -> None:
-        from ..writers import write_bytes_prefixed
-
         write_bytes_reversed(self.h_prevouts, txi.prev_hash, TX_HASH_SIZE)
         write_uint32(self.h_prevouts, txi.prev_index)
         write_uint64(self.h_amounts, txi.amount)
@@ -70,8 +68,6 @@ class BitcoinSigHasher:
         write_uint32(self.h_sequences, txi.sequence)
 
     def add_output(self, txo: TxOutput, script_pubkey: bytes) -> None:
-        from ..writers import write_tx_output
-
         write_tx_output(self.h_outputs, txo, script_pubkey)
 
     def hash143(
@@ -85,6 +81,7 @@ class BitcoinSigHasher:
     ) -> bytes:
         from trezor.crypto.hashlib import sha256
         from trezor.utils import HashWriter
+
         from .. import scripts
         from ..writers import get_tx_hash
 

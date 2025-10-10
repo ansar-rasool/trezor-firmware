@@ -56,6 +56,8 @@
 
 #if !BITCOIN_ONLY
 #include "ethereum.h"
+#include "ethereum_definitions.h"
+#include "ethereum_networks.h"
 #include "nem.h"
 #include "nem2.h"
 #include "stellar.h"
@@ -224,20 +226,33 @@ static const CoinInfo *fsm_getCoin(bool has_name, const char *name) {
   return coin;
 }
 
-static HDNode *fsm_getDerivedNode(const char *curve, const uint32_t *address_n,
-                                  size_t address_n_count,
-                                  uint32_t *fingerprint) {
+static HDNode *fsm_getDerivedNodeEx(const char *curve,
+                                    const uint32_t *address_n,
+                                    size_t address_n_count, const uint8_t *seed,
+                                    uint32_t *fingerprint) {
   static CONFIDENTIAL HDNode node;
   if (fingerprint) {
     *fingerprint = 0;
   }
-  if (!config_getRootNode(&node, curve)) {
-    layoutHome();
-    return 0;
+
+  if (seed == NULL) {
+    if (!config_getRootNode(&node, curve)) {
+      layoutHome();
+      return 0;
+    }
+  } else {
+    if (hdnode_from_seed(seed, 64, curve, &node) != 1) {
+      fsm_sendFailure(FailureType_Failure_NotInitialized,
+                      _("Unsupported curve"));
+      layoutHome();
+      return 0;
+    }
   }
+
   if (!address_n || address_n_count == 0) {
     return &node;
   }
+
   if (hdnode_private_ckd_cached(&node, address_n, address_n_count,
                                 fingerprint) == 0) {
     fsm_sendFailure(FailureType_Failure_ProcessError,
@@ -246,6 +261,13 @@ static HDNode *fsm_getDerivedNode(const char *curve, const uint32_t *address_n,
     return 0;
   }
   return &node;
+}
+
+static HDNode *fsm_getDerivedNode(const char *curve, const uint32_t *address_n,
+                                  size_t address_n_count,
+                                  uint32_t *fingerprint) {
+  return fsm_getDerivedNodeEx(curve, address_n, address_n_count, NULL,
+                              fingerprint);
 }
 
 static bool fsm_getSlip21Key(const char *path[], size_t path_count,
@@ -408,6 +430,7 @@ void fsm_msgRebootToBootloader(void) {
 }
 
 void fsm_abortWorkflows(void) {
+  reset_abort();
   recovery_abort();
   signing_abort();
   authorization_type = 0;
@@ -434,6 +457,17 @@ bool fsm_layoutPathWarning(void) {
                     _("Continue at your"), _("own risk!"), NULL);
   if (!protectButton(ButtonRequestType_ButtonRequest_UnknownDerivationPath,
                      false)) {
+    fsm_sendFailure(FailureType_Failure_ActionCancelled, NULL);
+    return false;
+  }
+  return true;
+}
+
+bool fsm_layoutDifferentPathsWarning(void) {
+  layoutDialogSwipe(&bmp_icon_warning, _("Abort"), _("Continue"), NULL,
+                    _("Using different paths"), _("for different XPUBs."), NULL,
+                    _("Continue at your"), _("own risk!"), NULL);
+  if (!protectButton(ButtonRequestType_ButtonRequest_Warning, false)) {
     fsm_sendFailure(FailureType_Failure_ActionCancelled, NULL);
     return false;
   }

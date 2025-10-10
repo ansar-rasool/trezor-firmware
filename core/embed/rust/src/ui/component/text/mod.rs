@@ -1,6 +1,8 @@
+pub mod common;
 pub mod formatted;
-mod iter;
 pub mod layout;
+pub mod op;
 pub mod paragraphs;
+pub mod util;
 
 pub use layout::{LineBreaking, PageBreaking, TextStyle};

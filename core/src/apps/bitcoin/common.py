@@ -5,13 +5,16 @@ from trezor import wire
 from trezor.crypto import bech32
 from trezor.crypto.curve import bip340
 from trezor.enums import InputScriptType, OutputScriptType
+from trezor.messages import MultisigRedeemScriptType
 
 if TYPE_CHECKING:
     from enum import IntEnum
-    from apps.common.coininfo import CoinInfo
+
+    from trezor.crypto import bip32
     from trezor.messages import TxInput
     from trezor.utils import HashWriter
-    from trezor.crypto import bip32
+
+    from apps.common.coininfo import CoinInfo
 else:
     IntEnum = object
 
@@ -44,7 +47,8 @@ class SigHashType(IntEnum):
 
     @classmethod
     def from_int(cls, sighash_type: int) -> "SigHashType":
-        for val in cls.__dict__.values():  # type: SigHashType
+        val: SigHashType
+        for val in cls.__dict__.values():
             if val == sighash_type:
                 return val
         raise ValueError("Unsupported sighash type.")
@@ -117,6 +121,10 @@ def bip340_sign(node: bip32.HDNode, digest: bytes) -> bytes:
 
 def ecdsa_hash_pubkey(pubkey: bytes, coin: CoinInfo) -> bytes:
     from trezor.utils import ensure
+
+    ensure(
+        coin.curve_name.startswith("secp256k1")
+    )  # The following code makes sense only for Weiersrass curves
 
     if pubkey[0] == 0x04:
         ensure(len(pubkey) == 65)  # uncompressed format
@@ -210,3 +218,60 @@ def format_fee_rate(
         shortcut = ""
 
     return f"{fee_rate_formatted} sat{shortcut}/{'v' if coin.segwit else ''}B"
+
+
+# function copied from python/src/trezorlib/tools.py
+def descriptor_checksum(desc: str) -> str:
+    def _polymod(c: int, val: int) -> int:
+        c0 = c >> 35
+        c = ((c & 0x7FFFFFFFF) << 5) ^ val
+        if c0 & 1:
+            c ^= 0xF5DEE51989
+        if c0 & 2:
+            c ^= 0xA9FDCA3312
+        if c0 & 4:
+            c ^= 0x1BAB10E32D
+        if c0 & 8:
+            c ^= 0x3706B1677A
+        if c0 & 16:
+            c ^= 0x644D626FFD
+        return c
+
+    INPUT_CHARSET = "0123456789()[],'/*abcdefgh@:$%{}IJKLMNOPQRSTUVWXYZ&+-.;<=>?!^_|~ijklmnopqrstuvwxyzABCDEFGH`#\"\\ "
+    CHECKSUM_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
+
+    c = 1
+    cls = 0
+    clscount = 0
+    for ch in desc:
+        pos = INPUT_CHARSET.find(ch)
+        if pos == -1:
+            return ""
+        c = _polymod(c, pos & 31)
+        cls = cls * 3 + (pos >> 5)
+        clscount += 1
+        if clscount == 3:
+            c = _polymod(c, cls)
+            cls = 0
+            clscount = 0
+    if clscount > 0:
+        c = _polymod(c, cls)
+    for j in range(0, 8):
+        c = _polymod(c, 0)
+    c ^= 1
+
+    ret = [""] * 8
+    for j in range(0, 8):
+        ret[j] = CHECKSUM_CHARSET[(c >> (5 * (7 - j))) & 31]
+    return "".join(ret)
+
+
+def multisig_uses_single_path(multisig: MultisigRedeemScriptType) -> bool:
+    if not multisig.pubkeys:
+        # Pubkeys are specified by multisig.nodes and multisig.address_n, in this case all the pubkeys use the same path
+        return True
+    else:
+        # Pubkeys are specified by multisig.pubkeys, in this case we check that all the pubkeys use the same path
+        return all(
+            [hd.address_n == multisig.pubkeys[0].address_n for hd in multisig.pubkeys]
+        )

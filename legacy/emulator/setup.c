@@ -81,7 +81,7 @@ static void setup_flash(void) {
 #ifdef PIZERO
   /* clear firmware space */
   for (int i = FLASH_CODE_SECTOR_FIRST; i <= FLASH_CODE_SECTOR_LAST; i++) {
-    uint32_t size = flash_sector_size(i);
+    uint32_t size = flash_sector_size(i ,1);
     const void *data = flash_get_address(i, 0, size);
     memset((uint8_t *)data, 0, size);
   }

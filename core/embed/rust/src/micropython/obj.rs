@@ -1,6 +1,7 @@
-use core::convert::{TryFrom, TryInto};
-
-use cstr_core::CStr;
+use core::{
+    convert::{TryFrom, TryInto},
+    ffi::CStr,
+};
 
 use crate::error::Error;
 
@@ -97,10 +98,23 @@ impl Obj {
         // SAFETY:
         //  - `val` is in `0..=3` range.
         //  - MicroPython compiled with `MICROPY_OBJ_REPR == MICROPY_OBJ_REPR_A`.
-        //  - MicroPython compiled with `MICROPY_OBJ_IMMEDIATE_OBJS`.
-        //    micropython/py/obj.h #define MP_OBJ_NEW_IMMEDIATE_OBJ(val)
-        //    ((mp_obj_t)(((val) << 3) | 6))
+        //  - MicroPython compiled with `MICROPY_OBJ_IMMEDIATE_OBJS.
+
+        // micropython/py/obj.h
+        // #define MP_OBJ_NEW_IMMEDIATE_OBJ(val) ((mp_obj_t)(((val) << 3) | 6))
         unsafe { Self::from_bits((val << 3) | 6) }
+    }
+
+    pub const fn small_int(val: u16) -> Self {
+        // SAFETY:
+        //  - MicroPython compiled with `MICROPY_OBJ_REPR == MICROPY_OBJ_REPR_A`.
+        //  - val fits in 31 bits
+        // (TODO if we ever add static asserts, we can extend this function to u32)
+
+        // micropython/py/obj.h
+        // #define MP_OBJ_NEW_SMALL_INT(small_int) \
+        //     ((mp_obj_t)((((mp_uint_t)(small_int)) << 1) | 1))
+        unsafe { Self::from_bits(((val << 1) | 1) as usize) }
     }
 }
 
@@ -277,7 +291,7 @@ impl TryFrom<&'static CStr> for Obj {
         // SAFETY:
         //  - `CStr` is guaranteed to be null-terminated UTF-8.
         //  - the argument is static so it will remain valid for the lifetime of result.
-        let obj = unsafe { ffi::trezor_obj_str_from_rom_text(val.as_ptr()) };
+        let obj = unsafe { ffi::trezor_obj_str_from_rom_text(val.as_ptr() as _) };
         if obj.is_null() {
             Err(Error::AllocationFailed)
         } else {
@@ -303,6 +317,23 @@ impl TryFrom<(Obj, Obj)> for Obj {
     }
 }
 
+impl TryFrom<(Obj, Obj, Obj)> for Obj {
+    type Error = Error;
+
+    fn try_from(val: (Obj, Obj, Obj)) -> Result<Self, Self::Error> {
+        // SAFETY:
+        //  - Should work with any micropython objects.
+        // EXCEPTION: Will raise if allocation fails.
+        let values = [val.0, val.1, val.2];
+        let obj = catch_exception(|| unsafe { ffi::mp_obj_new_tuple(3, values.as_ptr()) })?;
+        if obj.is_null() {
+            Err(Error::AllocationFailed)
+        } else {
+            Ok(obj)
+        }
+    }
+}
+
 //
 // # Additional conversions based on the methods above.
 //
@@ -310,14 +341,14 @@ impl TryFrom<(Obj, Obj)> for Obj {
 impl From<u8> for Obj {
     fn from(val: u8) -> Self {
         // `u8` will fit into smallint so no error should happen here.
-        unwrap!(u32::from(val).try_into())
+        Obj::small_int(val as u16)
     }
 }
 
 impl From<u16> for Obj {
     fn from(val: u16) -> Self {
         // `u16` will fit into smallint so no error should happen here.
-        unwrap!(u32::from(val).try_into())
+        Obj::small_int(val)
     }
 }
 
@@ -423,5 +454,22 @@ impl Obj {
     pub fn is_str(self) -> bool {
         let is_type_str = unsafe { ffi::mp_type_str.is_type_of(self) };
         is_type_str || self.is_qstr()
+    }
+
+    pub fn type_<'a>(self) -> Option<&'a super::typ::Type> {
+        if self.is_ptr() {
+            // SAFETY:
+            // Safe for pointers, for as long as MicroPython behaves sanely.
+            // We assume that:
+            // * The pointer is a valid MicroPython object, which has `ObjBase` as its first
+            //   element.
+            // * The type pointer points to a valid type object.
+            // * The pointee has a 'static lifetime, i.e., either is ROM-based, or GC
+            //   allocated.
+            let base = self.as_ptr() as *const ObjBase;
+            unsafe { (*base).type_.as_ref() }
+        } else {
+            None
+        }
     }
 }

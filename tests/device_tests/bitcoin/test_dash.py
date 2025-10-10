@@ -20,6 +20,7 @@ from trezorlib import btc, messages
 from trezorlib.debuglink import TrezorClientDebugLink as Client
 from trezorlib.tools import parse_path
 
+from ...common import is_core
 from ...tx_cache import TxCache
 from .signtx import (
     request_extra_data,
@@ -39,7 +40,7 @@ TXHASH_15575a = bytes.fromhex(
     "15575a1c874bd60a819884e116c42e6791c8283ce1fc3b79f0d18531a61bbb8a"
 )
 
-pytestmark = pytest.mark.altcoin
+pytestmark = [pytest.mark.altcoin, pytest.mark.models("t1b1", "t2t1")]
 
 
 def test_send_dash(client: Client):
@@ -57,15 +58,13 @@ def test_send_dash(client: Client):
         script_type=messages.OutputScriptType.PAYTOADDRESS,
     )
     with client:
-        tt = client.features.model == "T"
         client.set_expected_responses(
             [
                 request_input(0),
                 request_output(0),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                (tt, messages.ButtonRequest(code=B.ConfirmOutput)),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 messages.ButtonRequest(code=B.SignTx),
-                (tt, messages.ButtonRequest(code=B.SignTx)),
                 request_input(0),
                 request_meta(inp1.prev_hash),
                 request_input(0, inp1.prev_hash),
@@ -106,16 +105,14 @@ def test_send_dash_dip2_input(client: Client):
         script_type=messages.OutputScriptType.PAYTOADDRESS,
     )
     with client:
-        tt = client.features.model == "T"
         client.set_expected_responses(
             [
                 request_input(0),
                 request_output(0),
                 request_output(1),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                (tt, messages.ButtonRequest(code=B.ConfirmOutput)),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 messages.ButtonRequest(code=B.SignTx),
-                (tt, messages.ButtonRequest(code=B.SignTx)),
                 request_input(0),
                 request_meta(inp1.prev_hash),
                 request_input(0, inp1.prev_hash),

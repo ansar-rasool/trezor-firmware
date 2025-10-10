@@ -24,7 +24,7 @@ from . import ChoiceType, with_client
 if TYPE_CHECKING:
     from ..client import TrezorClient
 
-PATH_HELP = "BIP-32 path, e.g. m/44'/128'/0'"
+PATH_HELP = "BIP-32 path, e.g. m/44h/128h/0h"
 
 
 @click.group(name="monero")
@@ -41,16 +41,18 @@ def cli() -> None:
     type=ChoiceType({m.name: m for m in messages.MoneroNetworkType}),
     default=messages.MoneroNetworkType.MAINNET,
 )
+@click.option("-C", "--chunkify", is_flag=True)
 @with_client
 def get_address(
     client: "TrezorClient",
     address: str,
     show_display: bool,
     network_type: messages.MoneroNetworkType,
+    chunkify: bool,
 ) -> bytes:
     """Get Monero address for specified path."""
     address_n = tools.parse_path(address)
-    return monero.get_address(client, address_n, show_display, network_type)
+    return monero.get_address(client, address_n, show_display, network_type, chunkify)
 
 
 @cli.command()

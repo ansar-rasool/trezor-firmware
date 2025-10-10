@@ -5,10 +5,10 @@ package hw.trezor.messages.bitcoin;
 option java_package = "com.satoshilabs.trezor.lib.protobuf";
 option java_outer_classname = "TrezorMessageBitcoin";
 
-option (include_in_bitcoin_only) = true;
-
-import "messages.proto";
 import "messages-common.proto";
+import "options.proto";
+
+option (include_in_bitcoin_only) = true;
 
 /**
  * Type of script which will be used for transaction input
@@ -53,16 +53,22 @@ enum AmountUnit {
     SATOSHI = 3;        // sat
 }
 
+enum MultisigPubkeysOrder {
+    PRESERVED = 0;      // order of pubkeys is preserved
+    LEXICOGRAPHIC = 1;  // pubkeys are sorted lexicographically (BIP-67)
+}
+
 /**
  * Type of redeem script used in input
  * @embed
  */
 message MultisigRedeemScriptType {
-    repeated HDNodePathType pubkeys = 1;    // pubkeys from multisig address (sorted lexicographically)
+    repeated HDNodePathType pubkeys = 1;    // this field is deprecated and will be removed in the future, use nodes together with address_n instead
     repeated bytes signatures = 2;          // existing signatures for partially signed input
     required uint32 m = 3;                  // "m" from n, how many valid signatures is necessary for spending
-    repeated common.HDNodeType nodes = 4;    // simplified way how to specify pubkeys if they share the same address_n path
-    repeated uint32 address_n = 5;                              // use only field 1 or fields 4+5, if fields 4+5 are used, field 1 is ignored
+    repeated common.HDNodeType nodes = 4;
+    repeated uint32 address_n = 5;          // path to derive pubkeys from nodes
+    optional MultisigPubkeysOrder pubkeys_order = 6 [default=PRESERVED]; // order of pubkeys in script pubkey
     /**
     * Structure representing HDNode + Path
     */
@@ -92,9 +98,10 @@ message GetPublicKey {
  * @end
  */
 message PublicKey {
-    required common.HDNodeType node = 1;        // BIP32 public node
+    required common.HDNodeType node = 1;        // BIP-32 public node
     required string xpub = 2;                   // serialized form of public node
     optional uint32 root_fingerprint = 3;       // master root node fingerprint
+    optional string descriptor = 4;             // BIP-380 descriptor
 }
 
 /**
@@ -110,6 +117,7 @@ message GetAddress {
     optional MultisigRedeemScriptType multisig = 4;                     // filled if we are showing a multisig address
     optional InputScriptType script_type = 5 [default=SPENDADDRESS];    // used to distinguish between various address formats (non-segwit, segwit, etc.)
     optional bool ignore_xpub_magic = 6;                                // ignore SLIP-0132 XPUB magic, use xpub/tpub prefix for all account types
+    optional bool chunkify = 7;                                         // display the address in chunks of 4 characters
 }
 
 /**
@@ -154,6 +162,7 @@ message SignMessage {
     optional string coin_name = 3 [default='Bitcoin'];                  // coin to use for signing
     optional InputScriptType script_type = 4 [default=SPENDADDRESS];    // used to distinguish between various address formats (non-segwit, segwit, etc.)
     optional bool no_script_type = 5;                                   // don't include script type information in the recovery byte of the signature, same as in Bitcoin Core
+    optional bool chunkify = 6;                                         // display the address in chunks of 4 characters
 }
 
 /**
@@ -176,6 +185,7 @@ message VerifyMessage {
     required bytes signature = 2;                       // signature to verify
     required bytes message = 3;                         // message to verify
     optional string coin_name = 4 [default='Bitcoin'];  // coin to use for verifying
+    optional bool chunkify = 5;                         // display the address in chunks of 4 characters
 }
 
 /**
@@ -199,6 +209,7 @@ message SignTx {
     optional bool decred_staking_ticket = 12 [default=false];  // only for Decred, this is signing a ticket purchase
     optional bool serialize = 13 [default=true];               // serialize the full transaction, as opposed to only outputting the signatures
     optional CoinJoinRequest coinjoin_request = 14;            // only for preauthorized CoinJoins
+    optional bool chunkify = 15;                               // display the address in chunks of 4 characters
 
     /**
      * Signing request for a CoinJoin transaction.
@@ -207,8 +218,8 @@ message SignTx {
         required uint32 fee_rate = 1;                // coordination fee rate in units of 10^-6 percent
         required uint64 no_fee_threshold = 2;        // PlebsDontPayThreshold in Wasabi, the input amount above which the fee rate applies
         required uint64 min_registrable_amount = 3;  // minimum registrable output amount
-        required bytes mask_public_key = 4;          // ephemeral secp256k1 public key used for masking coinjoin_flags, 33 bytes in compressed form
-        required bytes signature = 5;                // the trusted party's signature of the CoinJoin request digest
+        optional bytes mask_public_key = 4;          // ephemeral secp256k1 public key used for masking coinjoin_flags, 33 bytes in compressed form
+        optional bytes signature = 5;                // the trusted party's signature of the CoinJoin request digest
     }
 }
 
@@ -620,4 +631,3 @@ message AuthorizeCoinJoin {
     optional InputScriptType script_type = 7 [default=SPENDADDRESS];    // used to distinguish between various address formats (non-segwit, segwit, etc.)
     optional AmountUnit amount_unit = 8 [default=BITCOIN];              // show amounts in
 }
-

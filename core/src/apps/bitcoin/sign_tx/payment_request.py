@@ -1,12 +1,13 @@
 from micropython import const
 from typing import TYPE_CHECKING
 
-from trezor.wire import DataError
+from trezor.wire import DataError, context
 
 from .. import writers
 
 if TYPE_CHECKING:
     from trezor.messages import TxAckPaymentRequest, TxOutput
+
     from apps.common import coininfo
     from apps.common.keychain import Keychain
 
@@ -25,10 +26,12 @@ class PaymentRequestVerifier:
     def __init__(
         self, msg: TxAckPaymentRequest, coin: coininfo.CoinInfo, keychain: Keychain
     ) -> None:
-        from storage import cache
+        from storage.cache_common import APP_COMMON_NONCE
         from trezor.crypto.hashlib import sha256
         from trezor.utils import HashWriter
+
         from apps.common.address_mac import check_address_mac
+
         from .. import writers  # pylint: disable=import-outside-toplevel
 
         self.h_outputs = HashWriter(sha256())
@@ -39,9 +42,9 @@ class PaymentRequestVerifier:
 
         if msg.nonce:
             nonce = bytes(msg.nonce)
-            if cache.get(cache.APP_COMMON_NONCE) != nonce:
+            if context.cache_get(APP_COMMON_NONCE) != nonce:
                 raise DataError("Invalid nonce in payment request.")
-            cache.delete(cache.APP_COMMON_NONCE)
+            context.cache_delete(APP_COMMON_NONCE)
         else:
             nonce = b""
             if msg.memos:

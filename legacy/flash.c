@@ -22,8 +22,11 @@
 
 #include "common.h"
 #include "flash.h"
+#include "flash_area.h"
 #include "memory.h"
 #include "supervise.h"
+
+#define STORAGE_AREAS_COUNT 2
 
 static const uint32_t FLASH_SECTOR_TABLE[FLASH_SECTOR_COUNT + 1] = {
     [0] = 0x08000000,   // - 0x08003FFF |  16 KiB
@@ -41,6 +44,25 @@ static const uint32_t FLASH_SECTOR_TABLE[FLASH_SECTOR_COUNT + 1] = {
     [12] = 0x08100000,  // last element - not a valid sector
 };
 
+const flash_area_t STORAGE_AREAS[STORAGE_AREAS_COUNT] = {
+    {
+        .num_subareas = 1,
+        .subarea[0] =
+            {
+                .first_sector = 2,
+                .num_sectors = 1,
+            },
+    },
+    {
+        .num_subareas = 1,
+        .subarea[0] =
+            {
+                .first_sector = 3,
+                .num_sectors = 1,
+            },
+    },
+};
+
 static secbool flash_check_success(uint32_t status) {
   return (status & (FLASH_SR_PGAERR | FLASH_SR_PGPERR | FLASH_SR_PGSERR |
                     FLASH_SR_WRPERR))
@@ -55,7 +77,7 @@ secbool flash_unlock_write(void) {
 
 secbool flash_lock_write(void) { return flash_check_success(svc_flash_lock()); }
 
-const void *flash_get_address(uint8_t sector, uint32_t offset, uint32_t size) {
+const void *flash_get_address(uint16_t sector, uint32_t offset, uint32_t size) {
   if (sector >= FLASH_SECTOR_COUNT) {
     return NULL;
   }
@@ -67,30 +89,32 @@ const void *flash_get_address(uint8_t sector, uint32_t offset, uint32_t size) {
   return (const void *)FLASH_PTR(addr);
 }
 
-uint32_t flash_sector_size(uint8_t sector) {
-  if (sector >= FLASH_SECTOR_COUNT) {
+uint32_t flash_sector_size(uint16_t first_sector, uint16_t sector_count) {
+  if (first_sector + sector_count >= FLASH_SECTOR_COUNT) {
     return 0;
   }
-  return FLASH_SECTOR_TABLE[sector + 1] - FLASH_SECTOR_TABLE[sector];
+  return FLASH_SECTOR_TABLE[first_sector + sector_count] -
+         FLASH_SECTOR_TABLE[first_sector];
 }
 
-secbool flash_erase(uint8_t sector) {
-  ensure(flash_unlock_write(), NULL);
-  svc_flash_erase_sector(sector);
-  ensure(flash_lock_write(), NULL);
+uint16_t flash_sector_find(uint16_t first_sector, uint32_t offset) {
+  uint16_t sector = first_sector;
 
-  // Check whether the sector was really deleted (contains only 0xFF).
-  const uint32_t addr_start = FLASH_SECTOR_TABLE[sector],
-                 addr_end = FLASH_SECTOR_TABLE[sector + 1];
-  for (uint32_t addr = addr_start; addr < addr_end; addr += 4) {
-    if (*((const uint32_t *)FLASH_PTR(addr)) != 0xFFFFFFFF) {
-      return secfalse;
+  while (sector < FLASH_SECTOR_COUNT) {
+    uint32_t sector_size =
+        FLASH_SECTOR_TABLE[sector + 1] - FLASH_SECTOR_TABLE[sector];
+
+    if (offset < sector_size) {
+      break;
     }
+    offset -= sector_size;
+    sector++;
   }
-  return sectrue;
+
+  return sector;
 }
 
-secbool flash_write_byte(uint8_t sector, uint32_t offset, uint8_t data) {
+secbool flash_write_byte(uint16_t sector, uint32_t offset, uint8_t data) {
   uint8_t *address = (uint8_t *)flash_get_address(sector, offset, 1);
   if (address == NULL) {
     return secfalse;
@@ -110,7 +134,7 @@ secbool flash_write_byte(uint8_t sector, uint32_t offset, uint8_t data) {
   return sectrue;
 }
 
-secbool flash_write_word(uint8_t sector, uint32_t offset, uint32_t data) {
+secbool flash_write_word(uint16_t sector, uint32_t offset, uint32_t data) {
   uint32_t *address = (uint32_t *)flash_get_address(sector, offset, 4);
   if (address == NULL) {
     return secfalse;
@@ -131,5 +155,15 @@ secbool flash_write_word(uint8_t sector, uint32_t offset, uint32_t data) {
     return secfalse;
   }
 
+  return sectrue;
+}
+
+secbool flash_write_block(uint16_t sector, uint32_t offset,
+                          const flash_block_t block) {
+  return flash_write_word(sector, offset, block[0]);
+}
+
+secbool flash_sector_erase(uint16_t sector) {
+  svc_flash_erase_sector(sector);
   return sectrue;
 }

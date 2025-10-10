@@ -2,7 +2,7 @@
  * Trezor adaptation by Yura Pakhuchiy <pakhuchiy@gmail.com>. */
 /**
  * Groestl interface. This code implements Groestl with the recommended
- * parameters for SHA-3, with outputs of 224, 256, 384 and 512 bits.
+ * parameters for SHA-3, with output of 512 bits.
  *
  * ==========================(LICENSE BEGIN)============================
  *
@@ -29,7 +29,7 @@
  *
  * ===========================(LICENSE END)=============================
  *
- * @file     sph_groestl.h
+ * @file     groestl.h
  * @author   Thomas Pornin <thomas.pornin@cryptolog.com>
  */
 
@@ -37,9 +37,10 @@
 #define GROESTL_H__
 
 #include <stddef.h>
+#include <stdint.h>
 
 /**
- * This structure is a context for Groestl-384 and Groestl-512 computations:
+ * This structure is a context for Groestl-512 computation:
  * it contains the intermediate values and some data from the last
  * entered block. Once a Groestl computation has been performed, the
  * context can be reused for another computation.
@@ -49,13 +50,13 @@
  * <code>memcpy()</code>).
  */
 typedef struct {
-	unsigned char buf[128];    /* first field, for alignment */
-	size_t ptr;
-	union {
-		uint64_t wide[16];
-		uint32_t narrow[32];
-	} state;
-	uint64_t count;
+  unsigned char buf[128]; /* first field, for alignment */
+  size_t ptr;
+  union {
+    uint64_t wide[16];
+    uint32_t narrow[32];
+  } state;
+  uint64_t count;
 } sph_groestl_big_context;
 
 typedef sph_groestl_big_context GROESTL512_CTX;

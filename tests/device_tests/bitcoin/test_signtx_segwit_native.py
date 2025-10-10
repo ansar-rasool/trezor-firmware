@@ -21,6 +21,8 @@ from trezorlib.debuglink import TrezorClientDebugLink as Client
 from trezorlib.tools import H_, parse_path
 
 from ...bip32 import deserialize
+from ...common import is_core
+from ...input_flows import InputFlowConfirmAllWarnings
 from ...tx_cache import TxCache
 from .signtx import (
     assert_tx_matches,
@@ -81,18 +83,16 @@ def test_send_p2sh(client: Client):
         amount=123_456_789 - 11_000 - 12_300_000,
     )
     with client:
-        tt = client.features.model == "T"
         client.set_expected_responses(
             [
                 request_input(0),
                 request_output(0),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                (tt, messages.ButtonRequest(code=B.ConfirmOutput)),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 request_output(1),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                (tt, messages.ButtonRequest(code=B.ConfirmOutput)),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 messages.ButtonRequest(code=B.SignTx),
-                (tt, messages.ButtonRequest(code=B.SignTx)),
                 request_input(0),
                 request_meta(TXHASH_20912f),
                 request_input(0, TXHASH_20912f),
@@ -138,16 +138,14 @@ def test_send_p2sh_change(client: Client):
         amount=123_456_789 - 11_000 - 12_300_000,
     )
     with client:
-        tt = client.features.model == "T"
         client.set_expected_responses(
             [
                 request_input(0),
                 request_output(0),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                (tt, messages.ButtonRequest(code=B.ConfirmOutput)),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 request_output(1),
                 messages.ButtonRequest(code=B.SignTx),
-                (tt, messages.ButtonRequest(code=B.SignTx)),
                 request_input(0),
                 request_meta(TXHASH_20912f),
                 request_input(0, TXHASH_20912f),
@@ -193,18 +191,16 @@ def test_send_native(client: Client):
         amount=100_000 - 40_000 - 10_000,
     )
     with client:
-        tt = client.features.model == "T"
         client.set_expected_responses(
             [
                 request_input(0),
                 request_output(0),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                (tt, messages.ButtonRequest(code=B.ConfirmOutput)),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 request_output(1),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                (tt, messages.ButtonRequest(code=B.ConfirmOutput)),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 messages.ButtonRequest(code=B.SignTx),
-                (tt, messages.ButtonRequest(code=B.SignTx)),
                 request_input(0),
                 request_meta(TXHASH_b36780),
                 request_input(0, TXHASH_b36780),
@@ -282,16 +278,14 @@ def test_send_native_change(client: Client):
         amount=100_000 - 40_000 - 10_000,
     )
     with client:
-        tt = client.features.model == "T"
         client.set_expected_responses(
             [
                 request_input(0),
                 request_output(0),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                (tt, messages.ButtonRequest(code=B.ConfirmOutput)),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 request_output(1),
                 messages.ButtonRequest(code=B.SignTx),
-                (tt, messages.ButtonRequest(code=B.SignTx)),
                 request_input(0),
                 request_meta(TXHASH_fcb3f5),
                 request_input(0, TXHASH_fcb3f5),
@@ -351,22 +345,21 @@ def test_send_both(client: Client):
     )
 
     with client:
-        tt = client.features.model == "T"
         client.set_expected_responses(
             [
                 request_input(0),
                 request_input(1),
                 request_output(0),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                (tt, messages.ButtonRequest(code=B.ConfirmOutput)),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 request_output(1),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                (tt, messages.ButtonRequest(code=B.ConfirmOutput)),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 request_output(2),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                (tt, messages.ButtonRequest(code=B.ConfirmOutput)),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
+                (is_core(client), messages.ButtonRequest(code=B.SignTx)),
                 messages.ButtonRequest(code=B.SignTx),
-                (tt, messages.ButtonRequest(code=B.SignTx)),
                 request_input(0),
                 request_meta(TXHASH_65047a),
                 request_input(0, TXHASH_65047a),
@@ -436,14 +429,12 @@ def test_send_multisig_1(client: Client):
         script_type=messages.OutputScriptType.PAYTOADDRESS,
     )
 
-    tt = client.features.model == "T"
     expected_responses = [
         request_input(0),
         request_output(0),
         messages.ButtonRequest(code=B.ConfirmOutput),
-        (tt, messages.ButtonRequest(code=B.ConfirmOutput)),
+        (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
         messages.ButtonRequest(code=B.SignTx),
-        (tt, messages.ButtonRequest(code=B.SignTx)),
         request_input(0),
         request_meta(TXHASH_b9abfa),
         request_input(0, TXHASH_b9abfa),
@@ -515,14 +506,12 @@ def test_send_multisig_2(client: Client):
         script_type=messages.OutputScriptType.PAYTOADDRESS,
     )
 
-    tt = client.features.model == "T"
     expected_responses = [
         request_input(0),
         request_output(0),
         messages.ButtonRequest(code=B.ConfirmOutput),
-        (tt, messages.ButtonRequest(code=B.ConfirmOutput)),
+        (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
         messages.ButtonRequest(code=B.SignTx),
-        (tt, messages.ButtonRequest(code=B.SignTx)),
         request_input(0),
         request_meta(TXHASH_b9abfa),
         request_input(0, TXHASH_b9abfa),
@@ -601,15 +590,13 @@ def test_send_multisig_3_change(client: Client):
         script_type=messages.OutputScriptType.PAYTOP2SHWITNESS,
     )
 
-    tt = client.features.model == "T"
     expected_responses = [
         request_input(0),
         request_output(0),
         messages.ButtonRequest(code=B.UnknownDerivationPath),
         messages.ButtonRequest(code=B.ConfirmOutput),
-        (tt, messages.ButtonRequest(code=B.ConfirmOutput)),
+        (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
         messages.ButtonRequest(code=B.SignTx),
-        (tt, messages.ButtonRequest(code=B.SignTx)),
         request_input(0),
         request_meta(TXHASH_b9abfa),
         request_input(0, TXHASH_b9abfa),
@@ -626,6 +613,9 @@ def test_send_multisig_3_change(client: Client):
 
     with client:
         client.set_expected_responses(expected_responses)
+        if is_core(client):
+            IF = InputFlowConfirmAllWarnings(client)
+            client.set_input_flow(IF.get())
         signatures, _ = btc.sign_tx(
             client, "Testnet", [inp1], [out1], prev_txes=TX_API_TESTNET
         )
@@ -638,6 +628,9 @@ def test_send_multisig_3_change(client: Client):
 
     with client:
         client.set_expected_responses(expected_responses)
+        if is_core(client):
+            IF = InputFlowConfirmAllWarnings(client)
+            client.set_input_flow(IF.get())
         _, serialized_tx = btc.sign_tx(
             client, "Testnet", [inp1], [out1], prev_txes=TX_API_TESTNET
         )
@@ -689,15 +682,13 @@ def test_send_multisig_4_change(client: Client):
         script_type=messages.OutputScriptType.PAYTOWITNESS,
     )
 
-    tt = client.features.model == "T"
     expected_responses = [
         request_input(0),
         request_output(0),
         messages.ButtonRequest(code=B.UnknownDerivationPath),
         messages.ButtonRequest(code=B.ConfirmOutput),
-        (tt, messages.ButtonRequest(code=B.ConfirmOutput)),
+        (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
         messages.ButtonRequest(code=B.SignTx),
-        (tt, messages.ButtonRequest(code=B.SignTx)),
         request_input(0),
         request_meta(TXHASH_b9abfa),
         request_input(0, TXHASH_b9abfa),
@@ -714,6 +705,9 @@ def test_send_multisig_4_change(client: Client):
 
     with client:
         client.set_expected_responses(expected_responses)
+        if is_core(client):
+            IF = InputFlowConfirmAllWarnings(client)
+            client.set_input_flow(IF.get())
         signatures, _ = btc.sign_tx(
             client, "Testnet", [inp1], [out1], prev_txes=TX_API_TESTNET
         )
@@ -726,6 +720,9 @@ def test_send_multisig_4_change(client: Client):
 
     with client:
         client.set_expected_responses(expected_responses)
+        if is_core(client):
+            IF = InputFlowConfirmAllWarnings(client)
+            client.set_input_flow(IF.get())
         _, serialized_tx = btc.sign_tx(
             client, "Testnet", [inp1], [out1], prev_txes=TX_API_TESTNET
         )
@@ -792,20 +789,18 @@ def test_multisig_mismatch_inputs_single(client: Client):
     )
 
     with client:
-        tt = client.features.model == "T"
         client.set_expected_responses(
             [
                 request_input(0),
                 request_input(1),
                 request_output(0),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                (tt, messages.ButtonRequest(code=B.ConfirmOutput)),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 request_output(1),
                 # Ensure that the multisig output is not identified as a change output.
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                (tt, messages.ButtonRequest(code=B.ConfirmOutput)),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 messages.ButtonRequest(code=B.SignTx),
-                (tt, messages.ButtonRequest(code=B.SignTx)),
                 request_input(0),
                 request_meta(TXHASH_1c022d),
                 request_input(0, TXHASH_1c022d),

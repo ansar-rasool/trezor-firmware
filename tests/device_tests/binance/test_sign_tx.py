@@ -103,13 +103,18 @@ BINANCE_TEST_VECTORS = [
 
 @pytest.mark.altcoin
 @pytest.mark.binance
-@pytest.mark.skip_t1  # T1 support is not planned
+@pytest.mark.models("core")
 @pytest.mark.setup_client(
     mnemonic="offer caution gift cross surge pretty orange during eye soldier popular holiday mention east eight office fashion ill parrot vault rent devote earth cousin"
 )
 @pytest.mark.parametrize("message, expected_response", BINANCE_TEST_VECTORS)
-def test_binance_sign_message(client: Client, message, expected_response):
-    response = binance.sign_tx(client, parse_path("m/44h/714h/0h/0/0"), message)
+@pytest.mark.parametrize("chunkify", (True, False))
+def test_binance_sign_message(
+    client: Client, chunkify: bool, message: dict, expected_response: dict
+):
+    response = binance.sign_tx(
+        client, parse_path("m/44h/714h/0h/0/0"), message, chunkify=chunkify
+    )
 
     assert response.public_key.hex() == expected_response["public_key"]
 

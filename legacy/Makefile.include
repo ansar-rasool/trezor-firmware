@@ -101,6 +101,8 @@ CPUFLAGS   += -DHW_MODEL=$(HW_MODEL)
 CPUFLAGS   += -DHW_REVISION=0
 CFLAGS   += -DHW_MODEL=$(HW_MODEL)
 CFLAGS   += -DHW_REVISION=0
+CFLAGS   += -DFLASH_BLOCK_WORDS=1
+CFLAGS   += -DFLASH_BIT_ACCESS=1
 
 ifeq ($(EMULATOR),1)
 CFLAGS   += -DEMULATOR=1
@@ -123,6 +125,8 @@ CFLAGS += -DSECP256K1_CONTEXT_SIZE=180
 else
 CFLAGS += -DSECP256K1_CONTEXT_SIZE=208
 endif
+else
+CFLAGS   += -DUSE_INSECURE_PRNG=1
 endif
 
 CFLAGS   += $(shell pkg-config --cflags sdl2 SDL2_image)
@@ -137,7 +141,6 @@ LDSCRIPT  = $(TOP_DIR)/memory.ld
 endif
 
 CFLAGS   += -DEMULATOR=0
-CFLAGS   += -DRAND_PLATFORM_INDEPENDENT=1
 
 LDFLAGS  += --static \
             -Wl,--start-group \
@@ -198,6 +201,8 @@ CFLAGS += -DDEBUG_T1_SIGNATURES=1
 else
 CFLAGS += -DDEBUG_T1_SIGNATURES=0
 endif
+
+#../vendor/trezor-crypto/%.o: CFLAGS += -ftrivial-auto-var-init=zero
 
 all: $(NAME).bin
 

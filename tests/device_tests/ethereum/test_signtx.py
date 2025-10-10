@@ -16,26 +16,66 @@
 
 import pytest
 
-from trezorlib import ethereum, exceptions, messages
-from trezorlib.debuglink import TrezorClientDebugLink as Client, message_filters
+from trezorlib import ethereum, exceptions, messages, models
+from trezorlib.debuglink import TrezorClientDebugLink as Client
+from trezorlib.debuglink import message_filters
 from trezorlib.exceptions import TrezorFailure
-from trezorlib.tools import parse_path
+from trezorlib.tools import parse_path, unharden
 
 from ...common import parametrize_using_common_fixtures
+from ...definitions import encode_eth_network
+from ...input_flows import (
+    InputFlowConfirmAllWarnings,
+    InputFlowEthereumSignTxDataGoBack,
+    InputFlowEthereumSignTxDataScrollDown,
+    InputFlowEthereumSignTxDataSkip,
+    InputFlowEthereumSignTxGoBackFromSummary,
+    InputFlowEthereumSignTxShowFeeInfo,
+    InputFlowEthereumSignTxStaking,
+)
 
 TO_ADDR = "0x1d1c328764a41bda0492b66baa30c4a339ff85ef"
-SHOW_ALL = (143, 167)
-GO_BACK = (16, 220)
+
 
 pytestmark = [pytest.mark.altcoin, pytest.mark.ethereum]
+
+
+def make_defs(parameters: dict) -> messages.EthereumDefinitions:
+    # With removal of most built-in defs from firmware, we have test vectors
+    # that no longer run. Because this is not the place to test the definitions,
+    # we generate fake entries so that we can check the signing results.
+    address_n = parse_path(parameters["path"])
+    slip44 = unharden(address_n[1])
+    network = encode_eth_network(chain_id=parameters["chain_id"], slip44=slip44)
+
+    return messages.EthereumDefinitions(encoded_network=network)
 
 
 @parametrize_using_common_fixtures(
     "ethereum/sign_tx.json",
     "ethereum/sign_tx_eip155.json",
 )
-def test_signtx(client: Client, parameters, result):
+@pytest.mark.parametrize("chunkify", (True, False))
+def test_signtx(client: Client, chunkify: bool, parameters: dict, result: dict):
+    input_flow = (
+        InputFlowConfirmAllWarnings(client).get()
+        if not client.debug.legacy_debug
+        else None
+    )
+    _do_test_signtx(client, parameters, result, input_flow, chunkify=chunkify)
+
+
+def _do_test_signtx(
+    client: Client,
+    parameters: dict,
+    result: dict,
+    input_flow=None,
+    chunkify: bool = False,
+):
     with client:
+        if input_flow:
+            client.watch_layout()
+            client.set_input_flow(input_flow)
         sig_v, sig_r, sig_s = ethereum.sign_tx(
             client,
             n=parse_path(parameters["path"]),
@@ -47,6 +87,8 @@ def test_signtx(client: Client, parameters, result):
             value=int(parameters["value"], 16),
             tx_type=parameters["tx_type"],
             data=bytes.fromhex(parameters["data"]),
+            definitions=make_defs(parameters),
+            chunkify=chunkify,
         )
 
     expected_v = 2 * parameters["chain_id"] + 35
@@ -56,9 +98,55 @@ def test_signtx(client: Client, parameters, result):
     assert sig_v == result["sig_v"]
 
 
+# Data taken from sign_tx_eip1559.json["tests"][0]
+example_input_data = {
+    "parameters": {
+        "chain_id": 1,
+        "path": "m/44'/60'/0'/0/0",
+        "nonce": "0x0",
+        "gas_price": "0x4a817c800",
+        "gas_limit": "0x5208",
+        "value": "0x2540be400",
+        "to_address": "0x8eA7a3fccC211ED48b763b4164884DDbcF3b0A98",
+        "tx_type": None,
+        "data": "",
+    },
+    "result": {
+        "sig_v": 38,
+        "sig_r": "6a6349bddb5749bb8b96ce2566a035ef87a09dbf89b5c7e3dfdf9ed725912f24",
+        "sig_s": "4ae58ccd3bacee07cdc4a3e8540544fd009c4311af7048122da60f2054c07ee4",
+    },
+}
+
+
+@pytest.mark.models("core", reason="T1 does not support input flows")
+def test_signtx_fee_info(client: Client):
+    input_flow = InputFlowEthereumSignTxShowFeeInfo(client).get()
+    _do_test_signtx(
+        client,
+        example_input_data["parameters"],
+        example_input_data["result"],
+        input_flow,
+    )
+
+
+@pytest.mark.models("core")
+def test_signtx_go_back_from_summary(client: Client):
+    input_flow = InputFlowEthereumSignTxGoBackFromSummary(client).get()
+    _do_test_signtx(
+        client,
+        example_input_data["parameters"],
+        example_input_data["result"],
+        input_flow,
+    )
+
+
 @parametrize_using_common_fixtures("ethereum/sign_tx_eip1559.json")
-def test_signtx_eip1559(client: Client, parameters, result):
+@pytest.mark.parametrize("chunkify", (True, False))
+def test_signtx_eip1559(client: Client, chunkify: bool, parameters: dict, result: dict):
     with client:
+        if not client.debug.legacy_debug:
+            client.set_input_flow(InputFlowConfirmAllWarnings(client).get())
         sig_v, sig_r, sig_s = ethereum.sign_tx_eip1559(
             client,
             n=parse_path(parameters["path"]),
@@ -70,6 +158,8 @@ def test_signtx_eip1559(client: Client, parameters, result):
             chain_id=parameters["chain_id"],
             value=int(parameters["value"], 16),
             data=bytes.fromhex(parameters["data"]),
+            definitions=make_defs(parameters),
+            chunkify=chunkify,
         )
 
     assert sig_r.hex() == result["sig_r"]
@@ -126,15 +216,11 @@ def test_data_streaming(client: Client):
     checked in vectorized function above.
     """
     with client:
-        tt = client.features.model == "T"
         client.set_expected_responses(
             [
                 messages.ButtonRequest(code=messages.ButtonRequestType.SignTx),
                 messages.ButtonRequest(code=messages.ButtonRequestType.SignTx),
                 messages.ButtonRequest(code=messages.ButtonRequestType.SignTx),
-                (tt, messages.ButtonRequest(code=messages.ButtonRequestType.Other)),
-                (tt, messages.ButtonRequest(code=messages.ButtonRequestType.SignTx)),
-                (tt, messages.ButtonRequest(code=messages.ButtonRequestType.SignTx)),
                 message_filters.EthereumTxRequest(
                     data_length=1_024,
                     signature_r=None,
@@ -329,104 +415,27 @@ def test_sanity_checks_eip1559(client: Client):
         )
 
 
-def input_flow_skip(client: Client, cancel: bool = False):
-    yield  # confirm address
-    client.debug.press_yes()
-    yield  # confirm amount
-    client.debug.wait_layout()
-    client.debug.press_yes()
-    yield  # confirm data
-    if cancel:
-        client.debug.press_no()
-    else:
-        client.debug.press_yes()
-        yield  # gas price
-        client.debug.press_yes()
-        yield  # maximum fee
-        client.debug.press_yes()
-        yield  # hold to confirm
-        client.debug.press_yes()
+def input_flow_data_skip(client: Client, cancel: bool = False):
+    return InputFlowEthereumSignTxDataSkip(client, cancel).get()
 
 
-def input_flow_scroll_down(client: Client, cancel: bool = False):
-    yield  # confirm address
-    client.debug.wait_layout()
-    client.debug.press_yes()
-    yield  # confirm amount
-    client.debug.wait_layout()
-    client.debug.press_yes()
-    yield  # confirm data
-    client.debug.wait_layout()
-    client.debug.click(SHOW_ALL)
-
-    br = yield  # paginated data
-    for i in range(br.pages):
-        client.debug.wait_layout()
-        if i < br.pages - 1:
-            client.debug.swipe_up()
-
-    client.debug.press_yes()
-    yield  # confirm data
-    if cancel:
-        client.debug.press_no()
-    else:
-        client.debug.press_yes()
-        yield  # gas price
-        client.debug.press_yes()
-        yield  # maximum fee
-        client.debug.press_yes()
-        yield  # hold to confirm
-        client.debug.press_yes()
+def input_flow_data_scroll_down(client: Client, cancel: bool = False):
+    return InputFlowEthereumSignTxDataScrollDown(client, cancel).get()
 
 
-def input_flow_go_back(client: Client, cancel: bool = False):
-    br = yield  # confirm address
-    client.debug.wait_layout()
-    client.debug.press_yes()
-    br = yield  # confirm amount
-    client.debug.wait_layout()
-    client.debug.press_yes()
-    br = yield  # confirm data
-    client.debug.wait_layout()
-    client.debug.click(SHOW_ALL)
-
-    br = yield  # paginated data
-    for i in range(br.pages):
-        client.debug.wait_layout()
-        if i == 2:
-            client.debug.click(GO_BACK)
-            yield  # confirm data
-            client.debug.wait_layout()
-            if cancel:
-                client.debug.press_no()
-            else:
-                client.debug.press_yes()
-                yield  # confirm address
-                client.debug.wait_layout()
-                client.debug.press_yes()
-                yield  # confirm amount
-                client.debug.wait_layout()
-                client.debug.press_yes()
-                yield  # hold to confirm
-                client.debug.wait_layout()
-                client.debug.press_yes()
-            return
-
-        elif i < br.pages - 1:
-            client.debug.swipe_up()
+def input_flow_data_go_back(client: Client, cancel: bool = False):
+    return InputFlowEthereumSignTxDataGoBack(client, cancel).get()
 
 
 HEXDATA = "0123456789abcd000023456789abcd010003456789abcd020000456789abcd030000056789abcd040000006789abcd050000000789abcd060000000089abcd070000000009abcd080000000000abcd090000000001abcd0a0000000011abcd0b0000000111abcd0c0000001111abcd0d0000011111abcd0e0000111111abcd0f0000000002abcd100000000022abcd110000000222abcd120000002222abcd130000022222abcd140000222222abcd15"
 
 
 @pytest.mark.parametrize(
-    "flow", (input_flow_skip, input_flow_scroll_down, input_flow_go_back)
+    "flow", (input_flow_data_skip, input_flow_data_scroll_down, input_flow_data_go_back)
 )
-@pytest.mark.skip_t1
+@pytest.mark.models("core")
 def test_signtx_data_pagination(client: Client, flow):
-    with client:
-        client.watch_layout()
-        client.set_input_flow(flow(client))
+    def _sign_tx_call():
         ethereum.sign_tx(
             client,
             n=parse_path("m/44h/60h/0h/0/0"),
@@ -440,18 +449,66 @@ def test_signtx_data_pagination(client: Client, flow):
             data=bytes.fromhex(HEXDATA),
         )
 
-    with client, pytest.raises(exceptions.Cancelled):
+    with client:
         client.watch_layout()
-        client.set_input_flow(flow(client, cancel=True))
+        client.set_input_flow(flow(client))
+        _sign_tx_call()
+
+    if flow is not input_flow_data_scroll_down:
+        with client, pytest.raises(exceptions.Cancelled):
+            client.watch_layout()
+            client.set_input_flow(flow(client, cancel=True))
+            _sign_tx_call()
+
+
+@parametrize_using_common_fixtures("ethereum/sign_tx_staking.json")
+@pytest.mark.parametrize("chunkify", (True, False))
+def test_signtx_staking(client: Client, chunkify: bool, parameters: dict, result: dict):
+    input_flow = None
+    if client.model is not models.T1B1:
+        input_flow = InputFlowEthereumSignTxStaking(client).get()
+    _do_test_signtx(
+        client, parameters, result, input_flow=input_flow, chunkify=chunkify
+    )
+
+
+@parametrize_using_common_fixtures("ethereum/sign_tx_staking_data_error.json")
+def test_signtx_staking_bad_inputs(client: Client, parameters: dict, result: dict):
+    # result not needed
+    with pytest.raises(TrezorFailure, match=r"DataError"):
         ethereum.sign_tx(
             client,
-            n=parse_path("m/44h/60h/0h/0/0"),
-            nonce=0x0,
-            gas_price=0x14,
-            gas_limit=0x14,
-            to="0x1d1c328764a41bda0492b66baa30c4a339ff85ef",
-            chain_id=1,
-            value=0xA,
-            tx_type=None,
-            data=bytes.fromhex(HEXDATA),
+            n=parse_path(parameters["path"]),
+            nonce=int(parameters["nonce"], 16),
+            gas_price=int(parameters["gas_price"], 16),
+            gas_limit=int(parameters["gas_limit"], 16),
+            to=parameters["to_address"],
+            value=int(parameters["value"], 16),
+            data=bytes.fromhex(parameters["data"]),
+            chain_id=parameters["chain_id"],
+            tx_type=parameters["tx_type"],
+            definitions=None,
+            chunkify=False,
         )
+
+
+@parametrize_using_common_fixtures("ethereum/sign_tx_staking_eip1559.json")
+def test_signtx_staking_eip1559(client: Client, parameters: dict, result: dict):
+    with client:
+        sig_v, sig_r, sig_s = ethereum.sign_tx_eip1559(
+            client,
+            n=parse_path(parameters["path"]),
+            nonce=int(parameters["nonce"], 16),
+            max_gas_fee=int(parameters["max_gas_fee"], 16),
+            max_priority_fee=int(parameters["max_priority_fee"], 16),
+            gas_limit=int(parameters["gas_limit"], 16),
+            to=parameters["to_address"],
+            value=int(parameters["value"], 16),
+            data=bytes.fromhex(parameters["data"]),
+            chain_id=parameters["chain_id"],
+            definitions=None,
+            chunkify=True,
+        )
+    assert sig_r.hex() == result["sig_r"]
+    assert sig_s.hex() == result["sig_s"]
+    assert sig_v == result["sig_v"]

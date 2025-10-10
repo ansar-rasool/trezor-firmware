@@ -3,16 +3,13 @@ from typing import TYPE_CHECKING
 from apps.common.keychain import auto_keychain
 
 if TYPE_CHECKING:
-    from trezor.messages import MoneroGetAddress, MoneroAddress
-    from trezor.wire import Context
+    from trezor.messages import MoneroAddress, MoneroGetAddress
 
     from apps.common.keychain import Keychain
 
 
 @auto_keychain(__name__)
-async def get_address(
-    ctx: Context, msg: MoneroGetAddress, keychain: Keychain
-) -> MoneroAddress:
+async def get_address(msg: MoneroGetAddress, keychain: Keychain) -> MoneroAddress:
     from trezor import wire
     from trezor.messages import MoneroAddress
     from trezor.ui.layouts import show_address
@@ -25,10 +22,11 @@ async def get_address(
     account = msg.account  # local_cache_attribute
     minor = msg.minor  # local_cache_attribute
     payment_id = msg.payment_id  # local_cache_attribute
+    address_n = msg.address_n  # local_cache_attribute
 
-    await paths.validate_path(ctx, keychain, msg.address_n)
+    await paths.validate_path(keychain, address_n)
 
-    creds = misc.get_creds(keychain, msg.address_n, msg.network_type)
+    creds = misc.get_creds(keychain, address_n, msg.network_type)
     addr = creds.address
 
     have_subaddress = (
@@ -68,12 +66,14 @@ async def get_address(
         )
 
     if msg.show_display:
-        title = paths.address_n_to_str(msg.address_n)
+        from . import PATTERN, SLIP44_ID
+
         await show_address(
-            ctx,
             addr,
             address_qr="monero:" + addr,
-            title=title,
+            path=paths.address_n_to_str(address_n),
+            account=paths.get_account_name("XMR", msg.address_n, PATTERN, SLIP44_ID),
+            chunkify=bool(msg.chunkify),
         )
 
     return MoneroAddress(address=addr.encode())

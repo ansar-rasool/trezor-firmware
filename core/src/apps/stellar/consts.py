@@ -5,16 +5,16 @@ from trezor.enums import MessageType
 
 if TYPE_CHECKING:
     from trezor import protobuf
-
     from trezor.messages import (
         StellarAccountMergeOp,
         StellarAllowTrustOp,
         StellarBumpSequenceOp,
         StellarChangeTrustOp,
+        StellarClaimClaimableBalanceOp,
         StellarCreateAccountOp,
         StellarCreatePassiveSellOfferOp,
-        StellarManageDataOp,
         StellarManageBuyOfferOp,
+        StellarManageDataOp,
         StellarManageSellOfferOp,
         StellarPathPaymentStrictReceiveOp,
         StellarPathPaymentStrictSendOp,
@@ -36,6 +36,7 @@ if TYPE_CHECKING:
         | StellarPathPaymentStrictSendOp
         | StellarPaymentOp
         | StellarSetOptionsOp
+        | StellarClaimClaimableBalanceOp
     )
 
 
@@ -57,6 +58,7 @@ op_codes: dict[int, int] = {
     MessageType.StellarPathPaymentStrictSendOp: 13,
     MessageType.StellarPaymentOp: 1,
     MessageType.StellarSetOptionsOp: 5,
+    MessageType.StellarClaimClaimableBalanceOp: 15,
 }
 
 

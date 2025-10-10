@@ -105,9 +105,28 @@ the following marker:
 
 This marker must be registered in `REGISTERED_MARKERS` file in `tests` folder.
 
-If you wish to run a test only on TT, mark it with `@pytest.mark.skip_t1`.
-If the test should only run on T1, mark it with `@pytest.mark.skip_t2`.
-You must not use both on the same test.
+Tests can be run only for specific models. The marker `@pytest.mark.models()` can be
+used to narrow the selection:
+
+* `@pytest.mark.models("t3b1", "t2t1)` - only for Safe 3 rev2 and Trezor T
+* `@pytest.mark.models("core")` - only for trezor-core models (skip Trezor One)
+* `@pytest.mark.models(skip="t3t1")` - for all models except Safe 5
+* `@pytest.mark.models("core", skip="t3t1")` - for all trezor-core models except Safe 5
+
+Arguments can be a list of internal model names, or one of the following shortcuts:
+
+* `core` - all trezor-core models
+* `legacy` - just Trezor One
+* `safe` - Trezor Safe family
+* `safe3` - Trezor Safe 3 (covers T2B1 and T2T1)
+* `delizia` - covers the `delizia` UI (currently T3T1 only)
+
+You can specify a list as positional arguments, and exclude from it via `skip` keyword argument.
+
+You can provide a list of strings, a list of `TrezorModel` instances, or a
+comma-separated string of model names or shortcuts.
+
+You can specify a skip reason as `reason="TODO implement for Delizia too"`.
 
 [pytest-random-order]: https://pypi.org/project/pytest-random-order/
 

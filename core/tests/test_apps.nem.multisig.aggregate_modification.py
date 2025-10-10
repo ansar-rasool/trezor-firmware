@@ -1,11 +1,16 @@
-from common import *
+# flake8: noqa: F403,F405
+from common import *  # isort:skip
+
 from trezor.crypto import hashlib
 
 if not utils.BITCOIN_ONLY:
-    from trezor.messages import NEMAggregateModification
-    from trezor.messages import NEMCosignatoryModification
-    from trezor.messages import NEMSignTx
-    from trezor.messages import NEMTransactionCommon
+    from trezor.messages import (
+        NEMAggregateModification,
+        NEMCosignatoryModification,
+        NEMSignTx,
+        NEMTransactionCommon,
+    )
+
     from apps.nem.helpers import *
     from apps.nem.multisig import *
     from apps.nem.multisig.serialize import *
@@ -164,8 +169,11 @@ def _create_msg(
     )
 
     aggregate_modification = NEMAggregateModification(
-        modifications=[NEMCosignatoryModification(type=5, public_key=b"abc") for _ in range(modifications)],
-        relative_change=relative_change
+        modifications=[
+            NEMCosignatoryModification(type=5, public_key=b"abc")
+            for _ in range(modifications)
+        ],
+        relative_change=relative_change,
     )
 
     return NEMSignTx(

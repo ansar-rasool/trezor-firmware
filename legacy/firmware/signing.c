@@ -31,9 +31,6 @@
 #include "secp256k1.h"
 #include "transaction.h"
 #include "zkp_bip340.h"
-#ifdef USE_SECP256K1_ZKP_ECDSA
-#include "zkp_ecdsa.h"
-#endif
 #if DEBUG_LINK
 #include <inttypes.h>
 #include <stdio.h>
@@ -127,6 +124,8 @@ typedef struct {
   bool multisig_fp_set;
   bool multisig_fp_mismatch;
   uint8_t multisig_fp[32];
+  bool is_multisig;
+  MatchState is_multisig_state;
   uint32_t in_address_n[8];
   size_t in_address_n_count;
   InputScriptType in_script_type;
@@ -169,7 +168,6 @@ static secbool is_coinjoin;  // Is this a CoinJoin transaction?
 static uint64_t coinjoin_coordination_fee_base;
 static AuthorizeCoinJoin coinjoin_authorization;
 static CoinJoinRequest coinjoin_request;
-static Hasher coinjoin_request_hasher;
 
 /* A marker for in_address_n_count to indicate a mismatch in bip32 paths in
    input */
@@ -982,12 +980,34 @@ static bool extract_input_multisig_fp(TxInfo *tx_info,
   return true;
 }
 
+static void extract_is_multisig(TxInfo *tx_info, const TxInputType *txinput) {
+  switch (tx_info->is_multisig_state) {
+    case MatchState_MISMATCH:
+      return;
+    case MatchState_UNDEFINED:
+      tx_info->is_multisig_state = MatchState_MATCH;
+      tx_info->is_multisig = txinput->has_multisig;
+      return;
+    case MatchState_MATCH:
+      if (txinput->has_multisig != tx_info->is_multisig) {
+        tx_info->is_multisig_state = MatchState_MISMATCH;
+      }
+      return;
+  }
+}
+
 bool check_change_multisig_fp(const TxInfo *tx_info,
                               const TxOutputType *txoutput) {
   uint8_t h[32] = {0};
   return tx_info->multisig_fp_set && !tx_info->multisig_fp_mismatch &&
          cryptoMultisigFingerprint(&(txoutput->multisig), h) &&
          memcmp(tx_info->multisig_fp, h, 32) == 0;
+}
+
+bool check_change_is_multisig(const TxInfo *tx_info,
+                              const TxOutputType *txoutput) {
+  return tx_info->is_multisig_state == MatchState_MATCH &&
+         tx_info->is_multisig == txoutput->has_multisig;
 }
 
 static InputScriptType simple_script_type(InputScriptType script_type) {
@@ -1249,6 +1269,7 @@ static bool tx_info_init(TxInfo *tx_info, uint32_t inputs_count,
   tx_info->min_sequence = SEQUENCE_FINAL;
   tx_info->multisig_fp_set = false;
   tx_info->multisig_fp_mismatch = false;
+  tx_info->is_multisig_state = MatchState_UNDEFINED;
   tx_info->in_address_n_count = 0;
   tx_info->in_script_type = 0;
   tx_info->in_script_type_state = MatchState_UNDEFINED;
@@ -1365,24 +1386,6 @@ static bool init_coinjoin(const SignTx *msg,
          sizeof(coinjoin_authorization));
   memcpy(&coinjoin_request, &msg->coinjoin_request, sizeof(coinjoin_request));
 
-  // Begin hashing the CoinJoin request.
-  hasher_Init(&coinjoin_request_hasher, HASHER_SHA2);
-  hasher_Update(&coinjoin_request_hasher, (const uint8_t *)"CJR1", 4);
-  size_t coordinator_len =
-      strnlen(authorization->coordinator, sizeof(authorization->coordinator));
-  tx_script_hash(&coinjoin_request_hasher, coordinator_len,
-                 (const uint8_t *)authorization->coordinator);
-  uint32_t slip44 = coin->coin_type & PATH_UNHARDEN_MASK;
-  hasher_Update(&coinjoin_request_hasher, (uint8_t *)&slip44, sizeof(slip44));
-  hasher_Update(&coinjoin_request_hasher,
-                (const uint8_t *)&coinjoin_request.fee_rate, 4);
-  hasher_Update(&coinjoin_request_hasher,
-                (const uint8_t *)&coinjoin_request.no_fee_threshold, 8);
-  hasher_Update(&coinjoin_request_hasher,
-                (const uint8_t *)&coinjoin_request.min_registrable_amount, 8);
-  hasher_Update(&coinjoin_request_hasher,
-                coinjoin_request.mask_public_key.bytes, 33);
-  ser_length_hash(&coinjoin_request_hasher, msg->inputs_count);
   return true;
 }
 
@@ -1443,7 +1446,6 @@ void signing_init(const SignTx *msg, const CoinInfo *_coin, const HDNode *_root,
   memzero(&resp, sizeof(TxRequest));
   memzero(&coinjoin_authorization, sizeof(coinjoin_authorization));
   memzero(&coinjoin_request, sizeof(coinjoin_request));
-  memzero(&coinjoin_request_hasher, sizeof(coinjoin_request_hasher));
   is_replacement = false;
   unlocked_schema = unlock;
   signing = true;
@@ -1734,6 +1736,10 @@ static bool tx_info_add_input(TxInfo *tx_info, const TxInputType *txinput) {
       return false;
     }
 
+    // Remember whether all inputs are singlesig or all inputs are multisig.
+    // Change-outputs must be of the same type.
+    extract_is_multisig(tx_info, txinput);
+
     // Remember the input's script type. Change-outputs must use the same script
     // type as all inputs.
     extract_input_script_type(tx_info, txinput);
@@ -1817,15 +1823,15 @@ static void txinfo_fill_zip244_header_hash(TxInfo *tx_info) {
   // T.1a: version (4-byte little-endian version identifier including
   // overwintered flag)
   uint32_t ver = tx_info->version | TX_OVERWINTERED;
-  hasher_Update(&hasher, (const uint8_t *)&ver, 4);
+  HASHER_UPDATE_INT(&hasher, ver, uint32_t);
   // T.1b: version_group_id (4-byte little-endian version group identifier)
-  hasher_Update(&hasher, (const uint8_t *)&tx_info->version_group_id, 4);
+  HASHER_UPDATE_INT(&hasher, tx_info->version_group_id, uint32_t);
   // T.1c: consensus_branch_id (4-byte little-endian consensus branch id)
-  hasher_Update(&hasher, (const uint8_t *)&tx_info->branch_id, 4);
+  HASHER_UPDATE_INT(&hasher, tx_info->branch_id, uint32_t);
   // T.1d: lock_time (4-byte little-endian nLockTime value)
-  hasher_Update(&hasher, (const uint8_t *)&tx_info->lock_time, 4);
+  HASHER_UPDATE_INT(&hasher, tx_info->lock_time, uint32_t);
   // T.1e: expiry_height (4-byte little-endian block height)
-  hasher_Update(&hasher, (const uint8_t *)&tx_info->expiry, 4);
+  HASHER_UPDATE_INT(&hasher, tx_info->expiry, uint32_t);
   hasher_Final(&hasher, tx_info->hash_header);
 }
 #endif
@@ -1886,45 +1892,11 @@ static bool tx_info_check_outputs_hash(TxInfo *tx_info) {
 }
 
 static bool coinjoin_add_input(TxInputType *txi) {
-  // Masks for the signable and no_fee bits in coinjoin_flags.
-  const uint8_t COINJOIN_FLAGS_SIGNABLE = 0x01;
+  // Mask for the no_fee bits in coinjoin_flags.
   const uint8_t COINJOIN_FLAGS_NO_FEE = 0x02;
-
-  hasher_Update(&coinjoin_request_hasher, (uint8_t *)&txi->coinjoin_flags, 1);
 
   if (txi->script_type == InputScriptType_EXTERNAL) {
     return true;
-  }
-
-  // Compute the masking bit for the signable bit in coinjoin flags.
-  static CONFIDENTIAL uint8_t output_private_key[32] = {0};
-  uint8_t shared_secret[65] = {0};
-  bool res = (zkp_bip340_tweak_private_key(node.private_key, NULL,
-                                           output_private_key) == 0);
-  res = res && (ecdh_multiply(&secp256k1, output_private_key,
-                              coinjoin_request.mask_public_key.bytes,
-                              shared_secret) == 0);
-  memzero(&output_private_key, sizeof(output_private_key));
-  if (!res) {
-    fsm_sendFailure(FailureType_Failure_ProcessError,
-                    _("Failed to derive shared secret."));
-    signing_abort();
-    return false;
-  }
-
-  Hasher mask_hasher = {0};
-  uint8_t mask[SHA256_DIGEST_LENGTH] = {0};
-  hasher_Init(&mask_hasher, HASHER_SHA2);
-  hasher_Update(&mask_hasher, shared_secret + 1, 32);
-  tx_prevout_hash(&mask_hasher, txi);
-  hasher_Final(&mask_hasher, mask);
-
-  // Ensure that the input can be signed.
-  bool signable = (txi->coinjoin_flags ^ mask[0]) & COINJOIN_FLAGS_SIGNABLE;
-  if (!signable) {
-    fsm_sendFailure(FailureType_Failure_ProcessError, _("Unauthorized input"));
-    signing_abort();
-    return false;
   }
 
   // Add to coordination_fee_base, except for remixes and small inputs which are
@@ -2126,15 +2098,25 @@ static bool is_change_output(const TxInfo *tx_info,
     return false;
   }
 
-  /*
-   * Check the multisig fingerprint only for multisig outputs. This means that
-   * a transfer from a multisig account to a singlesig account is treated as a
-   * change-output as long as all other change-output conditions are satisfied.
-   * This goes a bit against the concept of a multisig account, but the other
-   * cosigners will notice that they are relinquishing control of the funds, so
-   * there is no security risk.
-   */
-  if (txoutput->has_multisig && !check_change_multisig_fp(tx_info, txoutput)) {
+  if (txoutput->has_multisig) {
+    if (!check_change_multisig_fp(tx_info, txoutput)) {
+      return false;
+    }
+    if (!multisig_uses_single_path(&(txoutput->multisig))) {
+      // An address that uses different derivation paths for different xpubs
+      // could be difficult to discover if the user did not note all the paths.
+      // The reason is that each path ends with an address index, which can have
+      // 1,000,000 possible values. If the address is a t-out-of-n multisig, the
+      // total number of possible paths is 1,000,000^n. This can be exploited by
+      // an attacker who has compromised the user's computer. The attacker could
+      // randomize the address indices and then demand a ransom from the user to
+      // reveal the paths. To prevent this, we require that all xpubs use the
+      // same derivation path.
+      return false;
+    }
+  }
+
+  if (!check_change_is_multisig(tx_info, txoutput)) {
     return false;
   }
 
@@ -2588,45 +2570,6 @@ static bool coinjoin_confirm_tx(void) {
   // Largest possible weight of an output supported by Trezor (P2TR or P2WSH).
   const uint64_t MAX_OUTPUT_WEIGHT = 4 * (8 + 1 + 1 + 1 + 32);
 
-  // The public key used for verifying coinjoin requests in production on
-  // mainnet.
-  const uint8_t COINJOIN_REQ_PUBKEY[] = {
-      0x02, 0x57, 0x03, 0xbb, 0xe1, 0x5b, 0xb0, 0x8e, 0x98, 0x21, 0xfe,
-      0x64, 0xaf, 0xf6, 0xb2, 0xef, 0x1a, 0x31, 0x60, 0xe3, 0x79, 0x9d,
-      0xd8, 0xf0, 0xce, 0xbf, 0x2c, 0x79, 0xe8, 0x67, 0xdd, 0x12, 0x5d};
-
-  // The public key used for verifying coinjoin requests on testnet and in debug
-  // mode. secp256k1 public key of m/0h for "all all ... all" seed.
-  const uint8_t COINJOIN_REQ_PUBKEY_TEST[] = {
-      0x03, 0x0f, 0xdf, 0x5e, 0x28, 0x9b, 0x5a, 0xef, 0x53, 0x62, 0x90,
-      0x95, 0x3a, 0xe8, 0x1c, 0xe6, 0x0e, 0x84, 0x1f, 0xf9, 0x56, 0xf3,
-      0x66, 0xac, 0x12, 0x3f, 0xa6, 0x9d, 0xb3, 0xc7, 0x9f, 0x21, 0xb0};
-
-  // Finish hashing the CoinJoin request.
-  hasher_Update(&coinjoin_request_hasher, info.hash_prevouts,
-                sizeof(info.hash_prevouts));
-  hasher_Update(&coinjoin_request_hasher, info.hash_outputs,
-                sizeof(info.hash_outputs));
-
-  // Verify the CoinJoin request signature.
-  uint8_t coinjoin_request_digest[SHA256_DIGEST_LENGTH] = {0};
-  hasher_Final(&coinjoin_request_hasher, coinjoin_request_digest);
-  if ((DEBUG_LINK || coin->coin_type == SLIP44_TESTNET) &&
-      ecdsa_verify_digest(&secp256k1, COINJOIN_REQ_PUBKEY_TEST,
-                          coinjoin_request.signature.bytes,
-                          coinjoin_request_digest) == 0) {
-    // success
-  } else if (ecdsa_verify_digest(&secp256k1, COINJOIN_REQ_PUBKEY,
-                                 coinjoin_request.signature.bytes,
-                                 coinjoin_request_digest) == 0) {
-    // success
-  } else {
-    fsm_sendFailure(FailureType_Failure_DataError,
-                    _("Invalid signature in coinjoin request."));
-    signing_abort();
-    return false;
-  }
-
   if (has_unverified_external_input) {
     fsm_sendFailure(FailureType_Failure_ProcessError,
                     _("Unverifiable external input."));
@@ -2723,26 +2666,26 @@ static void signing_hash_bip143(const TxInfo *tx_info,
   hasher_Init(&hasher_preimage, coin->curve->hasher_sign);
 
   // nVersion
-  hasher_Update(&hasher_preimage, (const uint8_t *)&tx_info->version, 4);
+  HASHER_UPDATE_INT(&hasher_preimage, tx_info->version, uint32_t);
   // hashPrevouts
-  hasher_Update(&hasher_preimage, tx_info->hash_prevouts143, 32);
+  HASHER_UPDATE_BYTES(&hasher_preimage, tx_info->hash_prevouts143, 32);
   // hashSequence
-  hasher_Update(&hasher_preimage, tx_info->hash_sequence143, 32);
+  HASHER_UPDATE_BYTES(&hasher_preimage, tx_info->hash_sequence143, 32);
   // outpoint
   tx_prevout_hash(&hasher_preimage, txinput);
   // scriptCode
   tx_script_hash(&hasher_preimage, txinput->script_sig.size,
                  txinput->script_sig.bytes);
   // amount
-  hasher_Update(&hasher_preimage, (const uint8_t *)&txinput->amount, 8);
+  HASHER_UPDATE_INT(&hasher_preimage, txinput->amount, uint64_t);
   // nSequence
   tx_sequence_hash(&hasher_preimage, txinput);
   // hashOutputs
-  hasher_Update(&hasher_preimage, tx_info->hash_outputs143, 32);
+  HASHER_UPDATE_BYTES(&hasher_preimage, tx_info->hash_outputs143, 32);
   // nLockTime
-  hasher_Update(&hasher_preimage, (const uint8_t *)&tx_info->lock_time, 4);
+  HASHER_UPDATE_INT(&hasher_preimage, tx_info->lock_time, uint32_t);
   // nHashType
-  hasher_Update(&hasher_preimage, (const uint8_t *)&hash_type, 4);
+  HASHER_UPDATE_INT(&hasher_preimage, hash_type, uint32_t);
 
   hasher_Final(&hasher_preimage, hash);
 }
@@ -2757,23 +2700,23 @@ static void signing_hash_bip341(const TxInfo *tx_info, uint32_t i,
   // nHashType
   hasher_Update(&sigmsg_hasher, &sighash_type, 1);
   // nVersion
-  hasher_Update(&sigmsg_hasher, (const uint8_t *)&tx_info->version, 4);
+  HASHER_UPDATE_INT(&sigmsg_hasher, tx_info->version, uint32_t);
   // nLockTime
-  hasher_Update(&sigmsg_hasher, (const uint8_t *)&tx_info->lock_time, 4);
+  HASHER_UPDATE_INT(&sigmsg_hasher, tx_info->lock_time, uint32_t);
   // sha_prevouts
-  hasher_Update(&sigmsg_hasher, tx_info->hash_prevouts, 32);
+  HASHER_UPDATE_BYTES(&sigmsg_hasher, tx_info->hash_prevouts, 32);
   // sha_amounts
-  hasher_Update(&sigmsg_hasher, tx_info->hash_amounts, 32);
+  HASHER_UPDATE_BYTES(&sigmsg_hasher, tx_info->hash_amounts, 32);
   // sha_scriptpubkeys
-  hasher_Update(&sigmsg_hasher, tx_info->hash_scriptpubkeys, 32);
+  HASHER_UPDATE_BYTES(&sigmsg_hasher, tx_info->hash_scriptpubkeys, 32);
   // sha_sequences
-  hasher_Update(&sigmsg_hasher, tx_info->hash_sequences, 32);
+  HASHER_UPDATE_BYTES(&sigmsg_hasher, tx_info->hash_sequences, 32);
   // sha_outputs
-  hasher_Update(&sigmsg_hasher, tx_info->hash_outputs, 32);
+  HASHER_UPDATE_BYTES(&sigmsg_hasher, tx_info->hash_outputs, 32);
   // spend_type 0 (no tapscript message extension, no annex)
   hasher_Update(&sigmsg_hasher, &zero, 1);
   // input_index
-  hasher_Update(&sigmsg_hasher, (const uint8_t *)&i, 4);
+  HASHER_UPDATE_INT(&sigmsg_hasher, i, uint32_t);
 
   hasher_Final(&sigmsg_hasher, hash);
 }
@@ -2792,16 +2735,15 @@ static void signing_hash_zip243(const TxInfo *tx_info,
 
   // 1. nVersion | fOverwintered
   uint32_t ver = tx_info->version | TX_OVERWINTERED;
-  hasher_Update(&hasher_preimage, (const uint8_t *)&ver, 4);
+  HASHER_UPDATE_INT(&hasher_preimage, ver, uint32_t);
   // 2. nVersionGroupId
-  hasher_Update(&hasher_preimage, (const uint8_t *)&tx_info->version_group_id,
-                4);
+  HASHER_UPDATE_INT(&hasher_preimage, tx_info->version_group_id, uint32_t);
   // 3. hashPrevouts
-  hasher_Update(&hasher_preimage, tx_info->hash_prevouts, 32);
+  HASHER_UPDATE_BYTES(&hasher_preimage, tx_info->hash_prevouts, 32);
   // 4. hashSequence
-  hasher_Update(&hasher_preimage, tx_info->hash_sequences, 32);
+  HASHER_UPDATE_BYTES(&hasher_preimage, tx_info->hash_sequences, 32);
   // 5. hashOutputs
-  hasher_Update(&hasher_preimage, tx_info->hash_outputs, 32);
+  HASHER_UPDATE_BYTES(&hasher_preimage, tx_info->hash_outputs, 32);
   // 6. hashJoinSplits
   hasher_Update(&hasher_preimage, null_bytes, 32);
   // 7. hashShieldedSpends
@@ -2809,20 +2751,20 @@ static void signing_hash_zip243(const TxInfo *tx_info,
   // 8. hashShieldedOutputs
   hasher_Update(&hasher_preimage, null_bytes, 32);
   // 9. nLockTime
-  hasher_Update(&hasher_preimage, (const uint8_t *)&tx_info->lock_time, 4);
+  HASHER_UPDATE_INT(&hasher_preimage, tx_info->lock_time, uint32_t);
   // 10. expiryHeight
-  hasher_Update(&hasher_preimage, (const uint8_t *)&tx_info->expiry, 4);
+  HASHER_UPDATE_INT(&hasher_preimage, tx_info->expiry, uint32_t);
   // 11. valueBalance
   hasher_Update(&hasher_preimage, null_bytes, 8);
   // 12. nHashType
-  hasher_Update(&hasher_preimage, (const uint8_t *)&hash_type, 4);
+  HASHER_UPDATE_INT(&hasher_preimage, hash_type, uint32_t);
   // 13a. outpoint
   tx_prevout_hash(&hasher_preimage, txinput);
   // 13b. scriptCode
   tx_script_hash(&hasher_preimage, txinput->script_sig.size,
                  txinput->script_sig.bytes);
   // 13c. value
-  hasher_Update(&hasher_preimage, (const uint8_t *)&txinput->amount, 8);
+  HASHER_UPDATE_INT(&hasher_preimage, txinput->amount, uint64_t);
   // 13d. nSequence
   tx_sequence_hash(&hasher_preimage, txinput);
 
@@ -2842,12 +2784,12 @@ static void signing_hash_zip244(const TxInfo *tx_info,
   // S.2g.i: prevout (field encoding)
   tx_prevout_hash(&hasher, txinput);
   // S.2g.ii: value (8-byte signed little-endian)
-  hasher_Update(&hasher, (const uint8_t *)&txinput->amount, 8);
+  HASHER_UPDATE_INT(&hasher, txinput->amount, uint64_t);
   // S.2g.iii: scriptPubKey (field encoding)
   tx_script_hash(&hasher, txinput->script_pubkey.size,
                  txinput->script_pubkey.bytes);
   // S.2g.iv: nSequence (4-byte unsigned little-endian)
-  hasher_Update(&hasher, (const uint8_t *)&txinput->sequence, 4);
+  HASHER_UPDATE_INT(&hasher, txinput->sequence, uint32_t);
   hasher_Final(&hasher, txin_sig_digest);
 
   // `S.2: transparent_sig_digest` field for signature digest computation.
@@ -2858,20 +2800,17 @@ static void signing_hash_zip244(const TxInfo *tx_info,
   // S.2a: hash_type (1 byte)
   hasher_Update(&hasher, (const uint8_t *)&hash_type, 1);
   // S.2b: prevouts_sig_digest (32-byte hash)
-  hasher_Update(&hasher, tx_info->hash_prevouts,
-                sizeof(tx_info->hash_prevouts));
+  HASHER_UPDATE_BYTES(&hasher, tx_info->hash_prevouts, 32);
   // S.2c: amounts_sig_digest (32-byte hash)
-  hasher_Update(&hasher, tx_info->hash_amounts, sizeof(tx_info->hash_amounts));
+  HASHER_UPDATE_BYTES(&hasher, tx_info->hash_amounts, 32);
   // S.2d: scriptpubkeys_sig_digest (32-byte hash)
-  hasher_Update(&hasher, tx_info->hash_scriptpubkeys,
-                sizeof(tx_info->hash_scriptpubkeys));
+  HASHER_UPDATE_BYTES(&hasher, tx_info->hash_scriptpubkeys, 32);
   // S.2e: sequence_sig_digest (32-byte hash)
-  hasher_Update(&hasher, tx_info->hash_sequences,
-                sizeof(tx_info->hash_sequences));
+  HASHER_UPDATE_BYTES(&hasher, tx_info->hash_sequences, 32);
   // S.2f: outputs_sig_digest (32-byte hash)
-  hasher_Update(&hasher, tx_info->hash_outputs, sizeof(tx_info->hash_outputs));
+  HASHER_UPDATE_BYTES(&hasher, tx_info->hash_outputs, 32);
   // S.2g: txin_sig_digest (32-byte hash)
-  hasher_Update(&hasher, txin_sig_digest, sizeof(txin_sig_digest));
+  HASHER_UPDATE_BYTES(&hasher, txin_sig_digest, 32);
   hasher_Final(&hasher, transparent_sig_digest);
 
   // `S.3: sapling_digest` field. Empty Sapling bundle.
@@ -2892,14 +2831,13 @@ static void signing_hash_zip244(const TxInfo *tx_info,
   hasher_InitParam(&hasher, HASHER_BLAKE2B_PERSONAL, personal,
                    sizeof(personal));
   // S.1: header_digest (32-byte hash output)
-  hasher_Update(&hasher, tx_info->hash_header, sizeof(tx_info->hash_header));
+  HASHER_UPDATE_BYTES(&hasher, tx_info->hash_header, 32);
   // S.2: transparent_sig_digest (32-byte hash output)
-  hasher_Update(&hasher, transparent_sig_digest,
-                sizeof(transparent_sig_digest));
+  HASHER_UPDATE_BYTES(&hasher, transparent_sig_digest, 32);
   // S.3: sapling_digest (32-byte hash output)
-  hasher_Update(&hasher, sapling_digest, sizeof(sapling_digest));
+  HASHER_UPDATE_BYTES(&hasher, sapling_digest, 32);
   // S.4: orchard_digest (32-byte hash output)
-  hasher_Update(&hasher, orchard_digest, sizeof(orchard_digest));
+  HASHER_UPDATE_BYTES(&hasher, orchard_digest, 32);
   hasher_Final(&hasher, hash);
 }
 #endif
@@ -2942,16 +2880,8 @@ static bool signing_verify_orig_nonlegacy_input(TxInputType *orig_input) {
       signing_hash_bip143(&orig_info, orig_input, hash);
     }
 
-#ifdef USE_SECP256K1_ZKP_ECDSA
-    if (coin->curve->params == &secp256k1) {
-      valid = zkp_ecdsa_verify_digest(coin->curve->params, node.public_key, sig,
-                                      hash) == 0;
-    } else
-#endif
-    {
-      valid = ecdsa_verify_digest(coin->curve->params, node.public_key, sig,
-                                  hash) == 0;
-    }
+    valid = ecdsa_verify_digest(coin->curve->params, node.public_key, sig,
+                                hash) == 0;
   }
 
   if (!valid) {
@@ -2965,22 +2895,13 @@ static bool signing_verify_orig_nonlegacy_input(TxInputType *orig_input) {
 static bool signing_verify_orig_legacy_input(void) {
   // Finalize legacy digest computation.
   uint32_t hash_type = signing_hash_type(&input);
-  hasher_Update(&ti.hasher, (const uint8_t *)&hash_type, 4);
+  HASHER_UPDATE_INT(&ti.hasher, hash_type, uint32_t);
 
   // Compute the signed digest and verify signature.
   uint8_t hash[32] = {0};
   tx_hash_final(&ti, hash, false);
 
-  bool valid = false;
-#ifdef USE_SECP256K1_ZKP_ECDSA
-  if (coin->curve->params == &secp256k1) {
-    valid =
-        zkp_ecdsa_verify_digest(coin->curve->params, pubkey, sig, hash) == 0;
-  } else
-#endif
-  {
-    valid = ecdsa_verify_digest(coin->curve->params, pubkey, sig, hash) == 0;
-  }
+  bool valid = ecdsa_verify_digest(coin->curve->params, pubkey, sig, hash) == 0;
 
   if (!valid) {
     fsm_sendFailure(FailureType_Failure_DataError, _("Invalid signature."));
@@ -3205,12 +3126,12 @@ static void phase1_request_orig_output(void) {
 
 #if !BITCOIN_ONLY
 static void signing_hash_decred(const TxInputType *txinput,
-                                const uint8_t *hash_witness, uint8_t *hash) {
+                                const uint8_t hash_witness[32], uint8_t *hash) {
   uint32_t hash_type = signing_hash_type(txinput);
   Hasher hasher_preimage = {0};
   hasher_Init(&hasher_preimage, coin->curve->hasher_sign);
-  hasher_Update(&hasher_preimage, (const uint8_t *)&hash_type, 4);
-  hasher_Update(&hasher_preimage, decred_hash_prefix, 32);
+  HASHER_UPDATE_INT(&hasher_preimage, hash_type, uint32_t);
+  HASHER_UPDATE_BYTES(&hasher_preimage, decred_hash_prefix, 32);
   hasher_Update(&hasher_preimage, hash_witness, 32);
   hasher_Final(&hasher_preimage, hash);
 }
@@ -3282,7 +3203,7 @@ static bool signing_sign_bip340(const uint8_t *private_key,
 static bool signing_sign_legacy_input(void) {
   // Finalize legacy digest computation.
   uint32_t hash_type = signing_hash_type(&input);
-  hasher_Update(&ti.hasher, (const uint8_t *)&hash_type, 4);
+  HASHER_UPDATE_INT(&ti.hasher, hash_type, uint32_t);
 
   // Compute the digest and generate signature.
   uint8_t hash[32] = {0};

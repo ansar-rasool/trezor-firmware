@@ -5,17 +5,18 @@ from trezor.crypto.hashlib import sha256
 from apps.common import coininfo
 
 if TYPE_CHECKING:
-    from trezor.messages import IdentityType, SignIdentity, SignedIdentity
-    from trezor.wire import Context
+    from trezor.messages import IdentityType, SignedIdentity, SignIdentity
+
     from apps.common.paths import Bip32Path
 
 # This module implements the SLIP-0013 authentication using a deterministic hierarchy, see
 # https://github.com/satoshilabs/slips/blob/master/slip-0013.md.
 
 
-async def sign_identity(ctx: Context, msg: SignIdentity) -> SignedIdentity:
+async def sign_identity(msg: SignIdentity) -> SignedIdentity:
     from trezor.messages import SignedIdentity
     from trezor.ui.layouts import confirm_sign_identity
+
     from apps.common.keychain import get_keychain
     from apps.common.paths import AlwaysMatchingSchema
 
@@ -25,13 +26,13 @@ async def sign_identity(ctx: Context, msg: SignIdentity) -> SignedIdentity:
     challenge_hidden = msg.challenge_hidden  # local_cache_attribute
     curve_name = msg.ecdsa_curve_name or "secp256k1"
 
-    keychain = await get_keychain(ctx, curve_name, [AlwaysMatchingSchema])
+    keychain = await get_keychain(curve_name, [AlwaysMatchingSchema])
     identity = serialize_identity(msg_identity)
 
     # require_confirm_sign_identity
     proto = msg_identity_proto.upper() if msg_identity_proto else "identity"
     await confirm_sign_identity(
-        ctx, proto, serialize_identity_without_proto(msg_identity), challenge_visual
+        proto, serialize_identity_without_proto(msg_identity), challenge_visual
     )
     # END require_confirm_sign_identity
 
@@ -45,8 +46,6 @@ async def sign_identity(ctx: Context, msg: SignIdentity) -> SignedIdentity:
     else:
         address = None
     pubkey = node.public_key()
-    if pubkey[0] == 0x01:
-        pubkey = b"\x00" + pubkey[1:]
     seckey = node.private_key()
 
     if msg_identity_proto in ("gpg", "signify", "ssh"):
@@ -62,6 +61,7 @@ async def sign_identity(ctx: Context, msg: SignIdentity) -> SignedIdentity:
         curve_name,
     )
 
+    # For ed25519, the public key has the prefix 0x00, as specified by SLIP-10. However, since this prefix is non-standard, it may be removed in the future.
     return SignedIdentity(address=address, public_key=pubkey, signature=signature)
 
 
@@ -90,6 +90,7 @@ def serialize_identity_without_proto(identity: IdentityType) -> str:
 
 def get_identity_path(identity: str, index: int, num: int) -> Bip32Path:
     from ustruct import pack, unpack
+
     from apps.common.paths import HARDENED
 
     identity_hash = sha256(pack("<I", index) + identity.encode()).digest()
@@ -104,8 +105,9 @@ def sign_challenge(
     sigtype: str | coininfo.CoinInfo,
     curve: str,
 ) -> bytes:
-    from apps.common.signverify import message_digest
     from trezor.wire import DataError
+
+    from apps.common.signverify import message_digest
 
     if sigtype == "gpg":
         data = challenge_hidden

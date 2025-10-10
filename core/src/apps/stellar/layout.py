@@ -1,73 +1,77 @@
 from typing import TYPE_CHECKING
 
 import trezor.ui.layouts as layouts
-from trezor import strings
+from trezor import TR, strings
 from trezor.enums import ButtonRequestType
 
 from . import consts
 
 if TYPE_CHECKING:
-    from trezor.wire import Context
     from trezor.enums import StellarMemoType
-
     from trezor.messages import StellarAsset
 
 
 async def require_confirm_init(
-    ctx: Context,
     address: str,
     network_passphrase: str,
     accounts_match: bool,
 ) -> None:
-    description = "Initialize signing with" + " your account" if accounts_match else ""
+    description = (
+        TR.stellar__initialize_signing_with + TR.stellar__your_account
+        if accounts_match
+        else ""
+    )
     await layouts.confirm_address(
-        ctx,
-        "Confirm Stellar",
+        TR.stellar__confirm_stellar,
         address,
-        description,
-        "confirm_init",
+        description=description,
+        br_name="confirm_init",
     )
 
     # get_network_warning
     if network_passphrase == consts.NETWORK_PASSPHRASE_PUBLIC:
         network = None
     elif network_passphrase == consts.NETWORK_PASSPHRASE_TESTNET:
-        network = "testnet network"
+        network = TR.stellar__testnet_network
     else:
-        network = "private network"
+        network = TR.stellar__private_network
 
     if network:
         await layouts.confirm_metadata(
-            ctx,
             "confirm_init_network",
-            "Confirm network",
-            "Transaction is on {}",
+            TR.stellar__confirm_network,
+            TR.stellar__on_network_template,
             network,
             ButtonRequestType.ConfirmOutput,
         )
 
 
-async def require_confirm_timebounds(ctx: Context, start: int, end: int) -> None:
+async def require_confirm_timebounds(start: int, end: int) -> None:
     await layouts.confirm_properties(
-        ctx,
         "confirm_timebounds",
-        "Confirm timebounds",
+        TR.stellar__confirm_timebounds,
         (
             (
-                "Valid from (UTC)",
-                strings.format_timestamp(start) if start > 0 else "[no restriction]",
+                TR.stellar__valid_from,
+                (
+                    strings.format_timestamp(start)
+                    if start > 0
+                    else TR.stellar__no_restriction
+                ),
             ),
             (
-                "Valid to (UTC)",
-                strings.format_timestamp(end) if end > 0 else "[no restriction]",
+                TR.stellar__valid_to,
+                (
+                    strings.format_timestamp(end)
+                    if end > 0
+                    else TR.stellar__no_restriction
+                ),
             ),
         ),
     )
 
 
-async def require_confirm_memo(
-    ctx: Context, memo_type: StellarMemoType, memo_text: str
-) -> None:
+async def require_confirm_memo(memo_type: StellarMemoType, memo_text: str) -> None:
     from trezor.enums import StellarMemoType
 
     if memo_type == StellarMemoType.TEXT:
@@ -80,30 +84,35 @@ async def require_confirm_memo(
         description = "Memo (RETURN)"
     else:
         return await layouts.confirm_action(
-            ctx,
             "confirm_memo",
-            "Confirm memo",
-            "No memo set!",
-            "Important: Many exchanges require a memo when depositing",
+            TR.stellar__confirm_memo,
+            TR.stellar__no_memo_set,
+            TR.stellar__exchanges_require_memo,
             br_code=ButtonRequestType.ConfirmOutput,
+            prompt_screen=True,
         )
 
     await layouts.confirm_blob(
-        ctx,
         "confirm_memo",
-        "Confirm memo",
+        TR.stellar__confirm_memo,
         memo_text,
         description,
     )
 
 
-async def require_confirm_final(ctx: Context, fee: int, num_operations: int) -> None:
-    op_str = strings.format_plural("{count} {plural}", num_operations, "operation")
+async def require_confirm_final(fee: int, num_operations: int) -> None:
+    op_str = strings.format_plural(
+        "{count} {plural}", num_operations, TR.plurals__transaction_of_x_operations
+    )
+    text = (
+        TR.stellar__sign_tx_count_template.format(op_str)
+        + " "
+        + TR.stellar__sign_tx_fee_template
+    )
     await layouts.confirm_metadata(
-        ctx,
         "confirm_final",
-        "Final confirm",
-        "Sign this transaction made up of " + op_str + " and pay {}\nfor fee?",
+        TR.stellar__final_confirm,
+        text,
         format_amount(fee),
         hold=True,
     )

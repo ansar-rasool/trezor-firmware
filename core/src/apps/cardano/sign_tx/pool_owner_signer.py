@@ -1,5 +1,6 @@
 from typing import TYPE_CHECKING
 
+from trezor import TR
 from trezor.wire import ProcessError
 
 from .signer import Signer
@@ -21,7 +22,7 @@ class PoolOwnerSigner(Signer):
     staking key in the list of pool owners.
     """
 
-    SIGNING_MODE_TITLE = "Confirming pool registration as owner."
+    SIGNING_MODE_TITLE = TR.cardano__confirming_pool_registration
 
     def _validate_tx_init(self) -> None:
         msg = self.msg  # local_cache_attribute
@@ -45,7 +46,6 @@ class PoolOwnerSigner(Signer):
 
         # super() omitted intentionally
         await layout.confirm_stake_pool_registration_final(
-            self.ctx,
             self.msg.protocol_magic,
             self.msg.ttl,
             self.msg.validity_interval_start,
@@ -79,9 +79,12 @@ class PoolOwnerSigner(Signer):
         from ..helpers.paths import SCHEMA_STAKING_ANY_ACCOUNT
 
         super()._validate_witness_request(witness_request)
-        if not SCHEMA_STAKING_ANY_ACCOUNT.match(witness_request.path):
+        if not (
+            SCHEMA_STAKING_ANY_ACCOUNT.match(witness_request.path)
+            and witness_request.path == self.pool_owner_path
+        ):
             raise ProcessError(
-                "Stakepool registration transaction can only contain staking witnesses"
+                "Stakepool registration transaction can only contain the pool owner witness request"
             )
 
     def _is_network_id_verifiable(self) -> bool:

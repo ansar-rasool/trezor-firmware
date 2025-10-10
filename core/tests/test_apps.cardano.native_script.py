@@ -1,12 +1,17 @@
-from common import *
+# flake8: noqa: F403,F405
+from common import *  # isort:skip
+
 from trezor import wire
 from trezor.crypto import cardano
 from trezor.enums import CardanoNativeScriptType
 from trezor.messages import CardanoNativeScript
 
 if not utils.BITCOIN_ONLY:
+    from apps.cardano.native_script import (
+        get_native_script_hash,
+        validate_native_script,
+    )
     from apps.cardano.seed import Keychain
-    from apps.cardano.native_script import get_native_script_hash, validate_native_script
 
 VALID_NATIVE_SCRIPTS = [
     # PUB_KEY
@@ -68,7 +73,7 @@ VALID_NATIVE_SCRIPTS = [
     # ALL scripts are empty
     [
         CardanoNativeScript(type=CardanoNativeScriptType.ALL, scripts=[]),
-        b"d441227553a0f1a965fee7d60a0f724b368dd1bddbc208730fccebcf"
+        b"d441227553a0f1a965fee7d60a0f724b368dd1bddbc208730fccebcf",
     ],
     # ANY
     [
@@ -92,7 +97,7 @@ VALID_NATIVE_SCRIPTS = [
     # ANY scripts are empty
     [
         CardanoNativeScript(type=CardanoNativeScriptType.ANY, scripts=[]),
-        b"52dc3d43b6d2465e96109ce75ab61abe5e9c1d8a3c9ce6ff8a3af528"
+        b"52dc3d43b6d2465e96109ce75ab61abe5e9c1d8a3c9ce6ff8a3af528",
     ],
     # N OF K
     [
@@ -122,8 +127,10 @@ VALID_NATIVE_SCRIPTS = [
     ],
     # N_OF_K scripts are empty
     [
-        CardanoNativeScript(type=CardanoNativeScriptType.N_OF_K, required_signatures_count=0, scripts=[]),
-        b"3530cc9ae7f2895111a99b7a02184dd7c0cea7424f1632d73951b1d7"
+        CardanoNativeScript(
+            type=CardanoNativeScriptType.N_OF_K, required_signatures_count=0, scripts=[]
+        ),
+        b"3530cc9ae7f2895111a99b7a02184dd7c0cea7424f1632d73951b1d7",
     ],
     # INVALID BEFORE
     [
@@ -182,7 +189,13 @@ VALID_NATIVE_SCRIPTS = [
                     scripts=[
                         CardanoNativeScript(
                             type=CardanoNativeScriptType.PUB_KEY,
-                            key_path=[1854 | HARDENED, 1815 | HARDENED, 0 | HARDENED, 0, 0],
+                            key_path=[
+                                1854 | HARDENED,
+                                1815 | HARDENED,
+                                0 | HARDENED,
+                                0,
+                                0,
+                            ],
                         ),
                         CardanoNativeScript(
                             type=CardanoNativeScriptType.PUB_KEY,
@@ -198,7 +211,13 @@ VALID_NATIVE_SCRIPTS = [
                     scripts=[
                         CardanoNativeScript(
                             type=CardanoNativeScriptType.PUB_KEY,
-                            key_path=[1854 | HARDENED, 1815 | HARDENED, 0 | HARDENED, 0, 0],
+                            key_path=[
+                                1854 | HARDENED,
+                                1815 | HARDENED,
+                                0 | HARDENED,
+                                0,
+                                0,
+                            ],
                         ),
                         CardanoNativeScript(
                             type=CardanoNativeScriptType.PUB_KEY,

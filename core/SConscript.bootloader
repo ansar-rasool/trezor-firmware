@@ -1,52 +1,47 @@
 # pylint: disable=E0602
 
 import os
-import tools
+import shlex
+import tools, models, ui
 
-TREZOR_MODEL = ARGUMENTS.get('TREZOR_MODEL', 'T')
+TREZOR_MODEL = ARGUMENTS.get('TREZOR_MODEL', 'T2T1')
 CMAKELISTS = int(ARGUMENTS.get('CMAKELISTS', 0))
-DMA2D = False
+BOOTLOADER_QA = ARGUMENTS.get('BOOTLOADER_QA', '0') == '1'
+PRODUCTION = 0 if BOOTLOADER_QA else ARGUMENTS.get('PRODUCTION', '0') == '1'
+HW_REVISION = ARGUMENTS.get('HW_REVISION', None)
+UI_DEBUG_OVERLAY = ARGUMENTS.get('UI_DEBUG_OVERLAY', '0') == '1'
 
-if TREZOR_MODEL in ('1', ):
-    # skip bootloader build
-    env = Environment()
-    def build_bootloader(target,source,env):
-        print(f'Bootloader: nothing to build for Model {TREZOR_MODEL}')
-    program_bin = env.Command(
-                 target='bootloader.bin',
-                 source=None,
-                 action=build_bootloader
-             )
-    Return()
+FEATURES_WANTED = ["input", "rgb_led", "consumption_mask", "usb", "optiga", "dma2d"]
 
 CCFLAGS_MOD = ''
 CPPPATH_MOD = []
 CPPDEFINES_MOD = []
 SOURCE_MOD = []
-
-if TREZOR_MODEL in ('1', 'R'):
-    FONT_NORMAL='Font_PixelOperator_Regular_8'
-    FONT_DEMIBOLD=None
-    FONT_BOLD=None
-    FONT_MONO='Font_PixelOperatorMono_Regular_8'
-if TREZOR_MODEL in ('T', ):
-    FONT_NORMAL='Font_Roboto_Regular_20'
-    FONT_DEMIBOLD=None
-    FONT_BOLD=None
-    FONT_MONO='Font_RobotoMono_Regular_20'
+SOURCE_MOD_CRYPTO = []
+CPPDEFINES_HAL = []
+SOURCE_HAL = []
+PATH_HAL = []
+RUST_UI_FEATURES = []
 
 # modtrezorcrypto
 CCFLAGS_MOD += '-Wno-sequence-point '
 CPPPATH_MOD += [
     'vendor/trezor-crypto',
+    'vendor/trezor-storage',
 ]
 CPPDEFINES_MOD += [
+    'KERNEL_MODE',
     'AES_128',
     'AES_192',
     'USE_KECCAK',
     'ED25519_NO_PRECOMP',
+    'FANCY_FATAL_ERROR',
 ]
+
 SOURCE_MOD += [
+    'vendor/trezor-storage/flash_area.c',
+]
+SOURCE_MOD_CRYPTO = [
     'vendor/trezor-crypto/blake2s.c',
     'vendor/trezor-crypto/chacha_drbg.c',
     'vendor/trezor-crypto/chacha20poly1305/chacha_merged.c',
@@ -67,36 +62,25 @@ CPPPATH_MOD += [
 ]
 
 SOURCE_MOD += [
-    'embed/extmod/modtrezorui/buffers.c',
-    'embed/extmod/modtrezorui/colors.c',
-    'embed/extmod/modtrezorui/display.c',
-    'embed/extmod/modtrezorui/fonts/fonts.c',
-    'embed/extmod/modtrezorui/fonts/font_bitmap.c',
+    'embed/upymod/modtrezorcrypto/rand.c',
+    'embed/gfx/bitblt/gfx_bitblt.c',
+    'embed/gfx/bitblt/gfx_bitblt_mono8.c',
+    'embed/gfx/bitblt/gfx_bitblt_rgb565.c',
+    'embed/gfx/bitblt/gfx_bitblt_rgba8888.c',
+    'embed/gfx/fonts/font_bitmap.c',
+    'embed/gfx/gfx_color.c',
+    'embed/gfx/gfx_draw.c',
+    'embed/gfx/terminal.c',
+    'embed/io/display/display_utils.c',
+    'embed/util/flash/flash_utils.c',
+    'embed/util/image/image.c',
+    'embed/util/rsod/rsod.c',
+    'embed/util/scm_revision/scm_revision.c',
+    'embed/rtl/error_handling.c',
+    'embed/rtl/mini_printf.c',
     'vendor/micropython/lib/uzlib/adler32.c',
     'vendor/micropython/lib/uzlib/crc32.c',
     'vendor/micropython/lib/uzlib/tinflate.c',
-]
-
-SOURCE_STMHAL = [
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_cortex.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_dma.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_flash.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_flash_ex.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_gpio.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_i2c.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_pcd.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_pcd_ex.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_pwr.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_rcc.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sd.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_spi.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sram.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_tim.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_tim_ex.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_ll_fmc.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_ll_sdmmc.c',
-    'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_ll_usb.c',
 ]
 
 SOURCE_NANOPB = [
@@ -105,59 +89,48 @@ SOURCE_NANOPB = [
     'vendor/nanopb/pb_encode.c',
 ]
 
+ui.init_ui(TREZOR_MODEL, "bootloader", RUST_UI_FEATURES)
+
+env = Environment(
+    ENV=os.environ,
+    CFLAGS=f"{ARGUMENTS.get('CFLAGS', '')} -DPRODUCTION={int(PRODUCTION)} -DBOOTLOADER_QA={int(BOOTLOADER_QA)}",
+    CPPDEFINES_IMPLICIT=[],
+    CPPDEFPREFIX="-D'",
+    CPPDEFSUFFIX="'",
+    )
+
+FEATURES_AVAILABLE = models.configure_board(TREZOR_MODEL, HW_REVISION, FEATURES_WANTED, env, CPPDEFINES_HAL, SOURCE_HAL, PATH_HAL)
+
 SOURCE_BOOTLOADER = [
-    'embed/bootloader/startup.s',
-    'embed/bootloader/header.S',
-    'embed/bootloader/bootui.c',
-    'embed/bootloader/main.c',
-    'embed/bootloader/messages.c',
-    'embed/bootloader/protob/messages.pb.c',
+    'embed/projects/bootloader/header.S',
+    'embed/projects/bootloader/bootui.c',
+    'embed/projects/bootloader/main.c',
+    'embed/projects/bootloader/poll.c',
+    'embed/projects/bootloader/antiglitch.c',
+    'embed/projects/bootloader/workflow/wf_firmware_update.c',
+    'embed/projects/bootloader/workflow/wf_wipe_device.c',
+    'embed/projects/bootloader/workflow/wf_get_features.c',
+    'embed/projects/bootloader/workflow/wf_initialize.c',
+    'embed/projects/bootloader/workflow/wf_ping.c',
+    'embed/projects/bootloader/workflow/wf_bootloader.c',
+    'embed/projects/bootloader/workflow/wf_empty_device.c',
+    'embed/projects/bootloader/workflow/wf_auto_update.c',
+    'embed/projects/bootloader/workflow/wf_host_control.c',
+    'embed/projects/bootloader/wire/codec_v1.c',
+    'embed/projects/bootloader/wire/wire_iface_usb.c',
+    'embed/projects/bootloader/protob/protob.c',
+    'embed/projects/bootloader/protob/pb/messages.pb.c',
+    'embed/projects/bootloader/version_check.c',
 ]
 
-SOURCE_TREZORHAL = [
-    'embed/trezorhal/common.c',
-    'embed/trezorhal/image.c',
-    'embed/trezorhal/flash.c',
-    'embed/trezorhal/mini_printf.c',
-    'embed/trezorhal/mpu.c',
-    'embed/trezorhal/random_delays.c',
-    'embed/trezorhal/rng.c',
-    'embed/trezorhal/stm32.c',
-    'embed/trezorhal/systick.c',
-    'embed/trezorhal/usb.c',
-    'embed/trezorhal/usbd_conf.c',
-    'embed/trezorhal/usbd_core.c',
-    'embed/trezorhal/usbd_ctlreq.c',
-    'embed/trezorhal/usbd_ioreq.c',
-    'embed/trezorhal/util.s',
-    'embed/trezorhal/vectortable.s',
-]
-
-if TREZOR_MODEL in ('R'):
-    SOURCE_TREZORHAL.append('embed/trezorhal/button.c')
-    SOURCE_TREZORHAL.append('embed/trezorhal/rgb_led.c')
-if TREZOR_MODEL in ('T',):
-    SOURCE_TREZORHAL.append('embed/trezorhal/touch.c')
-
-if DMA2D:
-    SOURCE_STMHAL.append('vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_dma2d.c')
-    SOURCE_TREZORHAL.append('embed/trezorhal/dma2d.c')
-    CPPDEFINES_MOD += [
-        'USE_DMA2D',
+if 'optiga' in FEATURES_AVAILABLE:
+    SOURCE_BOOTLOADER += [
+        'embed/projects/bootloader/workflow/wf_unlock_bootloader.c',
     ]
 
-# fonts
-tools.add_font('NORMAL', FONT_NORMAL, CPPDEFINES_MOD, SOURCE_MOD)
-tools.add_font('BOLD', FONT_BOLD, CPPDEFINES_MOD, SOURCE_MOD)
-tools.add_font('DEMIBOLD', FONT_DEMIBOLD, CPPDEFINES_MOD, SOURCE_MOD)
-tools.add_font('MONO', FONT_MONO, CPPDEFINES_MOD, SOURCE_MOD)
-
-
-env = Environment(ENV=os.environ, CFLAGS='%s -DPRODUCTION=%s' % (ARGUMENTS.get('CFLAGS', ''), ARGUMENTS.get('PRODUCTION', '0')))
-
-tools.configure_board(TREZOR_MODEL, env, CPPDEFINES_MOD, SOURCE_TREZORHAL)
 
 env.Replace(
+    CAT='cat',
     CP='cp',
     AS='arm-none-eabi-as',
     AR='arm-none-eabi-ar',
@@ -172,68 +145,77 @@ env.Replace(
 env.Replace(
     TREZOR_MODEL=TREZOR_MODEL, )
 
-if TREZOR_MODEL in ('T', 'R'):
-    CPU_ASFLAGS = '-mthumb -mcpu=cortex-m4 -mfloat-abi=hard -mfpu=fpv4-sp-d16'
-    CPU_CCFLAGS = '-mthumb -mcpu=cortex-m4 -mfloat-abi=hard -mfpu=fpv4-sp-d16 -mtune=cortex-m4 '
-    CPU_MODEL   = 'STM32F427xx'
-    RUST_TARGET = 'thumbv7em-none-eabihf'
-elif TREZOR_MODEL in ('1',):
-    CPU_ASFLAGS = '-mthumb -mcpu=cortex-m3 -mfloat-abi=soft'
-    CPU_CCFLAGS = '-mthumb -mtune=cortex-m3 -mcpu=cortex-m3 -mfloat-abi=soft '
-    CPU_MODEL   = 'STM32F405xx'
-    RUST_TARGET = 'thumbv7m-none-eabi'
-else:
-    raise ValueError('Unknown Trezor model')
+ALLPATHS = [
+        'embed/rust',
+        'embed/projects/bootloader',
+        'embed/projects/bootloader/nanopb',
+        'embed/projects/bootloader/protob',
+        'embed/rtl/inc',
+        'embed/models',
+        'embed/sys/bsp/inc',
+        'embed/gfx/inc',
+        'embed/util/translations/inc',
+        'embed/util/image/inc',
+        'embed/util/rsod/inc',
+        'embed/util/scm_revision/inc',
+        'embed/upymod/modtrezorui',
+        'vendor/nanopb',
+    ] + CPPPATH_MOD + PATH_HAL
 
 env.Replace(
     COPT=env.get('ENV').get('OPTIMIZE', '-Os'),
     CCFLAGS='$COPT '
     '-g3 '
     '-nostdlib '
-    '-std=gnu99 -Wall -Werror -Wdouble-promotion -Wpointer-arith -Wno-missing-braces -fno-common '
+    '-std=gnu11 -Wall -Werror -Wdouble-promotion -Wpointer-arith -Wno-missing-braces -fno-common '
     '-fsingle-precision-constant -fdata-sections -ffunction-sections '
     '-ffreestanding '
-    '-fstack-protector-all '
-    + CPU_CCFLAGS + CCFLAGS_MOD,
+    '-fstack-protector-strong '
+    +  env.get('ENV')["CPU_CCFLAGS"] + CCFLAGS_MOD,
     CCFLAGS_QSTR='-DNO_QSTR -DN_X64 -DN_X86 -DN_THUMB',
-    LINKFLAGS='-T embed/bootloader/memory.ld -Wl,--gc-sections -Wl,-Map=build/bootloader/bootloader.map -Wl,--warn-common -Wl,--print-memory-usage',
-    CPPPATH=[
-        'embed/rust',
-        'embed/bootloader',
-        'embed/bootloader/nanopb',
-        'embed/bootloader/protob',
-        'embed/trezorhal',
-        'embed/extmod/modtrezorui',
-        'vendor/micropython/lib/stm32lib/STM32F4xx_HAL_Driver/Inc',
-        'vendor/micropython/lib/stm32lib/CMSIS/STM32F4xx/Include',
-        'vendor/micropython/lib/cmsis/inc',
-        'vendor/nanopb',
-    ] + CPPPATH_MOD,
+    LINKFLAGS=['-Tbuild/bootloader/memory.ld', '-Wl,--gc-sections', '-Wl,-Map=build/bootloader/bootloader.map', '-Wl,--warn-common', '-Wl,--print-memory-usage'],
+    CPPPATH=ALLPATHS,
     CPPDEFINES=[
         'BOOTLOADER',
         'TREZOR_MODEL_'+TREZOR_MODEL,
-        CPU_MODEL,
         'USE_HAL_DRIVER',
-        ('STM32_HAL_H', '"<stm32f4xx.h>"'),
         'PB_FIELD_16BIT',
         'PB_ENCODE_ARRAYS_UNPACKED',
         'PB_VALIDATE_UTF8',
-    ] + CPPDEFINES_MOD,
-    ASFLAGS=CPU_ASFLAGS,
-    ASPPFLAGS='$CFLAGS $CCFLAGS', )
+    ] + CPPDEFINES_MOD + CPPDEFINES_HAL,
+    ASFLAGS=env.get('ENV')['CPU_ASFLAGS'],
+    ASPPFLAGS='$CFLAGS $CCFLAGS',
+    )
 
 env.Replace(
-    HEADERTOOL='tools/headertool.py',
+    HEADERTOOL='headertool',
 )
 
 env.Replace(
-    ALLSOURCES=SOURCE_MOD + SOURCE_BOOTLOADER + SOURCE_NANOPB + SOURCE_STMHAL + SOURCE_TREZORHAL,
-    ALLDEFS=tools.get_defs_for_cmake(env['CPPDEFINES']))
+    ALLSOURCES=SOURCE_MOD + SOURCE_MOD_CRYPTO + SOURCE_BOOTLOADER + SOURCE_NANOPB + SOURCE_HAL,
+    ALLDEFS=tools.get_defs_for_cmake(env['CPPDEFINES'] + env['CPPDEFINES_IMPLICIT'] + [f"PRODUCTION={int(PRODUCTION)}", f"BOOTLOADER_QA={int(BOOTLOADER_QA)}"]))
 
 cmake_gen = env.Command(
     target='CMakeLists.txt',
     source='',
     action='$MAKECMAKELISTS --sources $ALLSOURCES --dirs $CPPPATH --defs $ALLDEFS',
+)
+
+#
+# Rust library
+#
+features = ['bootloader',] + FEATURES_AVAILABLE + RUST_UI_FEATURES
+
+if UI_DEBUG_OVERLAY:
+    features.append('ui_debug_overlay')
+
+rust = tools.add_rust_lib(
+    env=env,
+    build='bootloader',
+    profile='release',
+    features=features,
+    all_paths=ALLPATHS,
+    build_dir=str(Dir('.').abspath),
 )
 
 
@@ -243,20 +225,32 @@ cmake_gen = env.Command(
 
 obj_program = []
 obj_program += env.Object(source=SOURCE_MOD)
+obj_program += env.Object(source=SOURCE_MOD_CRYPTO, CCFLAGS='$CCFLAGS -ftrivial-auto-var-init=zero')
 obj_program += env.Object(source=SOURCE_BOOTLOADER)
 obj_program += env.Object(source=SOURCE_NANOPB)
-obj_program += env.Object(source=SOURCE_STMHAL)
-obj_program += env.Object(source=SOURCE_TREZORHAL)
+obj_program += env.Object(source=SOURCE_HAL)
+
+
+linkerscript_gen = env.Command(
+    target='memory.ld',
+    source=[f'embed/models/{TREZOR_MODEL}/memory.ld', env.get('ENV')['LINKER_SCRIPT'].format(target='bootloader')],
+    action='$CAT $SOURCES > $TARGET',
+)
 
 program_elf = env.Command(
     target='bootloader.elf',
     source=obj_program,
     action=
-    '$LINK -o $TARGET $CCFLAGS $CFLAGS $LINKFLAGS $SOURCES -lc_nano -lgcc',
+    '$LINK -o $TARGET $CCFLAGS $CFLAGS $SOURCES $LINKFLAGS -lc_nano -lm -lgcc',
 )
 
-BINARY_NAME = f"build/bootloader/bootloader-{tools.get_model_identifier(TREZOR_MODEL)}"
-BINARY_NAME += "-" + tools.get_version('embed/bootloader/version.h')
+env.Depends(program_elf, linkerscript_gen)
+env.Depends(program_elf, rust)
+
+SUFFIX = '_qa' if BOOTLOADER_QA else ''
+
+BINARY_NAME = f"build/bootloader/bootloader-{TREZOR_MODEL}{SUFFIX}"
+BINARY_NAME += "-" + tools.get_version('embed/projects/bootloader/version.h')
 BINARY_NAME += "-" + tools.get_git_revision_short_hash()
 BINARY_NAME += "-dirty" if tools.get_git_modified() else ""
 BINARY_NAME += ".bin"
@@ -268,7 +262,7 @@ program_bin = env.Command(
     target='bootloader.bin',
     source=program_elf,
     action=[
-        '$OBJCOPY -O binary -j .header -j .flash -j .data $SOURCE $TARGET',
-        '$HEADERTOOL $TARGET ' + ('-D' if ARGUMENTS.get('PRODUCTION', '0') == '0' else ''),
+        '$OBJCOPY -O binary -j .header -j .flash -j .data -j .confidential $SOURCE $TARGET',
+        '$HEADERTOOL $TARGET ' + ('-D' if not PRODUCTION else ''),
         '$CP $TARGET ' + BINARY_NAME,
     ], )

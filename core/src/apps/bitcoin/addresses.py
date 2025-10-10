@@ -2,19 +2,21 @@ from typing import TYPE_CHECKING
 
 from trezor.crypto import base58
 from trezor.crypto.hashlib import sha256
+from trezor.enums import InputScriptType
 from trezor.utils import HashWriter
 from trezor.wire import ProcessError
 
 from apps.common import address_type
 
 from .common import ecdsa_hash_pubkey, encode_bech32_address
+from .multisig import multisig_get_pubkeys, multisig_pubkey_index
 from .scripts import output_script_native_segwit, write_output_script_multisig
 
 if TYPE_CHECKING:
-    from trezor.messages import MultisigRedeemScriptType
     from trezor.crypto import bip32
+    from trezor.messages import MultisigRedeemScriptType
+
     from apps.common.coininfo import CoinInfo
-    from trezor.enums import InputScriptType
 
 
 def get_address(
@@ -23,9 +25,6 @@ def get_address(
     node: bip32.HDNode,
     multisig: MultisigRedeemScriptType | None = None,
 ) -> str:
-    from trezor.enums import InputScriptType
-    from .multisig import multisig_get_pubkeys, multisig_pubkey_index
-
     node_public_key = node.public_key()  # result_cache
 
     if multisig:

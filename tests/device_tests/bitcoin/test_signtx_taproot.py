@@ -16,11 +16,12 @@
 
 import pytest
 
-from trezorlib import btc, messages
+from trezorlib import btc, messages, models
 from trezorlib.debuglink import TrezorClientDebugLink as Client
 from trezorlib.exceptions import TrezorFailure
 from trezorlib.tools import H_, parse_path
 
+from ...common import is_core
 from ...tx_cache import TxCache
 from .signtx import (
     assert_tx_matches,
@@ -62,7 +63,8 @@ TXHASH_c96621 = bytes.fromhex(
 )
 
 
-def test_send_p2tr(client: Client):
+@pytest.mark.parametrize("chunkify", (True, False))
+def test_send_p2tr(client: Client, chunkify: bool):
     inp1 = messages.TxInputType(
         # tb1pn2d0yjeedavnkd8z8lhm566p0f2utm3lgvxrsdehnl94y34txmts5s7t4c
         address_n=parse_path("m/86h/1h/0h/1/0"),
@@ -78,15 +80,13 @@ def test_send_p2tr(client: Client):
         script_type=messages.OutputScriptType.PAYTOADDRESS,
     )
     with client:
-        tt = client.features.model == "T"
         client.set_expected_responses(
             [
                 request_input(0),
                 request_output(0),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                (tt, messages.ButtonRequest(code=B.ConfirmOutput)),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 messages.ButtonRequest(code=B.SignTx),
-                (tt, messages.ButtonRequest(code=B.SignTx)),
                 request_input(0),
                 request_output(0),
                 request_input(0),
@@ -94,7 +94,7 @@ def test_send_p2tr(client: Client):
             ]
         )
         _, serialized_tx = btc.sign_tx(
-            client, "Testnet", [inp1], [out1], prev_txes=TX_API
+            client, "Testnet", [inp1], [out1], prev_txes=TX_API, chunkify=chunkify
         )
 
     assert_tx_matches(
@@ -134,17 +134,15 @@ def test_send_two_with_change(client: Client):
         amount=6_800 + 13_000 - 200 - 15_000,
     )
     with client:
-        tt = client.features.model == "T"
         client.set_expected_responses(
             [
                 request_input(0),
                 request_input(1),
                 request_output(0),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                (tt, messages.ButtonRequest(code=B.ConfirmOutput)),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 request_output(1),
                 messages.ButtonRequest(code=B.SignTx),
-                (tt, messages.ButtonRequest(code=B.SignTx)),
                 request_input(0),
                 request_input(1),
                 request_output(0),
@@ -225,7 +223,6 @@ def test_send_mixed(client: Client):
     )
 
     with client:
-        tt = client.features.model == "T"
         client.set_expected_responses(
             [
                 # process inputs
@@ -236,20 +233,20 @@ def test_send_mixed(client: Client):
                 # approve outputs
                 request_output(0),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                (tt, messages.ButtonRequest(code=B.ConfirmOutput)),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 request_output(1),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                (tt, messages.ButtonRequest(code=B.ConfirmOutput)),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 request_output(2),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                (tt, messages.ButtonRequest(code=B.ConfirmOutput)),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 request_output(3),
                 messages.ButtonRequest(code=B.ConfirmOutput),
                 request_output(4),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                (tt, messages.ButtonRequest(code=B.ConfirmOutput)),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
+                (is_core(client), messages.ButtonRequest(code=B.SignTx)),
                 messages.ButtonRequest(code=B.SignTx),
-                (tt, messages.ButtonRequest(code=B.SignTx)),
                 # verify inputs
                 request_input(0),
                 request_meta(TXHASH_8c3ea7),
@@ -296,7 +293,7 @@ def test_send_mixed(client: Client):
                 request_input(0),
                 request_input(1),
                 request_input(2),
-                (client.features.model == "1", request_input(3)),
+                (client.model is models.T1B1, request_input(3)),
                 request_finished(),
             ]
         )
@@ -358,7 +355,6 @@ def test_attack_script_type(client: Client):
         return msg
 
     with client:
-        tt = client.features.model == "T"
         client.set_filter(messages.TxAck, attack_processor)
         client.set_expected_responses(
             [
@@ -366,9 +362,9 @@ def test_attack_script_type(client: Client):
                 request_input(1),
                 request_output(0),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                (tt, messages.ButtonRequest(code=B.ConfirmOutput)),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
+                (is_core(client), messages.ButtonRequest(code=B.SignTx)),
                 messages.ButtonRequest(code=B.SignTx),
-                (tt, messages.ButtonRequest(code=B.SignTx)),
                 request_input(0),
                 request_input(1),
                 request_output(0),

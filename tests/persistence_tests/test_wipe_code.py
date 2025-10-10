@@ -1,8 +1,9 @@
 from trezorlib import debuglink, device, messages
 from trezorlib.debuglink import TrezorClientDebugLink as Client
+from trezorlib.debuglink import message_filters
 
 from ..common import MNEMONIC12
-from ..emulators import EmulatorWrapper
+from ..emulators import Emulator, EmulatorWrapper
 from ..upgrade_tests import core_only, legacy_only
 
 PIN = "1234"
@@ -26,56 +27,46 @@ def setup_device_core(client: Client, pin: str, wipe_code: str) -> None:
         client, MNEMONIC12, pin, passphrase_protection=False, label="WIPECODE"
     )
 
-    def input_flow():
-        yield  # do you want to set/change the wipe_code?
-        client.debug.press_yes()
-        if pin is not None:
-            yield  # enter current pin
-            client.debug.input(pin)
-        yield  # enter new wipe code
-        client.debug.input(wipe_code)
-        yield  # enter new wipe code again
-        client.debug.input(wipe_code)
-        yield  # success
-        client.debug.press_yes()
-
     with client:
-        client.set_expected_responses(
-            [messages.ButtonRequest()] * 5 + [messages.Success, messages.Features]
-        )
-        client.set_input_flow(input_flow)
+        client.use_pin_sequence([pin, wipe_code, wipe_code])
         device.change_wipe_code(client)
 
 
 @core_only
-def test_wipe_code_activate_core():
-    with EmulatorWrapper("core") as emu:
-        # set up device
-        setup_device_core(emu.client, PIN, WIPE_CODE)
+def test_wipe_code_activate_core(core_emulator: Emulator):
+    # set up device
+    setup_device_core(core_emulator.client, PIN, WIPE_CODE)
 
-        emu.client.init_device()
-        device_id = emu.client.features.device_id
+    core_emulator.client.init_device()
+    device_id = core_emulator.client.features.device_id
 
-        # Initiate Change pin process
-        ret = emu.client.call_raw(messages.ChangePin(remove=False))
-        assert isinstance(ret, messages.ButtonRequest)
-        emu.client.debug.press_yes()
-        ret = emu.client.call_raw(messages.ButtonAck())
+    # Initiate Change pin process
+    ret = core_emulator.client.call_raw(messages.ChangePin(remove=False))
+    assert isinstance(ret, messages.ButtonRequest)
+    assert ret.name == "change_pin"
+    core_emulator.client.debug.press_yes()
+    ret = core_emulator.client.call_raw(messages.ButtonAck())
 
-        # Enter the wipe code instead of the current PIN
-        assert ret == messages.ButtonRequest(code=messages.ButtonRequestType.PinEntry)
-        emu.client._raw_write(messages.ButtonAck())
-        emu.client.debug.input(WIPE_CODE)
+    # Enter the wipe code instead of the current PIN
+    expected = message_filters.ButtonRequest(code=messages.ButtonRequestType.PinEntry)
+    assert expected.match(ret)
+    core_emulator.client._raw_write(messages.ButtonAck())
+    core_emulator.client.debug.input(WIPE_CODE)
 
-        # wait 30 seconds for emulator to shut down
-        # this will raise a TimeoutError if the emulator doesn't die.
-        emu.wait(30)
+    # preserving screenshots even after it dies and starts again
+    prev_screenshot_dir = core_emulator.client.debug.screenshot_recording_dir
 
-        emu.start()
-        assert emu.client.features.initialized is False
-        assert emu.client.features.pin_protection is False
-        assert emu.client.features.wipe_code_protection is False
-        assert emu.client.features.device_id != device_id
+    # wait 30 seconds for emulator to shut down
+    # this will raise a TimeoutError if the emulator doesn't die.
+    core_emulator.wait(30)
+
+    core_emulator.start()
+    if prev_screenshot_dir:
+        core_emulator.client.debug.start_recording(prev_screenshot_dir, refresh_index=1)
+    assert core_emulator.client.features.initialized is False
+    assert core_emulator.client.features.pin_protection is False
+    assert core_emulator.client.features.wipe_code_protection is False
+    assert core_emulator.client.features.device_id != device_id
 
 
 @legacy_only

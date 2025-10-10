@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import urllib.parse
 from pathlib import Path
 from typing import Iterable
 
@@ -36,7 +37,8 @@ def report_links(
             th("Link to report")
         for test in sorted(tests):
             with tr(data_actual_hash=actual_hashes.get(test.stem, "")):
-                path = test.relative_to(reports_path)
+                urlsafe = urllib.parse.quote(test.name)
+                path = test.with_name(urlsafe).relative_to(reports_path)
                 td(a(test.name, href=path))
 
 
@@ -45,13 +47,19 @@ def write(fixture_test_path: Path, doc: document, filename: str) -> Path:
     return fixture_test_path / filename
 
 
-def image_column(hash: str | None, cur_dir: Path) -> None:
+def image_column(hash: str | None, cur_dir: Path, img_id: str | None = None) -> None:
     """Put image into table as one cell."""
     with td():
         if hash:
-            image_link(hash, cur_dir)
+            image_link(hash, cur_dir, img_id=img_id)
         else:
             i("missing")
+
+
+def diff_column() -> None:
+    """Put diff image into table as one cell."""
+    with td(bgcolor="white"):
+        a("N/A")
 
 
 def _relative_path(cur_dir: Path, path_to: Path) -> str:
@@ -70,13 +78,17 @@ def _relative_path(cur_dir: Path, path_to: Path) -> str:
     return "/".join(components)
 
 
-def image_link(hash: str, cur_dir: Path, title: str = "") -> None:
+def image_link(
+    hash: str, cur_dir: Path, title: str = "", img_id: str | None = None
+) -> None:
     """Put image into table as one cell."""
     path = _IMAGE_DIR / f"{hash}.png"
     img(
+        id=img_id,
         src=_relative_path(cur_dir, path),
         title=title,
         loading="lazy",
+        onload="imageLoaded(this)",
     )
 
 
@@ -86,6 +98,7 @@ def diff_table(diff: Iterable[tuple[str | None, str | None]], cur_dir: Path) -> 
             background = "white"
         else:
             background = "red"
-        with tr(bgcolor=background):
+        with tr(bgcolor=background, onclick="createDiff(this)"):
             image_column(left, cur_dir)
             image_column(right, cur_dir)
+            diff_column()

@@ -3,22 +3,22 @@ from typing import TYPE_CHECKING
 from apps.common.keychain import auto_keychain
 
 if TYPE_CHECKING:
-    from trezor.messages import RippleSignTx, RippleSignedTx
+    from trezor.messages import RippleSignedTx, RippleSignTx
+
     from apps.common.keychain import Keychain
-    from trezor.wire import Context
 
 
 # NOTE: it is one big function because that way it is the most flash-space-efficient
 @auto_keychain(__name__)
-async def sign_tx(
-    ctx: Context, msg: RippleSignTx, keychain: Keychain
-) -> RippleSignedTx:
+async def sign_tx(msg: RippleSignTx, keychain: Keychain) -> RippleSignedTx:
     from trezor.crypto import der
     from trezor.crypto.curve import secp256k1
     from trezor.crypto.hashlib import sha512
     from trezor.messages import RippleSignedTx
     from trezor.wire import ProcessError
+
     from apps.common import paths
+
     from . import helpers, layout
     from .serialize import serialize
 
@@ -26,7 +26,7 @@ async def sign_tx(
 
     if payment.amount > helpers.MAX_ALLOWED_AMOUNT:
         raise ProcessError("Amount exceeds maximum allowed amount.")
-    await paths.validate_path(ctx, keychain, msg.address_n)
+    await paths.validate_path(keychain, msg.address_n)
 
     node = keychain.derive(msg.address_n)
     source_address = helpers.address_from_public_key(node.public_key())
@@ -46,9 +46,11 @@ async def sign_tx(
         raise ProcessError("Fee must be in the range of 10 to 10,000 drops")
 
     if payment.destination_tag is not None:
-        await layout.require_confirm_destination_tag(ctx, payment.destination_tag)
-    await layout.require_confirm_fee(ctx, msg.fee)
-    await layout.require_confirm_tx(ctx, payment.destination, payment.amount)
+        await layout.require_confirm_destination_tag(payment.destination_tag)
+    await layout.require_confirm_tx(
+        payment.destination, payment.amount, chunkify=bool(msg.chunkify)
+    )
+    await layout.require_confirm_total(payment.amount + msg.fee, msg.fee)
 
     # Signs and encodes signature into DER format
     first_half_of_sha512 = sha512(to_sign).digest()[:32]

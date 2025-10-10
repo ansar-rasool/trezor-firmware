@@ -14,6 +14,7 @@
 # You should have received a copy of the License along with this library.
 # If not, see <https://www.gnu.org/licenses/lgpl-3.0.html>.
 
+import atexit
 import logging
 import os
 import subprocess
@@ -27,6 +28,15 @@ from ..transport.udp import UdpTransport
 LOG = logging.getLogger(__name__)
 
 EMULATOR_WAIT_TIME = 60
+_RUNNING_PIDS = set()
+
+
+def _cleanup_pids():
+    for process in _RUNNING_PIDS:
+        process.kill()
+
+
+atexit.register(_cleanup_pids)
 
 
 def _rm_f(path: Path) -> None:
@@ -82,6 +92,9 @@ class Emulator:
         self.auto_interact = auto_interact
         self.extra_args = list(extra_args)
 
+        # To save all screenshots properly in one directory between restarts
+        self.restart_amount = 0
+
     @property
     def client(self) -> TrezorClientDebugLink:
         """So that type-checkers do not see `client` as `Optional`.
@@ -112,7 +125,7 @@ class Emulator:
                 if transport._ping():
                     break
                 if self.process.poll() is not None:
-                    raise RuntimeError("Emulator proces died")
+                    raise RuntimeError("Emulator process died")
 
                 elapsed = time.monotonic() - start
                 if elapsed >= timeout:
@@ -127,6 +140,7 @@ class Emulator:
     def wait(self, timeout: Optional[float] = None) -> int:
         assert self.process is not None, "Emulator not started"
         ret = self.process.wait(timeout=timeout)
+        _RUNNING_PIDS.remove(self.process)
         self.process = None
         self.stop()
         return ret
@@ -161,6 +175,7 @@ class Emulator:
                 return
 
         self.process = self.launch_process()
+        _RUNNING_PIDS.add(self.process)
         try:
             self.wait_until_ready()
         except TimeoutError:
@@ -194,14 +209,22 @@ class Emulator:
             except subprocess.TimeoutExpired:
                 LOG.info("Emulator seems stuck. Sending kill signal.")
                 self.process.kill()
+            _RUNNING_PIDS.remove(self.process)
 
         _rm_f(self.profile_dir / "trezor.pid")
         _rm_f(self.profile_dir / "trezor.port")
         self.process = None
 
     def restart(self) -> None:
+        # preserving the recording directory between restarts
+        self.restart_amount += 1
+        prev_screenshot_dir = self.client.debug.screenshot_recording_dir
         self.stop()
         self.start()
+        if prev_screenshot_dir:
+            self.client.debug.start_recording(
+                prev_screenshot_dir, refresh_index=self.restart_amount
+            )
 
     def __enter__(self) -> "Emulator":
         return self

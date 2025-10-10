@@ -20,7 +20,7 @@
 #ifndef __NORCOW_CONFIG_H__
 #define __NORCOW_CONFIG_H__
 
-#include "flash.h"
+#include "flash_area.h"
 
 #define NORCOW_SECTOR_COUNT 2
 #define NORCOW_SECTOR_SIZE (16 * 1024)
@@ -33,9 +33,11 @@
  */
 #define NORCOW_HEADER_LEN (0)
 
+extern const flash_area_t STORAGE_AREAS[NORCOW_SECTOR_COUNT];
+
 /*
  * Current storage version.
  */
-#define NORCOW_VERSION ((uint32_t)0x00000003)
+#define NORCOW_VERSION ((uint32_t)0x00000005)
 
 #endif

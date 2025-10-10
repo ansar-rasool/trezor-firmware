@@ -41,6 +41,7 @@
 #define SHA256_BLOCK_LENGTH		64
 #define SHA256_DIGEST_LENGTH		32
 #define SHA256_DIGEST_STRING_LENGTH	(SHA256_DIGEST_LENGTH * 2 + 1)
+#define SHA384_DIGEST_LENGTH		48
 #define SHA512_BLOCK_LENGTH		128
 #define SHA512_DIGEST_LENGTH		64
 #define SHA512_DIGEST_STRING_LENGTH	(SHA512_DIGEST_LENGTH * 2 + 1)
@@ -80,6 +81,24 @@ void sha256_Final(SHA256_CTX*, uint8_t[SHA256_DIGEST_LENGTH]);
 char* sha256_End(SHA256_CTX*, char[SHA256_DIGEST_STRING_LENGTH]);
 void sha256_Raw(const uint8_t*, size_t, uint8_t[SHA256_DIGEST_LENGTH]);
 char* sha256_Data(const uint8_t*, size_t, char[SHA256_DIGEST_STRING_LENGTH]);
+
+// Update the hash with an integer and also (statically) check that it has the
+// expected size.
+#define SHA256_UPDATE_INT(ctx, val, expected_type)                            \
+  do {                                                                        \
+    sha256_Update((ctx), (const uint8_t *)&(val), sizeof(val));               \
+    _Static_assert(sizeof(val) == sizeof(expected_type), "invalid int size"); \
+  } while (0)
+
+// Byte array version of the macro above.
+#define SHA256_UPDATE_BYTES(ctx, val, expected_size)                    \
+  do {                                                                  \
+    sha256_Update((ctx), (val), sizeof(val));                           \
+    _Static_assert(sizeof(val) == expected_size, "invalid value size"); \
+    _Static_assert(sizeof((val)[0]) == 1, "not a byte array");          \
+  } while (0)
+
+void sha384_Raw(const uint8_t*, size_t, uint8_t[SHA384_DIGEST_LENGTH]);
 
 void sha512_Transform(const uint64_t* state_in, const uint64_t* data, uint64_t* state_out);
 void sha512_Init(SHA512_CTX*);

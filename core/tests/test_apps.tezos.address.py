@@ -1,11 +1,11 @@
-from common import *
-
-from apps.common.paths import HARDENED
+# flake8: noqa: F403,F405
+from common import *  # isort:skip
 
 if not utils.BITCOIN_ONLY:
-    from apps.tezos.sign_tx import _get_address_from_contract
     from trezor.enums import TezosContractType
     from trezor.messages import TezosContractID
+
+    from apps.tezos.sign_tx import _get_address_from_contract
 
 
 @unittest.skipUnless(not utils.BITCOIN_ONLY, "altcoin")

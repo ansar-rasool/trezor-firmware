@@ -14,11 +14,16 @@
 # You should have received a copy of the License along with this library.
 # If not, see <https://www.gnu.org/licenses/lgpl-3.0.html>.
 
+from __future__ import annotations
+
+import copy
 import functools
 import hashlib
+import inspect
 import re
 import struct
 import unicodedata
+import warnings
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -36,17 +41,21 @@ from typing import (
 import construct
 
 if TYPE_CHECKING:
-    from .client import TrezorClient
-    from .protobuf import MessageType
-
     # Needed to enforce a return value from decorators
     # More details: https://www.python.org/dev/peps/pep-0612/
     from typing import TypeVar
-    from typing_extensions import ParamSpec, Concatenate
+
+    from typing_extensions import Concatenate, ParamSpec
+
+    from . import client
+    from .messages import Success
+    from .protobuf import MessageType
 
     MT = TypeVar("MT", bound=MessageType)
     P = ParamSpec("P")
     R = TypeVar("R")
+
+    TrezorClient = TypeVar("TrezorClient", bound=client.TrezorClient)
 
 HARDENED_FLAG = 1 << 31
 
@@ -58,6 +67,23 @@ def H_(x: int) -> int:
     Shortcut function that "hardens" a number in a BIP44 path.
     """
     return x | HARDENED_FLAG
+
+
+def is_hardened(x: int) -> bool:
+    """
+    Determines if a number in a BIP44 path is hardened.
+    """
+    return x & HARDENED_FLAG != 0
+
+
+def unharden(x: int) -> int:
+    """
+    Unhardens a number in a BIP44 path.
+    """
+    if not is_hardened(x):
+        raise ValueError("Unhardened path component")
+
+    return x ^ HARDENED_FLAG
 
 
 def btc_hash(data: bytes) -> bytes:
@@ -108,59 +134,48 @@ __b58chars = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 __b58base = len(__b58chars)
 
 
+def b58encode_int(i: int) -> str:
+    """Encode an integer using Base58"""
+    digits = []
+    while i:
+        i, idx = divmod(i, __b58base)
+        digits.append(__b58chars[idx])
+    return "".join(reversed(digits))
+
+
 def b58encode(v: bytes) -> str:
     """encode v, which is a string of bytes, to base58."""
+    origlen = len(v)
+    v = v.lstrip(b"\0")
+    newlen = len(v)
 
-    long_value = 0
-    for c in v:
-        long_value = long_value * 256 + c
+    acc = int.from_bytes(v, byteorder="big")  # first byte is most significant
 
-    result = ""
-    while long_value >= __b58base:
-        div, mod = divmod(long_value, __b58base)
-        result = __b58chars[mod] + result
-        long_value = div
-    result = __b58chars[long_value] + result
+    result = b58encode_int(acc)
+    return __b58chars[0] * (origlen - newlen) + result
 
-    # Bitcoin does a little leading-zero-compression:
-    # leading 0-bytes in the input become leading-1s
-    nPad = 0
-    for c in v:
-        if c == 0:
-            nPad += 1
-        else:
-            break
 
-    return (__b58chars[0] * nPad) + result
+def b58decode_int(v: str) -> int:
+    """Decode a Base58 encoded string as an integer"""
+    decimal = 0
+    try:
+        for char in v:
+            decimal = decimal * __b58base + __b58chars.index(char)
+    except KeyError:
+        raise ValueError(f"Invalid character {char!r}") from None
+    return decimal
 
 
 def b58decode(v: AnyStr, length: Optional[int] = None) -> bytes:
     """decode v into a string of len bytes."""
-    str_v = v.decode() if isinstance(v, bytes) else v
+    v_str = v if isinstance(v, str) else v.decode()
+    origlen = len(v_str)
+    v_str = v_str.lstrip(__b58chars[0])
+    newlen = len(v_str)
 
-    for c in str_v:
-        if c not in __b58chars:
-            raise ValueError("invalid Base58 string")
+    acc = b58decode_int(v_str)
 
-    long_value = 0
-    for (i, c) in enumerate(str_v[::-1]):
-        long_value += __b58chars.find(c) * (__b58base**i)
-
-    result = b""
-    while long_value >= 256:
-        div, mod = divmod(long_value, 256)
-        result = struct.pack("B", mod) + result
-        long_value = div
-    result = struct.pack("B", long_value) + result
-
-    nPad = 0
-    for c in str_v:
-        if c == __b58chars[0]:
-            nPad += 1
-        else:
-            break
-
-    result = b"\x00" * nPad + result
+    result = acc.to_bytes(origlen - newlen + (acc.bit_length() + 7) // 8, "big")
     if length is not None and len(result) != length:
         raise ValueError("Result length does not match expected_length")
 
@@ -213,6 +228,23 @@ def parse_path(nstr: str) -> Address:
         raise ValueError("Invalid BIP32 path", nstr) from e
 
 
+def format_path(path: Address, flag: str = "h") -> str:
+    """
+    Convert BIP32 path list of uint32 integers with hardened flags to string.
+    Several conventions are supported to denote the hardened flag: 1', 1h
+
+    e.g.: [0, 0x80000001, 1] -> "m/0/1h/1"
+
+    :param path: list of integers
+    :return: path string
+    """
+    nstr = "m"
+    for i in path:
+        nstr += f"/{unharden(i)}{flag if is_hardened(i) else ''}"
+
+    return nstr
+
+
 def prepare_message_bytes(txt: AnyStr) -> bytes:
     """
     Make message suitable for protobuf.
@@ -237,15 +269,13 @@ def prepare_message_bytes(txt: AnyStr) -> bytes:
 @overload
 def expect(
     expected: "Type[MT]",
-) -> "Callable[[Callable[P, MessageType]], Callable[P, MT]]":
-    ...
+) -> "Callable[[Callable[P, MessageType]], Callable[P, MT]]": ...
 
 
 @overload
 def expect(
     expected: "Type[MT]", *, field: str, ret_type: "Type[R]"
-) -> "Callable[[Callable[P, MessageType]], Callable[P, R]]":
-    ...
+) -> "Callable[[Callable[P, MessageType]], Callable[P, R]]": ...
 
 
 def expect(
@@ -255,10 +285,16 @@ def expect(
     ret_type: "Optional[Type[R]]" = None,
 ) -> "Callable[[Callable[P, MessageType]], Callable[P, Union[MT, R]]]":
     """
-    Decorator checks if the method
-    returned one of expected protobuf messages
-    or raises an exception
+    Decorator checks if the method returned one of expected protobuf messages or raises
+    an exception.
+
+    Deprecated. Use `client.call(msg, expect=expected)` instead.
     """
+    warnings.warn(
+        "Use `client.call(msg, expect=expected)` instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
     def decorator(f: "Callable[P, MessageType]") -> "Callable[P, Union[MT, R]]":
         @functools.wraps(f)
@@ -275,6 +311,82 @@ def expect(
         return wrapped_f
 
     return decorator
+
+
+def _deprecation_retval_helper(value: Any, stacklevel: int = 0) -> Any:
+    stack = inspect.stack()
+    func_name = stack[stacklevel + 1].function
+
+    warning_text = (
+        f"The return value {value!r} of function {func_name}() "
+        "is deprecated and it will be removed in a future version."
+    )
+
+    # start with warnings disabled, otherwise we emit a lot of warnings while still
+    # constructing the deprecation warnings helper
+    warning_enabled = False
+
+    def deprecation_warning_wrapper(orig_value: Callable[P, R]) -> Callable[P, R]:
+        def emit(*args: P.args, **kwargs: P.kwargs) -> R:
+            nonlocal warning_enabled
+
+            if warning_enabled:
+                warnings.warn(warning_text, DeprecationWarning, stacklevel=2)
+                # only warn once per use
+                warning_enabled = False
+            return orig_value(*args, **kwargs)
+
+        return emit
+
+    # Deprecation wrapper class.
+    # Defined as empty at start.
+    class Deprecated(value.__class__):
+        pass
+
+    # Here we install the deprecation_warning_wrapper for all dunder methods.
+    # This implicitly includes __getattribute__, which causes all non-dunder attribute
+    # accesses to also raise the warning.
+    for key in dir(value.__class__):
+        if not key.startswith("__"):
+            # skip non-dunder methods
+            continue
+        if key in ("__new__", "__init__", "__class__"):
+            # skip some problematic items
+            continue
+        orig_value = getattr(value.__class__, key)
+        if not callable(orig_value):
+            # skip non-functions
+            continue
+        # replace the method with a wrapper that emits a warning
+        setattr(Deprecated, key, deprecation_warning_wrapper(orig_value))
+
+    from .protobuf import MessageType
+
+    # construct an instance:
+    if isinstance(value, str):
+        # for str, invoke the copy constructor
+        ret = Deprecated(value)
+    elif isinstance(value, MessageType):
+        # MessageTypes don't have a copy constructor, so
+        # 1. we make an explicit copy
+        value = copy.copy(value)
+        # 2. we change the class of the copy
+        value.__class__ = Deprecated
+        # note: we don't need deep copy because all accesses to inner objects already
+        # trigger the warning via __getattribute__
+        ret = value
+    else:
+        # we don't support other types currently
+        raise NotImplementedError
+
+    # enable warnings
+    warning_enabled = True
+
+    return ret
+
+
+def _return_success(msg: "Success") -> str | None:
+    return _deprecation_retval_helper(msg.message, stacklevel=1)
 
 
 def session(

@@ -1,5 +1,8 @@
 use super::{Component, Event, EventCtx};
-use crate::ui::geometry::{Insets, Rect};
+use crate::ui::{
+    geometry::{Insets, Rect},
+    shape::Renderer,
+};
 
 pub struct Border<T> {
     border: Insets,
@@ -35,12 +38,8 @@ where
         self.inner.event(ctx, event)
     }
 
-    fn paint(&mut self) {
-        self.inner.paint()
-    }
-
-    fn bounds(&self, sink: &mut dyn FnMut(Rect)) {
-        self.inner.bounds(sink);
+    fn render<'s>(&'s self, target: &mut impl Renderer<'s>) {
+        self.inner.render(target);
     }
 }
 
@@ -51,5 +50,15 @@ where
 {
     fn trace(&self, t: &mut dyn crate::trace::Tracer) {
         self.inner.trace(t)
+    }
+}
+
+#[cfg(feature = "micropython")]
+mod micropython {
+    use crate::{error::Error, micropython::obj::Obj, ui::layout::obj::ComponentMsgObj};
+    impl<T: ComponentMsgObj> ComponentMsgObj for super::Border<T> {
+        fn msg_try_into_obj(&self, msg: Self::Msg) -> Result<Obj, Error> {
+            self.inner().msg_try_into_obj(msg)
+        }
     }
 }

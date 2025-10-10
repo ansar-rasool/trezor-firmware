@@ -25,7 +25,7 @@ from . import with_client
 if TYPE_CHECKING:
     from ..client import TrezorClient
 
-PATH_HELP = "BIP-32 path, e.g. m/44'/1729'/0'"
+PATH_HELP = "BIP-32 path, e.g. m/44h/1729h/0h"
 
 
 @click.group(name="tezos")
@@ -36,11 +36,14 @@ def cli() -> None:
 @cli.command()
 @click.option("-n", "--address", required=True, help=PATH_HELP)
 @click.option("-d", "--show-display", is_flag=True)
+@click.option("-C", "--chunkify", is_flag=True)
 @with_client
-def get_address(client: "TrezorClient", address: str, show_display: bool) -> str:
+def get_address(
+    client: "TrezorClient", address: str, show_display: bool, chunkify: bool
+) -> str:
     """Get Tezos address for specified path."""
     address_n = tools.parse_path(address)
-    return tezos.get_address(client, address_n, show_display)
+    return tezos.get_address(client, address_n, show_display, chunkify)
 
 
 @cli.command()
@@ -57,11 +60,12 @@ def get_public_key(client: "TrezorClient", address: str, show_display: bool) -> 
 @click.argument("file", type=click.File("r"))
 @click.option("-n", "--address", required=True, help=PATH_HELP)
 @click.option("-f", "--file", "_ignore", is_flag=True, hidden=True, expose_value=False)
+@click.option("-C", "--chunkify", is_flag=True)
 @with_client
 def sign_tx(
-    client: "TrezorClient", address: str, file: TextIO
+    client: "TrezorClient", address: str, file: TextIO, chunkify: bool
 ) -> messages.TezosSignedTx:
     """Sign Tezos transaction."""
     address_n = tools.parse_path(address)
     msg = protobuf.dict_to_proto(messages.TezosSignTx, json.load(file))
-    return tezos.sign_tx(client, address_n, msg)
+    return tezos.sign_tx(client, address_n, msg, chunkify=chunkify)

@@ -1,9 +1,9 @@
-from storage import common, device
+# make sure to import cache unconditionally at top level so that it is imported (and retained) together with the storage module
+from storage import cache, common, device
 
 
 def wipe() -> None:
     from trezor import config
-    from storage import cache
 
     config.wipe()
     cache.clear_all()

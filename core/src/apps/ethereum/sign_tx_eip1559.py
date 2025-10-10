@@ -8,13 +8,14 @@ from .keychain import with_keychain_from_chain_id
 
 if TYPE_CHECKING:
     from trezor.messages import (
-        EthereumSignTxEIP1559,
         EthereumAccessList,
+        EthereumSignTxEIP1559,
         EthereumTxRequest,
     )
 
     from apps.common.keychain import Keychain
-    from trezor.wire import Context
+
+    from .definitions import Definitions
 
 
 _TX_TYPE = const(2)
@@ -30,21 +31,22 @@ def access_list_item_length(item: EthereumAccessList) -> int:
 
 @with_keychain_from_chain_id
 async def sign_tx_eip1559(
-    ctx: Context, msg: EthereumSignTxEIP1559, keychain: Keychain
+    msg: EthereumSignTxEIP1559,
+    keychain: Keychain,
+    defs: Definitions,
 ) -> EthereumTxRequest:
-    from trezor.crypto.hashlib import sha3_256
-    from trezor.utils import HashWriter
     from trezor import wire
     from trezor.crypto import rlp  # local_cache_global
+    from trezor.crypto.hashlib import sha3_256
+    from trezor.utils import HashWriter
+
     from apps.common import paths
-    from .layout import (
-        require_confirm_data,
-        require_confirm_eip1559_fee,
-        require_confirm_tx,
-    )
-    from .sign_tx import handle_erc20, send_request_chunk, check_common_fields
+
+    from .helpers import format_ethereum_amount, get_fee_items_eip1559
+    from .sign_tx import check_common_fields, confirm_tx_data, send_request_chunk
 
     gas_limit = msg.gas_limit  # local_cache_attribute
+    data_total = msg.data_length  # local_cache_attribute
 
     # check
     if len(msg.max_gas_fee) + len(gas_limit) > 30:
@@ -53,27 +55,23 @@ async def sign_tx_eip1559(
         raise wire.DataError("Fee overflow")
     check_common_fields(msg)
 
-    await paths.validate_path(ctx, keychain, msg.address_n)
+    # have a user confirm signing
+    await paths.validate_path(keychain, msg.address_n)
+    address_bytes = bytes_from_address(msg.to)
 
-    # Handle ERC20s
-    token, address_bytes, recipient, value = await handle_erc20(ctx, msg)
-
-    data_total = msg.data_length
-
-    await require_confirm_tx(ctx, recipient, value, msg.chain_id, token)
-    if token is None and msg.data_length > 0:
-        await require_confirm_data(ctx, msg.data_initial_chunk, data_total)
-
-    await require_confirm_eip1559_fee(
-        ctx,
-        value,
-        int.from_bytes(msg.max_priority_fee, "big"),
-        int.from_bytes(msg.max_gas_fee, "big"),
-        int.from_bytes(gas_limit, "big"),
-        msg.chain_id,
-        token,
+    max_gas_fee = int.from_bytes(msg.max_gas_fee, "big")
+    max_priority_fee = int.from_bytes(msg.max_priority_fee, "big")
+    gas_limit = int.from_bytes(msg.gas_limit, "big")
+    maximum_fee = format_ethereum_amount(max_gas_fee * gas_limit, None, defs.network)
+    fee_items = get_fee_items_eip1559(
+        max_gas_fee,
+        max_priority_fee,
+        gas_limit,
+        defs.network,
     )
+    await confirm_tx_data(msg, defs, address_bytes, maximum_fee, fee_items, data_total)
 
+    # transaction data confirmed, proceed with signing
     data = bytearray()
     data += msg.data_initial_chunk
     data_left = data_total - len(msg.data_initial_chunk)
@@ -105,7 +103,7 @@ async def sign_tx_eip1559(
         sha.extend(data)
 
     while data_left > 0:
-        resp = await send_request_chunk(ctx, data_left)
+        resp = await send_request_chunk(data_left)
         data_left -= len(resp.data_chunk)
         sha.extend(resp.data_chunk)
 
@@ -156,8 +154,8 @@ def _get_total_length(msg: EthereumSignTxEIP1559, data_total: int) -> int:
 def _sign_digest(
     msg: EthereumSignTxEIP1559, keychain: Keychain, digest: bytes
 ) -> EthereumTxRequest:
-    from trezor.messages import EthereumTxRequest
     from trezor.crypto.curve import secp256k1
+    from trezor.messages import EthereumTxRequest
 
     node = keychain.derive(msg.address_n)
     signature = secp256k1.sign(

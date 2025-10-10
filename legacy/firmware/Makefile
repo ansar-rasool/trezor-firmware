@@ -24,11 +24,12 @@ ZKP_CFLAGS = \
 	-DUSE_ASM_ARM \
 	-DUSE_EXTERNAL_DEFAULT_CALLBACKS \
 	-DECMULT_GEN_PREC_BITS=4 \
-	-DECMULT_WINDOW_SIZE=8 \
+	-DECMULT_WINDOW_SIZE=2 \
 	-DENABLE_MODULE_GENERATOR \
 	-DENABLE_MODULE_RECOVERY \
 	-DENABLE_MODULE_SCHNORRSIG \
-	-DENABLE_MODULE_EXTRAKEYS
+	-DENABLE_MODULE_EXTRAKEYS \
+	-DENABLE_MODULE_ECDH
 
 ifndef PIZERO
 ZKP_CFLAGS += -DUSE_EXTERNAL_ASM
@@ -74,6 +75,8 @@ OBJS += crypto.o
 ifneq ($(BITCOIN_ONLY),1)
 OBJS += u2f.o
 OBJS += ethereum.o
+OBJS += ethereum_definitions.o
+OBJS += ethereum_networks.o
 OBJS += ethereum_tokens.o
 OBJS += nem2.o
 OBJS += nem_mosaics.o
@@ -137,6 +140,7 @@ OBJS += ../vendor/trezor-crypto/nem.o
 OBJS += ../vendor/QR-Code-generator/c/qrcodegen.o
 
 OBJS += ../vendor/trezor-storage/storage.o
+OBJS += ../vendor/trezor-storage/storage_utils.o
 OBJS += ../vendor/trezor-storage/norcow.o
 
 OBJS += ../vendor/nanopb/pb_common.o
@@ -153,6 +157,7 @@ OBJS += protob/messages-management.pb.o
 ifneq ($(BITCOIN_ONLY),1)
 OBJS += ../vendor/trezor-crypto/cash_addr.o
 OBJS += protob/messages-ethereum.pb.o
+OBJS += protob/messages-definitions.pb.o
 OBJS += protob/messages-nem.pb.o
 OBJS += protob/messages-stellar.pb.o
 endif
@@ -172,6 +177,7 @@ CFLAGS += -Wno-sequence-point
 CFLAGS += -I../vendor/nanopb -Iprotob -DPB_FIELD_16BIT=1 -DPB_ENCODE_ARRAYS_UNPACKED=1 -DPB_VALIDATE_UTF8=1
 CFLAGS += -DSCM_REVISION='"$(shell git rev-parse HEAD | sed 's:\(..\):\\x\1:g')"'
 CFLAGS += -DUSE_MONERO=0
+CFLAGS += -DUSE_OPTIGA=0
 ifneq ($(BITCOIN_ONLY),1)
 CFLAGS += -DUSE_ETHEREUM=1
 CFLAGS += -DUSE_NEM=1

@@ -1,53 +1,42 @@
 from typing import TYPE_CHECKING
 
-from trezor.enums import ButtonRequestType
-from trezor.ui.layouts import confirm_action, confirm_homescreen
+import storage.device as storage_device
+import trezorui_api
+from trezor import TR, utils
+from trezor.enums import ButtonRequestType, DisplayRotation
+from trezor.ui.layouts import confirm_action
 from trezor.wire import DataError
 
 if TYPE_CHECKING:
-    from trezor.messages import ApplySettings, Success
-    from trezor.wire import Context, GenericContext
     from trezor.enums import SafetyCheckLevel
+    from trezor.messages import ApplySettings, Success
 
 
 BRT_PROTECT_CALL = ButtonRequestType.ProtectCall  # CACHE
 
 
 def _validate_homescreen(homescreen: bytes) -> None:
-    import trezorui2
-    import storage.device as storage_device
-
     if homescreen == b"":
         return
 
-    if len(homescreen) > storage_device.HOMESCREEN_MAXSIZE:
+    if len(homescreen) > utils.HOMESCREEN_MAXSIZE:
         raise DataError(
-            f"Homescreen is too large, maximum size is {storage_device.HOMESCREEN_MAXSIZE} bytes"
+            f"Homescreen is too large, maximum size is {utils.HOMESCREEN_MAXSIZE} bytes"
         )
-
-    try:
-        w, h, mcu_height = trezorui2.jpeg_info(homescreen)
-    except ValueError:
-        raise DataError("Invalid homescreen")
-    if w != 240 or h != 240:
-        raise DataError("Homescreen must be 240x240 pixel large")
-    if mcu_height > 16:
-        raise DataError("Unsupported jpeg type")
-    try:
-        trezorui2.jpeg_test(homescreen)
-    except ValueError:
-        raise DataError("Invalid homescreen")
+    if not trezorui_api.check_homescreen_format(homescreen):
+        raise DataError("Wrong homescreen format")
 
 
-async def apply_settings(ctx: Context, msg: ApplySettings) -> Success:
-    import storage.device as storage_device
-    from apps.common import safety_checks
+async def apply_settings(msg: ApplySettings) -> Success:
     from trezor.messages import Success
-    from trezor.wire import ProcessError, NotInitialized
+    from trezor.wire import NotInitialized, ProcessError
+
     from apps.base import reload_settings_from_storage
+    from apps.common import safety_checks
 
     if not storage_device.is_initialized():
         raise NotInitialized("Device is not initialized")
+
     homescreen = msg.homescreen  # local_cache_attribute
     label = msg.label  # local_cache_attribute
     auto_lock_delay_ms = msg.auto_lock_delay_ms  # local_cache_attribute
@@ -59,6 +48,7 @@ async def apply_settings(ctx: Context, msg: ApplySettings) -> Success:
     msg_safety_checks = msg.safety_checks  # local_cache_attribute
     experimental_features = msg.experimental_features  # local_cache_attribute
     hide_passphrase_from_host = msg.hide_passphrase_from_host  # local_cache_attribute
+    haptic_feedback = msg.haptic_feedback
 
     if (
         homescreen is None
@@ -70,12 +60,13 @@ async def apply_settings(ctx: Context, msg: ApplySettings) -> Success:
         and msg_safety_checks is None
         and experimental_features is None
         and hide_passphrase_from_host is None
+        and (haptic_feedback is None or not utils.USE_HAPTIC)
     ):
         raise ProcessError("No setting provided")
 
     if homescreen is not None:
         _validate_homescreen(homescreen)
-        await _require_confirm_change_homescreen(ctx, homescreen)
+        await _require_confirm_change_homescreen(homescreen)
         try:
             storage_device.set_homescreen(homescreen)
         except ValueError:
@@ -84,19 +75,17 @@ async def apply_settings(ctx: Context, msg: ApplySettings) -> Success:
     if label is not None:
         if len(label) > storage_device.LABEL_MAXLENGTH:
             raise DataError("Label too long")
-        await _require_confirm_change_label(ctx, label)
+        await _require_confirm_change_label(label)
         storage_device.set_label(label)
 
     if use_passphrase is not None:
-        await _require_confirm_change_passphrase(ctx, use_passphrase)
+        await _require_confirm_change_passphrase(use_passphrase)
         storage_device.set_passphrase_enabled(use_passphrase)
 
     if passphrase_always_on_device is not None:
         if not storage_device.is_passphrase_enabled():
             raise DataError("Passphrase is not enabled")
-        await _require_confirm_change_passphrase_source(
-            ctx, passphrase_always_on_device
-        )
+        await _require_confirm_change_passphrase_source(passphrase_always_on_device)
         storage_device.set_passphrase_always_on_device(passphrase_always_on_device)
 
     if auto_lock_delay_ms is not None:
@@ -104,189 +93,174 @@ async def apply_settings(ctx: Context, msg: ApplySettings) -> Success:
             raise ProcessError("Auto-lock delay too short")
         if auto_lock_delay_ms > storage_device.AUTOLOCK_DELAY_MAXIMUM:
             raise ProcessError("Auto-lock delay too long")
-        await _require_confirm_change_autolock_delay(ctx, auto_lock_delay_ms)
+        await _require_confirm_change_autolock_delay(auto_lock_delay_ms)
         storage_device.set_autolock_delay_ms(auto_lock_delay_ms)
 
     if msg_safety_checks is not None:
-        await _require_confirm_safety_checks(ctx, msg_safety_checks)
+        await _require_confirm_safety_checks(msg_safety_checks)
         safety_checks.apply_setting(msg_safety_checks)
 
     if display_rotation is not None:
-        await _require_confirm_change_display_rotation(ctx, display_rotation)
+        await _require_confirm_change_display_rotation(display_rotation)
         storage_device.set_rotation(display_rotation)
 
     if experimental_features is not None:
-        await _require_confirm_experimental_features(ctx, experimental_features)
+        await _require_confirm_experimental_features(experimental_features)
         storage_device.set_experimental_features(experimental_features)
 
     if hide_passphrase_from_host is not None:
         if safety_checks.is_strict():
             raise ProcessError("Safety checks are strict")
-        await _require_confirm_hide_passphrase_from_host(ctx, hide_passphrase_from_host)
+        await _require_confirm_hide_passphrase_from_host(hide_passphrase_from_host)
         storage_device.set_hide_passphrase_from_host(hide_passphrase_from_host)
+
+    if haptic_feedback is not None and utils.USE_HAPTIC:
+        from trezor import io
+
+        await _require_confirm_haptic_feedback(haptic_feedback)
+        io.haptic.haptic_set_enabled(haptic_feedback)
+        storage_device.set_haptic_feedback(haptic_feedback)
 
     reload_settings_from_storage()
 
     return Success(message="Settings applied")
 
 
-async def _require_confirm_change_homescreen(
-    ctx: GenericContext, homescreen: bytes
-) -> None:
-    if homescreen == b"":
-        await confirm_action(
-            ctx,
-            "set_homescreen",
-            "Set homescreen",
-            description="Do you really want to set default homescreen image?",
-            br_code=BRT_PROTECT_CALL,
-        )
-    else:
-        await confirm_homescreen(
-            ctx,
-            homescreen,
-        )
+async def _require_confirm_change_homescreen(homescreen: bytes) -> None:
+    from trezor.ui.layouts import confirm_homescreen
+
+    await confirm_homescreen(homescreen)
 
 
-async def _require_confirm_change_label(ctx: GenericContext, label: str) -> None:
-    await confirm_action(
-        ctx,
+async def _require_confirm_change_label(label: str) -> None:
+    from trezor.ui.layouts import confirm_single
+
+    await confirm_single(
         "set_label",
-        "Device name",
-        description="Do you want to change device name to {}?",
+        TR.device_name__title,
+        description=TR.device_name__change_template,
         description_param=label,
-        br_code=BRT_PROTECT_CALL,
+        verb=TR.buttons__change,
     )
 
 
-async def _require_confirm_change_passphrase(ctx: GenericContext, use: bool) -> None:
-    template = "Do you really want to {} passphrase encryption?"
-    description = template.format("enable" if use else "disable")
-    await confirm_action(
-        ctx,
-        "set_passphrase",
-        "Enable passphrase" if use else "Disable passphrase",
-        description=description,
-        br_code=BRT_PROTECT_CALL,
-    )
+async def _require_confirm_change_passphrase(use: bool) -> None:
+    from trezor.ui.layouts import confirm_change_passphrase
+
+    await confirm_change_passphrase(use)
+
+
+async def _require_confirm_hide_passphrase_from_host(enable: bool) -> None:
+    from trezor.ui.layouts import confirm_hide_passphrase_from_host
+
+    if enable:
+        await confirm_hide_passphrase_from_host()
 
 
 async def _require_confirm_change_passphrase_source(
-    ctx: GenericContext, passphrase_always_on_device: bool
+    passphrase_always_on_device: bool,
 ) -> None:
-    description = (
-        "Do you really want to enter passphrase always on the device?"
-        if passphrase_always_on_device
-        else "Do you want to revoke the passphrase on device setting?"
-    )
-    await confirm_action(
-        ctx,
-        "set_passphrase_source",
-        "Passphrase source",
-        description=description,
-        br_code=BRT_PROTECT_CALL,
-    )
+    from trezor.ui.layouts import confirm_change_passphrase_source
+
+    await confirm_change_passphrase_source(passphrase_always_on_device)
 
 
-async def _require_confirm_change_display_rotation(
-    ctx: GenericContext, rotation: int
-) -> None:
-    if rotation == 0:
-        label = "north"
-    elif rotation == 90:
-        label = "east"
-    elif rotation == 180:
-        label = "south"
-    elif rotation == 270:
-        label = "west"
+async def _require_confirm_change_display_rotation(rotation: DisplayRotation) -> None:
+    if rotation == DisplayRotation.North:
+        label = TR.rotation__north
+    elif rotation == DisplayRotation.East:
+        label = TR.rotation__east
+    elif rotation == DisplayRotation.South:
+        label = TR.rotation__south
+    elif rotation == DisplayRotation.West:
+        label = TR.rotation__west
     else:
-        raise DataError("Unsupported display rotation")
+        raise RuntimeError  # Unsupported display rotation
 
     await confirm_action(
-        ctx,
         "set_rotation",
-        "Change rotation",
-        description="Do you want to change device rotation to {}?",
+        TR.rotation__title_change,
+        subtitle=TR.words__settings,
+        description=TR.rotation__change_template,
         description_param=label,
         br_code=BRT_PROTECT_CALL,
+        prompt_screen=True,
     )
 
 
-async def _require_confirm_change_autolock_delay(
-    ctx: GenericContext, delay_ms: int
-) -> None:
+async def _require_confirm_change_autolock_delay(delay_ms: int) -> None:
     from trezor.strings import format_duration_ms
 
+    unit_plurals = {
+        "millisecond": TR.plurals__lock_after_x_milliseconds,
+        "second": TR.plurals__lock_after_x_seconds,
+        "minute": TR.plurals__lock_after_x_minutes,
+        "hour": TR.plurals__lock_after_x_hours,
+    }
+
     await confirm_action(
-        ctx,
         "set_autolock_delay",
-        "Auto-lock delay",
-        description="Do you really want to auto-lock your device after {}?",
-        description_param=format_duration_ms(delay_ms),
+        TR.auto_lock__title,
+        description=TR.auto_lock__change_template,
+        description_param=format_duration_ms(delay_ms, unit_plurals),
         br_code=BRT_PROTECT_CALL,
+        prompt_screen=True,
     )
 
 
-async def _require_confirm_safety_checks(
-    ctx: GenericContext, level: SafetyCheckLevel
-) -> None:
+async def _require_confirm_safety_checks(level: SafetyCheckLevel) -> None:
     from trezor.enums import SafetyCheckLevel
 
     if level == SafetyCheckLevel.Strict:
         await confirm_action(
-            ctx,
             "set_safety_checks",
-            "Safety checks",
-            description="Do you really want to enforce strict safety checks (recommended)?",
+            TR.safety_checks__title,
+            description=TR.safety_checks__enforce_strict,
             br_code=BRT_PROTECT_CALL,
+            prompt_screen=True,
         )
     elif level in (SafetyCheckLevel.PromptAlways, SafetyCheckLevel.PromptTemporarily):
-        # Reusing most stuff for both levels
-        template = (
-            "Trezor will{}allow you to approve some actions which might be unsafe."
+        description = (
+            TR.safety_checks__approve_unsafe_temporary
+            if level == SafetyCheckLevel.PromptTemporarily
+            else TR.safety_checks__approve_unsafe_always
         )
-        description = template.format(
-            " temporarily " if level == SafetyCheckLevel.PromptTemporarily else " "
-        )
-
         await confirm_action(
-            ctx,
             "set_safety_checks",
-            "Safety override",
-            "Are you sure?",
+            TR.safety_checks__title_safety_override,
+            TR.words__are_you_sure,
             description,
             hold=True,
-            verb="Hold to confirm",
+            verb=TR.buttons__hold_to_confirm,
             reverse=True,
             br_code=BRT_PROTECT_CALL,
+            prompt_screen=True,
         )
     else:
         raise ValueError  # enum value out of range
 
 
-async def _require_confirm_experimental_features(
-    ctx: GenericContext, enable: bool
-) -> None:
+async def _require_confirm_experimental_features(enable: bool) -> None:
     if enable:
         await confirm_action(
-            ctx,
             "set_experimental_features",
-            "Experimental mode",
-            "Only for development and beta testing!",
-            "Enable experimental features?",
+            TR.experimental_mode__title,
+            TR.experimental_mode__only_for_dev,
+            TR.experimental_mode__enable,
             reverse=True,
             br_code=BRT_PROTECT_CALL,
+            prompt_screen=True,
         )
 
 
-async def _require_confirm_hide_passphrase_from_host(
-    ctx: GenericContext, enable: bool
-) -> None:
-    if enable:
+if utils.USE_HAPTIC:
+
+    async def _require_confirm_haptic_feedback(enable: bool) -> None:
         await confirm_action(
-            ctx,
-            "set_hide_passphrase_from_host",
-            "Hide passphrase",
-            description="Hide passphrase coming from host?",
+            "haptic_feedback__settings",
+            TR.haptic_feedback__title,
+            TR.haptic_feedback__enable if enable else TR.haptic_feedback__disable,
+            subtitle=TR.haptic_feedback__subtitle,
             br_code=BRT_PROTECT_CALL,
+            prompt_screen=True,
         )

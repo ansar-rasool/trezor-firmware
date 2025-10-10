@@ -1,12 +1,49 @@
 # Trezor Storage
 
-The `storage` folder contains the implementation of Trezor's internal storage, which is common for both Legacy (Trezor One) and Core (Trezor T). This README also contains a detailed description of the cryptographic design.
+The `storage` folder contains the implementation of Trezor's internal storage, which is common for both Legacy (Trezor One) and Core (Trezor T and later models). This README also contains a detailed description of the cryptographic design.
+
+Due to differences of the underlying hardware, the storage uses two different format of stored data, referenced further as Bitwise and Blockwise
+
 
 All tests are located in the `tests` subdirectory, which also includes a Python implementation to run tests against this C production version and the Python one.
 
-## Summary
 
-The PIN is no longer stored in the flash storage. A new entry is added to the flash storage consisting of a 256-bit encrypted data encryption key (EDEK) followed by a 128-bit encrypted storage authentication key (ESAK) and a 64-bit PIN verification code (PVC). The PIN is used to decrypt the EDEK and ESAK and the PVC is used to verify that the correct PIN was used. The resulting data encryption key (DEK) is then used to encrypt/decrypt protected entries in the flash storage. We use Chacha20Poly1305 as defined in [RFC 7539](https://tools.ietf.org/html/rfc7539) to encrypt the EDEK and the protected entries. The storage authentication key (SAK) is used to authenticate the list of (APP, KEY) values for all protected entries that have been set in the storage. This prevents an attacker from erasing or adding entries to the storage.
+
+## Norcow data format
+
+### Bitwise flash
+
+All items are stored with single format:
+
+| Data           | KEY | APP | LEN | DATA |
+|----------------|-----|-----|-----|------|
+| Length (bytes) | 1   | 1   | 2   | LEN  |
+
+If any item is overwritten or deleted, the old entry is erased, i.e., DATA, APP, KEY are set to 0. LEN is kept for purposes of finding next item.
+
+
+### Blockwise flash (16 byte blocks)
+
+
+For optimization, we use two different formats for items, small items with up to 12 bytes of data,
+and larger items.
+
+Small items have the following format:
+
+| Data           | KEY | APP | LEN | DATA | PADDING  |
+|----------------|-----|-----|-----|------|----------|
+| Length (bytes) | 1   | 1   | 2   | LEN  | 12 - LEN |
+
+If any item is overwritten or deleted, the old entry is erased, i.e., DATA, APP, KEY and LEN are set to 0. When finding next item, we assume that zero LEN items means small item with 12 bytes of data.
+
+Larger items have the following format:
+
+| Data           | KEY | APP | LEN | PADDING | DATA | VALID FLAG | PADDING     |
+|----------------|-----|-----|-----|---------|------|------------|-------------|
+| Length (bytes) | 1   | 1   | 2   | 12      | LEN  | 1          | to 16 bytes |
+
+If any item is overwritten or deleted, the old entry is erased, i.e., DATA, are set to 0. LEN is kept for purposes of finding next item, and with it KEY and APP has to be kept too. To recognize data as deleted, the VALID FLAG is set to 0.
+
 
 ## Storage format
 
@@ -19,35 +56,37 @@ Entries fall into three categories:
 | Public    | 128 ≤ APP ≤ 191 | Always             | Only when unlocked |
 | Writable  | 192 ≤ APP ≤ 255 | Always             | Always             |
 
-The format of public and writable entries has remained unchanged, that is:
+The format of public and writable entries is trivial:
 
-| Data           | KEY | APP | LEN | DATA |
-|----------------|-----|-----|-----|------|
-| Length (bytes) | 1   | 1   | 2   | LEN  |
+| Data           | DATA |
+|----------------|------|
+| Length (bytes) | LEN  |
 
-Private values are used to store storage-specific information and cannot be directly accessed through the storage interface. Protected entries have the following new format:
+Private values are used to store storage-specific information and cannot be directly accessed through the storage interface. Protected entries have the following format:
 
-| Data           | KEY | APP | LEN | IV | TAG | ENCRDATA |
-|----------------|-----|-----|-----|----|-----|----------|
-| Length (bytes) | 1   | 1   | 2   | 12 | 16  | LEN - 28 |
-
-The LEN value thus indicates the total length of IV, TAG and ENCRDATA.
+| Data           | IV | ENCRDATA | TAG |
+|----------------|----|----------|-----|
+| Length (bytes) | 12 | LEN - 28 | 16  |
 
 The random salt (32 bits), EDEK (256 bits), ESAK (128 bits) and PVC (64 bits) is stored in a single entry under APP=0, KEY=2:
 
-| Data           | KEY | APP | LEN   | SALT | EDEK | ESAK | PVC |
-|----------------|-----|-----|-------|------|------|------|-----|
-| Length (bytes) | 1   | 1   | 2     | 4    | 32   | 16   | 8   |
-| Value          | 02  | 00  | 3C 00 |      |      |      |     |
+| Data           | SALT | EDEK | ESAK | PVC |
+|----------------|------|------|------|-----|
+| Length (bytes) | 4    | 32   | 16   | 8   |
 
 The storage authentication tag (128 bits) is stored in a single entry under APP=0, KEY=5:
 
-| Data           | KEY | APP | LEN   | TAG |
-|----------------|-----|-----|-------|-----|
-| Length (bytes) | 1   | 1   | 2     | 16  |
-| Value          | 05  | 00  | 20 00 |     |
+| Data           | TAG |
+|----------------|-----|
+| Length (bytes) | 16  |
 
-Furthermore, if any entry is overwritten, the old entry is erased, i.e., overwritten with 0. We are also using APP=0, KEY=0 as marker that the entry is erased (this was formerly used for the PIN entry, which is not needed anymore).
+
+Storage entries are stored as items in norcow flash. The format of the items is described in the section above.
+
+## PIN
+
+The PIN is not stored in the flash storage. An entry is added to the flash storage consisting of a 256-bit encrypted data encryption key (EDEK) followed by a 128-bit encrypted storage authentication key (ESAK) and a 64-bit PIN verification code (PVC). The PIN is used to decrypt the EDEK and ESAK and the PVC is used to verify that the correct PIN was used. The resulting data encryption key (DEK) is then used to encrypt/decrypt protected entries in the flash storage. We use Chacha20Poly1305 as defined in [RFC 7539](https://tools.ietf.org/html/rfc7539) to encrypt the EDEK and the protected entries. The storage authentication key (SAK) is used to authenticate the list of (APP, KEY) values for all protected entries that have been set in the storage. This prevents an attacker from erasing or adding entries to the storage.
+
 
 ## PIN verification and decryption of protected entries in flash storage
 
@@ -130,13 +169,15 @@ where `⨁` denotes the n-ary bitwise XOR operation and KEY<sub><i>i</i></sub> |
 
 - Instead of using separate IVs for each entry we considered using a single IV for the entire sector. Upon sector compaction a new IV would have to be generated and the encrypted data would have to be reencrypted under the new IV. A possible issue with this approach is that compaction cannot happen without the DEK, i.e. generally data could not be written to the flash storage without knowing the PIN. This property might not always be desirable.
 
-## New measures for PIN entry counter protection
+## PIN entry counter protection
+
+### Bitwise flash
 
 The former implementation of the PIN entry counter was vulnerable to fault injection attacks.
 
 Under the former implementation the PIN counter storage entry consisted of 32 words initialized to 0xFFFFFFFF. The first non-zero word in this area was the current PIN failure counter. Before verifying the PIN the lowest bit with value 1 was set to 0, i.e. a value of FFFFFFFC indicated two PIN entries. Upon successful PIN entry, the word was set to 0x00000000, indicating that the next word was the PIN failure counter. Allegedly, by manipulating the voltage on the USB input an attacker could convince the device to read the PIN entry counter as 0xFFFFFFFF even if some of the bits had been set to 0.
 
-### Design goals
+#### Design goals
 
 - Make it easy to decrement the counter by changing a 1 bit to 0.
 - Make it hard to reset the counter by a fault injection, i.e. counter values should not have an overly simple binary representation like 0xFFFFFFFF.
@@ -144,7 +185,7 @@ Under the former implementation the PIN counter storage entry consisted of 32 wo
 - Optimize the format for successful PIN entry.
 - Minimize the number of branching operations. Avoid loops, instead utilize bitwise and arithmetic operations when processing the PIN counter data.
 
-### Proposal summary
+#### Proposal summary
 
 Under the former implementation, for every unsuccessful PIN entry we discarded one bit from the counter, while for every successful PIN entry we discard an entire word. In the new implementation we optimize the counter operations for successful PIN entry.
 
@@ -159,7 +200,7 @@ Before every PIN verification the highest 1-bit in the `pin_entry_log` is set to
 
 In actual fact the logs are not written to the flash storage exactly as shown above, but they are stored in a form that should protect them against fault injection attacks. Only half of the stored bits carry information, the other half acts as "guard bits". So a stored value `...001110...` could look like `...0g0gg1g11g0g...`, where `g` denotes a guard bit. The positions and the values of the guard bits are determined by a guard key. The `guard_key` is a randomly generated uint32 value stored as an entry in the flash memory in cleartext. The assumption behind this is that an attacker attempting to reset or decrement the PIN counter by a fault injection is not able to read the flash storage. However, the value of `guard_key` also needs to be protected against fault injection, so the set of valid `guard_key` values should be limited by some condition which is easy to verify, such as `guard_key mod M == C`, where `M` and `C` a suitably chosen constants. The constants should be chosen so that the binary representation of any valid `guard_key` value has Hamming weight between 8 and 24. These conditions are discussed below.
 
-### Storage format
+#### Storage format
 
 The PIN log has APP = 0 and KEY = 1. The DATA part of the entry consists of 33 words (132 bytes, assuming 32-bit words):
 
@@ -169,7 +210,7 @@ The PIN log has APP = 0 and KEY = 1. The DATA part of the entry consists of 33 w
 
 Each log is stored in big-endian word order. The byte order of each word is platform dependent.
 
-### Guard key validation
+#### Guard key validation
 
 The guard_key is said to be valid if the following three conditions hold true:
 
@@ -198,7 +239,7 @@ int key_validity(uint32_t guard_key)
 }
 ```
 
-### Key generation
+#### Key generation
 
 The `guard_key` may be generated in the following way:
 
@@ -208,7 +249,7 @@ The `guard_key` may be generated in the following way:
 
 Note that on average steps 1 to 3 are repeated about one hundred times.
 
-### Key expansion
+#### Key expansion
 
 The `guard_key` is read from storage, its value is checked for validity and used to compute the `guard_mask` (indicating the positions of the guard bits) and guard value (indicating the values of the guard bits on their actual positions):
 
@@ -241,13 +282,13 @@ guard = (((guard_key & LOW_MASK) << 1) & guard_key) |
         (((~guard_key) & LOW_MASK) & (guard_key >> 1))
 ```
 
-### Log initialization
+#### Log initialization
 
 Each log is stored as 16 consecutive words each initialized to:
 
 `guard | ~guard_mask`
 
-### Removing and adding guard bits
+#### Removing and adding guard bits
 
 After reading a word from the flash storage we verify the format by checking the condition:
 
@@ -267,7 +308,7 @@ The guard bits can be added back as follows:
 
 `word = (word & ~guard_mask) | guard`
 
-### Determining the number of PIN failures
+#### Determining the number of PIN failures
 
 Remove the guard bits from the words of the `pin_entry_log` using the operations described above and verify that the result has form 0\*1\* by checking the condition:
 
@@ -289,4 +330,52 @@ count = (count & 0x33333333) + ((count >> 2) & 0x33333333)
 count = (count + (count >> 4)) & 0x0F0F0F0F
 count = count + (count >> 8)
 count = (count + (count >> 16)) & 0x3F
+```
+
+### Blockwise flash
+
+For blockwise flash, the PIN counter protection was significantly simplified. This is fine because models with this type of flash
+use secure element for additional protection. The flash is also ECC protected, so fault injection attacks are harder.
+
+
+#### Design goals
+
+- Fit one block to not waste too much space when counting PIN failures.
+- Provide a simple way to check the PIN counter value.
+- Make it reasonably hard to reset the counter by a fault injection.
+- Significantly reduce the code complexity.
+
+#### Format
+
+The counter is 8 bit value, stored in such a way that every 1 bit is expanded to 01 and every 0 bit is expanded to 10.
+The resulting 16 bit value is written into the flash block as many times as needed to fill the block.
+
+#### Expanding the counter
+
+The counter is expanded by the following procedure:
+
+```c
+c = ((c << 4) | c) & 0x0f0f;
+c = ((c << 2) | c) & 0x3333;
+c = ((c << 1) | c) & 0x5555;
+c = ((c << 1) | c) ^ 0xaaaa;
+```
+
+#### Compressing the counter
+
+The counter is compressed by the following procedure:
+
+```c
+c = c & 0x5555;
+c = ((c >> 1) | c) & 0x3333;
+c = ((c >> 2) | c) & 0x0f0f;
+c = ((c >> 4) | c) & 0x00ff;
+```
+
+#### Checking the counter
+
+The counter format is checked by the following operation:
+
+```c
+((c ^ (c << 1)) & 0xAAAA != 0xAAAA)
 ```

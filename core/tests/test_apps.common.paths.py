@@ -1,6 +1,10 @@
-from common import *
+# flake8: noqa: F403,F405
+from common import *  # isort:skip
+
 from trezor.utils import ensure
+
 from apps.common.paths import *
+
 
 # NOTE: moved into tests not to occupy flash space
 # in firmware binary, when it is not used in production
@@ -51,7 +55,7 @@ class TestPathSchemas(unittest.TestCase):
         ensure(
             all(is_equal(a, b) for a, b in zip(schema_a.schema, schema_b.schema))
             and is_equal(schema_a.trailing_components, schema_b.trailing_components),
-            f"Schemas differ:\nA = {repr(schema_a)}\nB = {repr(schema_b)}"
+            f"Schemas differ:\nA = {repr(schema_a)}\nB = {repr(schema_b)}",
         )
 
     def test_always_never_matching(self):

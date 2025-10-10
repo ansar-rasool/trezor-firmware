@@ -14,6 +14,8 @@
 # You should have received a copy of the License along with this library.
 # If not, see <https://www.gnu.org/licenses/lgpl-3.0.html>.
 
+from __future__ import annotations
+
 import hashlib
 import typing as t
 from dataclasses import field
@@ -24,6 +26,7 @@ from construct_classes import Struct, subcon
 
 from . import consts, models, util
 from .core import FirmwareImage
+from .models import Model
 
 __all__ = [
     "LegacyFirmware",
@@ -98,34 +101,31 @@ def check_sig_signmessage(
 class LegacyV2Firmware(FirmwareImage):
     """Firmware image in the format used by Trezor One 1.8.0 and newer."""
 
-    HASH_PARAMS = util.FirmwareHashParameters(
-        hash_function=hashlib.sha256,
-        chunk_size=consts.ONEV2_CHUNK_SIZE,
-        padding_byte=b"\xff",
-    )
-
     V3_FIRST_VERSION = (1, 12, 0)
+
+    def get_hash_params(self) -> util.FirmwareHashParameters:
+        return Model.ONE.hash_params()
 
     def verify_v2(self, dev_keys: bool) -> None:
         if not dev_keys:
-            public_keys = models.TREZOR_ONE_V1V2.firmware_keys
+            public_keys = models.LEGACY_V1V2.firmware_keys
         else:
-            public_keys = models.TREZOR_ONE_V1V2_DEV.firmware_keys
+            public_keys = models.LEGACY_V1V2_DEV.firmware_keys
 
         self.validate_code_hashes()
         check_sig_v1(
             self.digest(),
             self.header.v1_key_indexes,
             self.header.v1_signatures,
-            models.TREZOR_ONE_V1V2.firmware_sigs_needed,
+            models.LEGACY_V1V2.firmware_sigs_needed,
             public_keys,
         )
 
     def verify_v3(self, dev_keys: bool) -> None:
         if not dev_keys:
-            model_keys = models.TREZOR_ONE_V3
+            model_keys = models.LEGACY_V3
         else:
-            model_keys = models.TREZOR_ONE_V3_DEV
+            model_keys = models.LEGACY_V3_DEV
 
         self.validate_code_hashes()
         check_sig_signmessage(
@@ -162,11 +162,11 @@ class LegacyFirmware(Struct):
     expected format of firmware binary for Trezor One version 1.8.0, which can be installed
     by both the older and the newer bootloader."""
 
-    key_indexes: t.List[int]
-    signatures: t.List[bytes]
+    key_indexes: list[int]
+    signatures: list[bytes]
     code: bytes
-    flags: t.Dict[str, t.Any] = field(default_factory=dict)
-    embedded_v2: t.Optional[LegacyV2Firmware] = subcon(LegacyV2Firmware, default=None)
+    flags: dict[str, t.Any] = field(default_factory=dict)
+    embedded_v2: LegacyV2Firmware | None = subcon(LegacyV2Firmware, default=None)
 
     # fmt: off
     SUBCON = c.Struct(
@@ -191,9 +191,9 @@ class LegacyFirmware(Struct):
 
     def verify(self, dev_keys: bool = False) -> None:
         if not dev_keys:
-            model_keys = models.TREZOR_ONE_V1V2
+            model_keys = models.LEGACY_V1V2
         else:
-            model_keys = models.TREZOR_ONE_V1V2_DEV
+            model_keys = models.LEGACY_V1V2_DEV
         check_sig_v1(
             self.digest(),
             self.key_indexes,
@@ -204,3 +204,6 @@ class LegacyFirmware(Struct):
 
         if self.embedded_v2:
             self.embedded_v2.verify()
+
+    def model(self) -> Model | None:
+        return Model.T1B1

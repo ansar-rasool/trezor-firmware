@@ -14,6 +14,8 @@
 # You should have received a copy of the License along with this library.
 # If not, see <https://www.gnu.org/licenses/lgpl-3.0.html>.
 
+from __future__ import annotations
+
 import hashlib
 import typing as t
 from copy import copy
@@ -23,9 +25,9 @@ from construct_classes import Struct, subcon
 
 from .. import cosi
 from ..toif import ToifStruct
-from ..tools import TupleAdapter
+from ..tools import EnumAdapter, TupleAdapter
 from . import util
-from .models import TREZOR_T, TREZOR_T_DEV
+from .models import Model
 
 __all__ = [
     "VendorTrust",
@@ -47,6 +49,8 @@ def _transform_vendor_trust(data: bytes) -> bytes:
 
 
 class VendorTrust(Struct):
+    _dont_provide_secret: bool
+    allow_run_with_secret: bool
     show_vendor_string: bool
     require_user_click: bool
     red_background: bool
@@ -56,7 +60,10 @@ class VendorTrust(Struct):
 
     SUBCON = c.Transformed(
         c.BitStruct(
-            "_reserved" / c.Default(c.BitsInteger(9), 0),
+            "_reserved" / c.Default(c.BitsInteger(7), 0b1111111),
+            "_dont_provide_secret"
+            / c.Default(c.Flag, lambda this: not this.allow_run_with_secret),
+            "allow_run_with_secret" / c.Flag,
             "show_vendor_string" / c.Flag,
             "require_user_click" / c.Flag,
             "red_background" / c.Flag,
@@ -68,16 +75,25 @@ class VendorTrust(Struct):
         2,
     )
 
+    def is_full_trust(self) -> bool:
+        return (
+            not self.show_vendor_string
+            and not self.require_user_click
+            and not self.red_background
+            and self.delay == 0
+        )
+
 
 class VendorHeader(Struct):
     header_len: int
     expiry: int
-    version: t.Tuple[int, int]
+    version: tuple[int, int]
     sig_m: int
     # sig_n: int
-    pubkeys: t.List[bytes]
+    hw_model: Model | bytes
+    pubkeys: list[bytes]
     text: str
-    image: t.Dict[str, t.Any]
+    image: dict[str, t.Any]
     sigmask: int
     signature: bytes
 
@@ -93,7 +109,8 @@ class VendorHeader(Struct):
         "sig_m" / c.Int8ul,
         "sig_n" / c.Rebuild(c.Int8ul, c.len_(c.this.pubkeys)),
         "trust" / VendorTrust.SUBCON,
-        "_reserved" / c.Padding(14),
+        "hw_model" / EnumAdapter(c.Bytes(4), Model),
+        "_reserved" / c.Padding(10),
         "pubkeys" / c.Bytes(32)[c.this.sig_n],
         "text" / c.Aligned(4, c.PascalString(c.Int8ul, "utf-8")),
         "image" / ToifStruct,
@@ -109,10 +126,11 @@ class VendorHeader(Struct):
     # fmt: on
 
     def digest(self) -> bytes:
+        hash_function = Model.from_hw_model(self.hw_model).hash_params().hash_function
         cpy = copy(self)
         cpy.sigmask = 0
         cpy.signature = b"\x00" * 64
-        return hashlib.blake2s(cpy.build()).digest()
+        return hash_function(cpy.build()).digest()
 
     def vhash(self) -> bytes:
         h = hashlib.blake2s()
@@ -128,17 +146,13 @@ class VendorHeader(Struct):
 
     def verify(self, dev_keys: bool = False) -> None:
         digest = self.digest()
-        if not dev_keys:
-            public_keys = TREZOR_T.bootloader_keys
-        else:
-            public_keys = TREZOR_T_DEV.bootloader_keys
-        # TODO: add model awareness
+        model_keys = Model.from_hw_model(self.hw_model).model_keys(dev_keys)
         try:
             cosi.verify(
                 self.signature,
                 digest,
-                TREZOR_T.bootloader_sigs_needed,
-                public_keys,
+                model_keys.bootloader_sigs_needed,
+                model_keys.bootloader_keys,
                 self.sigmask,
             )
         except Exception:

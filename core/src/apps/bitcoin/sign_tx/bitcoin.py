@@ -1,6 +1,7 @@
 from micropython import const
 from typing import TYPE_CHECKING
 
+from trezor import workflow
 from trezor.crypto.hashlib import sha256
 from trezor.enums import InputScriptType
 from trezor.utils import HashWriter, empty_bytearray
@@ -13,6 +14,7 @@ from ..common import SigHashType, ecdsa_sign, input_is_external
 from ..ownership import verify_nonownership
 from ..verification import SignatureVerifier
 from . import helpers
+from .approvers import CoinJoinApprover
 from .helpers import request_tx_input, request_tx_output
 from .progress import progress
 from .tx_info import OriginalTxInfo
@@ -21,23 +23,15 @@ if TYPE_CHECKING:
     from typing import Sequence
 
     from trezor.crypto import bip32
-
-    from trezor.messages import (
-        PrevInput,
-        PrevOutput,
-        PrevTx,
-        SignTx,
-        TxInput,
-        TxOutput,
-    )
+    from trezor.messages import PrevInput, PrevOutput, PrevTx, SignTx, TxInput, TxOutput
 
     from apps.common.coininfo import CoinInfo
     from apps.common.keychain import Keychain
 
+    from ..writers import Writer
     from . import approvers
     from .sig_hasher import SigHasher
     from .tx_info import TxInfo
-    from ..writers import Writer
 
 
 # the number of bytes to preallocate for serialized transaction chunks
@@ -46,8 +40,24 @@ _SERIALIZED_TX_BUFFER = empty_bytearray(_MAX_SERIALIZED_CHUNK_SIZE)
 
 
 class Bitcoin:
+    def init_signing(self) -> None:
+        # Next shown progress bar is already signing progress, but it isn't shown until approval from next dialog
+        progress.init_signing(
+            len(self.external),
+            len(self.segwit),
+            len(self.presigned),
+            self.taproot_only,
+            self.serialize,
+            self.coin,
+            self.tx_info.tx,
+            self.orig_txs,
+        )
+        self.signing = True
+
     async def signer(self) -> None:
-        progress.init(self.tx_info.tx)
+        progress.init(
+            self.tx_info.tx, is_coinjoin=isinstance(self.approver, CoinJoinApprover)
+        )
 
         # Add inputs to sig_hasher and h_tx_check and compute the sum of input amounts.
         await self.step1_process_inputs()
@@ -60,18 +70,17 @@ class Bitcoin:
         await self.step2_approve_outputs()
 
         # Check fee, approve lock_time and total.
-        await self.approver.approve_tx(self.tx_info, self.orig_txs)
+        await self.approver.approve_tx(self.tx_info, self.orig_txs, self)
 
-        progress.init_signing(
-            len(self.external),
-            len(self.segwit),
-            len(self.presigned),
-            self.taproot_only,
-            self.serialize,
-            self.coin,
-            self.tx_info.tx,
-            self.orig_txs,
-        )
+        # Make sure proper progress is shown, in case dialog was not required
+        if not self.signing:
+            self.init_signing()
+            progress.report_init()
+        progress.report()
+
+        # Following steps can take a long time, make sure autolock doesn't kick in.
+        # This is set to True again after workflow is finished in start_default().
+        workflow.autolock_interrupts_workflow = False
 
         # Verify the transaction input amounts by requesting each previous transaction
         # and checking its output amount. Verify external inputs which have already
@@ -102,6 +111,7 @@ class Bitcoin:
             TxRequestDetailsType,
             TxRequestSerializedType,
         )
+
         from . import approvers
         from .tx_info import TxInfo
 
@@ -127,6 +137,9 @@ class Bitcoin:
 
         # indicates whether all internal inputs are Taproot
         self.taproot_only = True
+
+        # indicates whether the transaction is being signed
+        self.signing = False
 
         # transaction and signature serialization
         _SERIALIZED_TX_BUFFER[:] = bytes()
@@ -517,7 +530,9 @@ class Bitcoin:
             # Output is change and does not need approval.
             await approver.add_change_output(txo, script_pubkey)
         else:
-            await approver.add_external_output(txo, script_pubkey, orig_txo)
+            await approver.add_external_output(
+                txo, script_pubkey, self.tx_info, orig_txo
+            )
 
         self.tx_info.add_output(txo, script_pubkey)
 

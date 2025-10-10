@@ -14,21 +14,18 @@
 # You should have received a copy of the License along with this library.
 # If not, see <https://www.gnu.org/licenses/lgpl-3.0.html>.
 
-from unittest import mock
-
 import pytest
 from shamir_mnemonic import shamir
 
-from trezorlib import device, messages
+from trezorlib import device
 from trezorlib.debuglink import TrezorClientDebugLink as Client
 from trezorlib.exceptions import TrezorFailure
-from trezorlib.messages import BackupType, ButtonRequestType as B
+from trezorlib.messages import BackupAvailability, BackupType
 
-from ...common import click_through, generate_entropy, read_and_confirm_mnemonic
+from ...common import EXTERNAL_ENTROPY, MOCK_GET_ENTROPY, generate_entropy
+from ...input_flows import InputFlowSlip39AdvancedResetRecovery
 
-pytestmark = [pytest.mark.skip_t1]
-
-EXTERNAL_ENTROPY = b"zlutoucky kun upel divoke ody" * 2
+pytestmark = pytest.mark.models("core")
 
 
 # TODO: test with different options
@@ -36,109 +33,46 @@ EXTERNAL_ENTROPY = b"zlutoucky kun upel divoke ody" * 2
 def test_reset_device_slip39_advanced(client: Client):
     strength = 128
     member_threshold = 3
-    all_mnemonics = []
 
-    def input_flow():
-        # 1. Confirm Reset
-        # 2. Backup your seed
-        # 3. Confirm warning
-        # 4. shares info
-        # 5. Set & Confirm number of groups
-        # 6. threshold info
-        # 7. Set & confirm group threshold value
-        # 8-17: for each of 5 groups:
-        #   1. Set & Confirm number of shares
-        #   2. Set & confirm share threshold value
-        # 18. Confirm show seeds
-        yield from click_through(client.debug, screens=18, code=B.ResetDevice)
-
-        # show & confirm shares for all groups
-        for _g in range(5):
-            for _h in range(5):
-                # mnemonic phrases
-                mnemonic = yield from read_and_confirm_mnemonic(client.debug)
-                all_mnemonics.append(mnemonic)
-
-                # Confirm continue to next share
-                br = yield
-                assert br.code == B.Success
-                client.debug.press_yes()
-
-        # safety warning
-        br = yield
-        assert br.code == B.Success
-        client.debug.press_yes()
-
-    os_urandom = mock.Mock(return_value=EXTERNAL_ENTROPY)
-    with mock.patch("os.urandom", os_urandom), client:
-        client.set_expected_responses(
-            [
-                messages.ButtonRequest(code=B.ResetDevice),
-                messages.EntropyRequest(),
-                messages.ButtonRequest(code=B.ResetDevice),
-                messages.ButtonRequest(code=B.ResetDevice),
-                messages.ButtonRequest(code=B.ResetDevice),
-                messages.ButtonRequest(code=B.ResetDevice),
-                messages.ButtonRequest(code=B.ResetDevice),
-                messages.ButtonRequest(code=B.ResetDevice),
-                messages.ButtonRequest(code=B.ResetDevice),
-                messages.ButtonRequest(code=B.ResetDevice),  # group #1 counts
-                messages.ButtonRequest(code=B.ResetDevice),
-                messages.ButtonRequest(code=B.ResetDevice),  # group #2 counts
-                messages.ButtonRequest(code=B.ResetDevice),
-                messages.ButtonRequest(code=B.ResetDevice),  # group #3 counts
-                messages.ButtonRequest(code=B.ResetDevice),
-                messages.ButtonRequest(code=B.ResetDevice),  # group #4 counts
-                messages.ButtonRequest(code=B.ResetDevice),
-                messages.ButtonRequest(code=B.ResetDevice),  # group #5 counts
-                messages.ButtonRequest(code=B.ResetDevice),
-            ]
-            + [
-                # individual mnemonic
-                messages.ButtonRequest(code=B.ResetDevice),
-                messages.ButtonRequest(code=B.Success),
-            ]
-            * (5 * 5)  # groups * shares
-            + [
-                messages.ButtonRequest(code=B.Success),
-                messages.Success,
-                messages.Features,
-            ]
-        )
-        client.set_input_flow(input_flow)
+    with client:
+        IF = InputFlowSlip39AdvancedResetRecovery(client, False)
+        client.set_input_flow(IF.get())
 
         # No PIN, no passphrase, don't display random
-        device.reset(
+        device.setup(
             client,
-            display_random=False,
             strength=strength,
             passphrase_protection=False,
             pin_protection=False,
             label="test",
-            language="en-US",
             backup_type=BackupType.Slip39_Advanced,
+            entropy_check_count=0,
+            _get_entropy=MOCK_GET_ENTROPY,
         )
 
     # generate secret locally
     internal_entropy = client.debug.state().reset_entropy
+    assert internal_entropy is not None
     secret = generate_entropy(strength, internal_entropy, EXTERNAL_ENTROPY)
 
     # validate that all combinations will result in the correct master secret
-    validate_mnemonics(all_mnemonics, member_threshold, secret)
+    validate_mnemonics(IF.mnemonics, member_threshold, secret)
 
     # Check if device is properly initialized
     assert client.features.initialized is True
-    assert client.features.needs_backup is False
+    assert client.features.backup_availability == BackupAvailability.NotAvailable
     assert client.features.pin_protection is False
     assert client.features.passphrase_protection is False
-    assert client.features.backup_type is BackupType.Slip39_Advanced
+    assert client.features.backup_type is BackupType.Slip39_Advanced_Extendable
 
     # backup attempt fails because backup was done in reset
     with pytest.raises(TrezorFailure, match="ProcessError: Seed already backed up"):
         device.backup(client)
 
 
-def validate_mnemonics(mnemonics, threshold, expected_ems):
+def validate_mnemonics(
+    mnemonics: list[str], threshold: int, expected_ems: bytes
+) -> None:
     # 3of5 shares 3of5 groups
     # TODO: test all possible group+share combinations?
     test_combination = mnemonics[0:3] + mnemonics[5:8] + mnemonics[10:13]

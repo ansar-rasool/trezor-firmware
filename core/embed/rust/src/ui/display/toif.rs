@@ -1,72 +1,36 @@
 use crate::{
-    trezorhal::{
-        display::ToifFormat,
-        uzlib::{UzlibContext, UZLIB_WINDOW_SIZE},
-    },
-    ui::{
-        constant,
-        display::{get_color_table, get_offset, pixeldata, pixeldata_dirty, set_window},
-        geometry::{Alignment2D, Offset, Point, Rect},
-    },
+    error::{value_error, Error},
+    ui::geometry::Offset,
 };
-
-use super::Color;
 
 const TOIF_HEADER_LENGTH: usize = 12;
 
-pub fn icon(icon: &Icon, center: Point, fg_color: Color, bg_color: Color) {
-    let r = Rect::from_center_and_size(center, icon.toif.size());
-    let area = r.translate(get_offset());
-    let clamped = area.clamp(constant::screen());
-    let colortable = get_color_table(fg_color, bg_color);
-
-    set_window(clamped);
-
-    let mut dest = [0_u8; 1];
-
-    let mut window = [0; UZLIB_WINDOW_SIZE];
-    let mut ctx = icon.toif.decompression_context(Some(&mut window));
-
-    for py in area.y0..area.y1 {
-        for px in area.x0..area.x1 {
-            let p = Point::new(px, py);
-            let x = p.x - area.x0;
-
-            if clamped.contains(p) {
-                if x % 2 == 0 {
-                    unwrap!(ctx.uncompress(&mut dest), "Decompression failed");
-                    pixeldata(colortable[(dest[0] & 0xF) as usize]);
-                } else {
-                    pixeldata(colortable[(dest[0] >> 4) as usize]);
-                }
-            } else if x % 2 == 0 {
-                //continue unzipping but dont write to display
-                unwrap!(ctx.uncompress(&mut dest), "Decompression failed");
-            }
-        }
-    }
-
-    pixeldata_dirty();
+#[derive(PartialEq, Debug, Eq, FromPrimitive, Clone, Copy)]
+pub enum ToifFormat {
+    FullColorBE = 0, // big endian
+    GrayScaleOH = 1, // odd hi
+    FullColorLE = 2, // little endian
+    GrayScaleEH = 3, // even hi
 }
 
-/// Holding toif data and allowing it to draw itself.
+/// Holding toif data
 /// See https://docs.trezor.io/trezor-firmware/misc/toif.html for data format.
 #[derive(PartialEq, Eq, Clone, Copy)]
-pub struct Toif {
-    data: &'static [u8],
+pub struct Toif<'i> {
+    data: &'i [u8],
 }
 
-impl Toif {
-    pub const fn new(data: &'static [u8]) -> Option<Self> {
+impl<'i> Toif<'i> {
+    pub const fn new(data: &'i [u8]) -> Result<Self, Error> {
         if data.len() < TOIF_HEADER_LENGTH || data[0] != b'T' || data[1] != b'O' || data[2] != b'I'
         {
-            return None;
+            return Err(value_error!(c"Invalid TOIF header."));
         }
         let zdatalen = u32::from_le_bytes([data[8], data[9], data[10], data[11]]) as usize;
         if zdatalen + TOIF_HEADER_LENGTH != data.len() {
-            return None;
+            return Err(value_error!(c"Invalid TOIF length."));
         }
-        Some(Self { data })
+        Ok(Self { data })
     }
 
     pub const fn format(&self) -> ToifFormat {
@@ -77,6 +41,13 @@ impl Toif {
             b'G' => ToifFormat::GrayScaleEH,
             _ => panic!(),
         }
+    }
+
+    pub const fn is_grayscale(&self) -> bool {
+        matches!(
+            self.format(),
+            ToifFormat::GrayScaleOH | ToifFormat::GrayScaleEH
+        )
     }
 
     pub const fn width(&self) -> i16 {
@@ -91,39 +62,43 @@ impl Toif {
         Offset::new(self.width(), self.height())
     }
 
-    pub fn zdata(&self) -> &'static [u8] {
+    pub fn zdata(&self) -> &'i [u8] {
         &self.data[TOIF_HEADER_LENGTH..]
     }
 
-    pub fn uncompress(&self, dest: &mut [u8]) {
-        let mut ctx = self.decompression_context(None);
-        unwrap!(ctx.uncompress(dest));
-    }
-
-    pub fn decompression_context<'a>(
-        &'a self,
-        window: Option<&'a mut [u8; UZLIB_WINDOW_SIZE]>,
-    ) -> UzlibContext {
-        UzlibContext::new(self.zdata(), window)
+    pub fn original_data(&self) -> &'i [u8] {
+        self.data
     }
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub struct Icon {
-    pub toif: Toif,
+    pub toif: Toif<'static>,
+    #[cfg(feature = "ui_debug")]
+    pub name: &'static str,
 }
 
 impl Icon {
-    pub fn new(data: &'static [u8]) -> Self {
-        let toif = unwrap!(Toif::new(data));
-        assert!(toif.format() == ToifFormat::GrayScaleEH);
-        Self { toif }
+    pub const fn new(data: &'static [u8]) -> Self {
+        let toif = match Toif::new(data) {
+            Ok(t) => t,
+            _ => panic!("Invalid image."),
+        };
+        assert!(matches!(toif.format(), ToifFormat::GrayScaleEH));
+        Self {
+            toif,
+            #[cfg(feature = "ui_debug")]
+            name: "<unnamed>",
+        }
     }
 
-    /// Display the icon with baseline Point, aligned according to the
-    /// `alignment` argument.
-    pub fn draw(&self, baseline: Point, alignment: Alignment2D, fg_color: Color, bg_color: Color) {
-        let r = Rect::snap(baseline, self.toif.size(), alignment);
-        icon(self, r.center(), fg_color, bg_color);
+    /// Create a named icon.
+    /// The name is only stored in debug builds.
+    pub const fn debug_named(data: &'static [u8], _name: &'static str) -> Self {
+        Self {
+            #[cfg(feature = "ui_debug")]
+            name: _name,
+            ..Self::new(data)
+        }
     }
 }

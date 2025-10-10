@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import re
+import subprocess
 
 import click
 
@@ -64,9 +65,25 @@ def cli(project, version):
     major, minor, patch = m.group(1, 2, 3)
 
     parts = project.parts
-    if parts[-1] == "core":
+    if (project / "version.h").is_file():
         bump_header(
-            project / "embed" / "firmware" / "version.h",
+            project / "version.h",
+            VERSION_MAJOR=major,
+            VERSION_MINOR=minor,
+            VERSION_PATCH=patch,
+        )
+    elif parts[-1] == "core":
+        bump_header(
+            project / "embed" / "projects" / "firmware" / "version.h",
+            VERSION_MAJOR=major,
+            VERSION_MINOR=minor,
+            VERSION_PATCH=patch,
+        )
+        # also bump language JSONs
+        subprocess.run(["python", project / "translations" / "cli.py", "gen"])
+    elif parts[-1] == "legacy":
+        bump_header(
+            project / "firmware" / "version.h",
             VERSION_MAJOR=major,
             VERSION_MINOR=minor,
             VERSION_PATCH=patch,
@@ -74,20 +91,6 @@ def cli(project, version):
     elif parts[-1] == "python":
         bump_python(
             project / "src" / "trezorlib" / "__init__.py", f"{major}.{minor}.{patch}"
-        )
-    elif parts[-2:] == ("legacy", "firmware"):
-        bump_header(
-            project / "version.h",
-            VERSION_MAJOR=major,
-            VERSION_MINOR=minor,
-            VERSION_PATCH=patch,
-        )
-    elif parts[-2:] == ("legacy", "bootloader"):
-        bump_header(
-            project / "version.h",
-            VERSION_MAJOR=major,
-            VERSION_MINOR=minor,
-            VERSION_PATCH=patch,
         )
     else:
         raise click.ClickException(f"Unknown project {project}.")

@@ -14,13 +14,13 @@
 # You should have received a copy of the License along with this library.
 # If not, see <https://www.gnu.org/licenses/lgpl-3.0.html>.
 
+import logging
 from enum import IntEnum
 from io import BytesIO
-import logging
 
 import pytest
 
-from trezorlib import messages, protobuf
+from trezorlib import protobuf
 
 
 class SomeEnum(IntEnum):
@@ -90,21 +90,8 @@ class DefaultFields(protobuf.MessageType):
 class RecursiveMessage(protobuf.MessageType):
     FIELDS = {
         1: protobuf.Field("uvarint", "uint64"),
-        2: protobuf.Field("recursivefield", "RecursiveMessage", required=False)
+        2: protobuf.Field("recursivefield", "RecursiveMessage", required=False),
     }
-
-
-# message types are read from the messages module so we need to "include" these messages there for now
-messages.SomeEnum = SomeEnum
-messages.WiderEnum = WiderEnum
-messages.NarrowerEnum = NarrowerEnum
-messages.PrimitiveMessage = PrimitiveMessage
-messages.EnumMessageMoreValues = EnumMessageMoreValues
-messages.EnumMessageLessValues = EnumMessageLessValues
-messages.RepeatedFields = RepeatedFields
-messages.RequiredFields = RequiredFields
-messages.DefaultFields = DefaultFields
-messages.RecursiveMessage = RecursiveMessage
 
 
 def load_uvarint(buffer):
@@ -170,7 +157,7 @@ def test_sint_uint():
 
     # roundtrip:
     assert protobuf.uint_to_sint(protobuf.sint_to_uint(1234567891011)) == 1234567891011
-    assert protobuf.uint_to_sint(protobuf.sint_to_uint(-(2 ** 32))) == -(2 ** 32)
+    assert protobuf.uint_to_sint(protobuf.sint_to_uint(-(2**32))) == -(2**32)
 
 
 def test_simple_message():
@@ -314,11 +301,8 @@ def test_recursive():
     msg = RecursiveMessage(
         uvarint=1,
         recursivefield=RecursiveMessage(
-            uvarint=2,
-            recursivefield=RecursiveMessage(
-                uvarint=3
-            )
-        )
+            uvarint=2, recursivefield=RecursiveMessage(uvarint=3)
+        ),
     )
 
     buf = dump_message(msg)
@@ -326,7 +310,7 @@ def test_recursive():
 
     assert msg == retr
     assert retr.uvarint == 1
-    assert type(retr.recursivefield) == RecursiveMessage
+    assert type(retr.recursivefield) is RecursiveMessage
     assert retr.recursivefield.uvarint == 2
-    assert type(retr.recursivefield.recursivefield) == RecursiveMessage
+    assert type(retr.recursivefield.recursivefield) is RecursiveMessage
     assert retr.recursivefield.recursivefield.uvarint == 3

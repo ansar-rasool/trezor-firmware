@@ -16,23 +16,52 @@
 
 import os
 import sys
-from typing import TYPE_CHECKING, Any, BinaryIO, Dict, Iterable, List, Optional, Tuple
+import time
+from pathlib import Path
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    BinaryIO,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Tuple,
+    Union,
+)
 from urllib.parse import urlparse
 
 import click
 import requests
 
-from .. import exceptions, firmware
-from . import with_client
+from .. import device, exceptions, firmware, messages, models
+from ..firmware import models as fw_models
+from ..models import TrezorModel
+from . import ChoiceType, with_client
 
 if TYPE_CHECKING:
     from ..client import TrezorClient
     from . import TrezorConnection
 
-ALLOWED_FIRMWARE_FORMATS = {
-    1: (firmware.LegacyFirmware, firmware.LegacyV2Firmware),
-    2: (firmware.VendorFirmware,),
-}
+MODEL_CHOICE = ChoiceType(
+    {
+        "T1B1": models.T1B1,
+        "T2T1": models.T2T1,
+        "T2B1": models.T2B1,
+        "T3T1": models.T3T1,
+        "T3B1": models.T3B1,
+        # aliases
+        "1": models.T1B1,
+        "one": models.T1B1,
+        "t": models.T2T1,
+        "r": models.T2B1,
+        "safe3": models.T2B1,
+        "s3": models.T2B1,
+        "safe5": models.T3T1,
+        "s5": models.T3T1,
+    },
+    case_sensitive=False,
+)
 
 
 def _print_version(version: Tuple[int, int, int, int]) -> None:
@@ -58,6 +87,23 @@ def _get_file_name_from_url(url: str) -> str:
     return os.path.basename(full_path)
 
 
+def _print_firmware_model(hw_model: Union[bytes, fw_models.Model]) -> None:
+    try:
+        model_name = fw_models.Model.from_hw_model(hw_model).name
+        click.echo(f"{model_name} firmware image.")
+        return
+    except ValueError:
+        pass
+
+    assert isinstance(hw_model, bytes)
+    if hw_model.isascii():
+        model_name = hw_model.decode("ascii")
+        click.echo(f"Unrecognized hardware model: {model_name}")
+        return
+
+    click.echo(f"Suspicious hardware model code: {hw_model.hex()} ({hw_model!r})")
+
+
 def print_firmware_version(fw: "firmware.FirmwareType") -> None:
     """Print out the firmware version and details."""
     if isinstance(fw, firmware.LegacyFirmware):
@@ -70,7 +116,7 @@ def print_firmware_version(fw: "firmware.FirmwareType") -> None:
         click.echo("Trezor One v2 firmware (1.8.0 or later)")
         _print_version(fw.header.version)
     elif isinstance(fw, firmware.VendorFirmware):
-        click.echo("Trezor T firmware image.")
+        _print_firmware_model(fw.vendor_header.hw_model)
         vendor = fw.vendor_header.text
         vendor_version = "{}.{}".format(*fw.vendor_header.version)
         click.echo(f"Vendor header from {vendor}, version {vendor_version}")
@@ -110,9 +156,13 @@ def validate_signatures(
         click.echo("Unsigned firmware looking OK.")
 
     except firmware.FirmwareIntegrityError as e:
-        click.echo(e)
-        click.echo("Firmware validation failed, aborting.")
-        sys.exit(4)
+        try:
+            fw.verify(dev_keys=True)
+            click.echo("WARNING: Firmware for development kit only.")
+        except firmware.FirmwareIntegrityError:
+            click.echo(e)
+            click.echo("Firmware validation failed, aborting.")
+            sys.exit(4)
 
 
 def validate_fingerprint(
@@ -137,18 +187,13 @@ def validate_fingerprint(
 
 
 def check_device_match(
-    fw: "firmware.FirmwareType",
-    bootloader_onev2: bool,
-    trezor_major_version: int,
+    fw: "firmware.FirmwareType", model: TrezorModel, bootloader_onev2: bool
 ) -> None:
     """Validate if the device and firmware are compatible.
 
     Prints error message and exits if the validation fails.
     """
-    if trezor_major_version not in ALLOWED_FIRMWARE_FORMATS:
-        click.echo("trezorctl doesn't know your device version. Aborting.")
-        sys.exit(3)
-    elif not isinstance(fw, ALLOWED_FIRMWARE_FORMATS[trezor_major_version]):
+    if (model is not models.T1B1) != isinstance(fw, firmware.VendorFirmware):
         click.echo("Firmware does not match your device, aborting.")
         sys.exit(3)
 
@@ -165,11 +210,13 @@ def check_device_match(
 
 
 def get_all_firmware_releases(
-    bitcoin_only: bool, beta: bool, major_version: int
+    model: TrezorModel, bitcoin_only: bool, beta: bool
 ) -> List[Dict[str, Any]]:
     """Get sorted list of all releases suitable for inputted parameters"""
-    url = f"https://data.trezor.io/firmware/{major_version}/releases.json"
-    releases = requests.get(url).json()
+    url = f"https://data.trezor.io/firmware/{model.internal_name.lower()}/releases.json"
+    req = requests.get(url)
+    req.raise_for_status()
+    releases = req.json()
     if not releases:
         raise click.ClickException("Failed to get list of releases")
 
@@ -213,6 +260,7 @@ def get_url_and_fingerprint_from_release(
 
 
 def find_specified_firmware_version(
+    model: TrezorModel,
     version: str,
     beta: bool,
     bitcoin_only: bool,
@@ -222,20 +270,34 @@ def find_specified_firmware_version(
     If the specified version is not found, exits with a failure.
     """
     want_version = [int(x) for x in version.split(".")]
-    releases = get_all_firmware_releases(bitcoin_only, beta, want_version[0])
+    releases = get_all_firmware_releases(model, bitcoin_only, beta)
     for release in releases:
         if release["version"] == want_version:
             return get_url_and_fingerprint_from_release(release, bitcoin_only)
 
-    click.echo(f"Version {version} could not be found.")
+    click.echo(f"Version {version} for {model.internal_name} could not be found.")
     sys.exit(1)
+
+
+def _should_use_bitcoin_only(features: messages.Features) -> bool:
+    # in bootloader, decide by unit indicator
+    # TODO determine by fw vendor if installed?
+    if features.bootloader_mode:
+        return bool(features.unit_btconly)
+
+    # in firmware, check whether current firmware is bitcoin-only
+    if messages.Capability.Bitcoin_like not in features.capabilities:
+        return True
+
+    # universal firmware by default
+    return False
 
 
 def find_best_firmware_version(
     client: "TrezorClient",
     version: Optional[str],
     beta: bool,
-    bitcoin_only: bool,
+    bitcoin_only: Optional[bool],
 ) -> Tuple[str, str]:
     """Get the url from which to download the firmware and its expected fingerprint.
 
@@ -245,13 +307,15 @@ def find_best_firmware_version(
     If the specified version is not found, prints the closest available version
     (higher than the specified one, if existing).
     """
+    if bitcoin_only is None:
+        bitcoin_only = _should_use_bitcoin_only(client.features)
 
     def version_str(version: Iterable[int]) -> str:
         return ".".join(map(str, version))
 
     f = client.features
 
-    releases = get_all_firmware_releases(bitcoin_only, beta, f.major_version)
+    releases = get_all_firmware_releases(client.model, bitcoin_only, beta)
     highest_version = releases[0]["version"]
 
     if version:
@@ -259,9 +323,8 @@ def find_best_firmware_version(
         if len(want_version) != 3:
             click.echo("Please use the 'X.Y.Z' version format.")
         if want_version[0] != f.major_version:
-            model = f.model or "1"
             click.echo(
-                f"Warning: Trezor {model} firmware version should be "
+                f"Warning: Trezor {client.model.name} firmware version should be "
                 f"{f.major_version}.X.Y (requested: {version})"
             )
     else:
@@ -340,9 +403,9 @@ def download_firmware_data(url: str) -> bytes:
 def validate_firmware(
     firmware_data: bytes,
     fingerprint: Optional[str] = None,
+    model: Optional[TrezorModel] = None,
     bootloader_onev2: Optional[bool] = None,
-    trezor_major_version: Optional[int] = None,
-    prompt_unsigned: bool = True,
+    verify_only: bool = False,
 ) -> None:
     """Validate the firmware through multiple tests.
 
@@ -357,15 +420,17 @@ def validate_firmware(
         sys.exit(2)
 
     print_firmware_version(fw)
-    validate_fingerprint(fw, fingerprint)
-    validate_signatures(fw, prompt_unsigned=prompt_unsigned)
+    if not fw.model():
+        click.echo("Cannot validate firmware for unrecognized model.")
+        if not verify_only:
+            click.echo("(Hint: use --skip-check to skip validation.)")
+        sys.exit(3)
 
-    if bootloader_onev2 is not None and trezor_major_version is not None:
-        check_device_match(
-            fw=fw,
-            bootloader_onev2=bootloader_onev2,
-            trezor_major_version=trezor_major_version,
-        )
+    validate_fingerprint(fw, fingerprint)
+    validate_signatures(fw, prompt_unsigned=not verify_only)
+
+    if model is not None and bootloader_onev2 is not None:
+        check_device_match(fw, model, bootloader_onev2)
         click.echo("Firmware is appropriate for your device.")
 
 
@@ -411,6 +476,43 @@ def upload_firmware_into_device(
         sys.exit(3)
 
 
+def _is_strict_update(client: "TrezorClient", firmware_data: bytes) -> bool:
+    """Check if the firmware is from the same vendor and the
+    firmware is newer than the currently installed firmware.
+    """
+    try:
+        fw = firmware.parse(firmware_data)
+    except Exception as e:
+        click.echo(e)
+        sys.exit(2)
+
+    if not isinstance(fw, firmware.VendorFirmware):
+        return False
+
+    f = client.features
+    cur_version = (f.major_version, f.minor_version, f.patch_version, 0)
+
+    return (
+        fw.vendor_header.text == f.fw_vendor
+        and fw.firmware.header.version > cur_version
+        and fw.vendor_header.trust.is_full_trust()
+    )
+
+
+def _get_firmware_header_size(firmware_data: bytes) -> int:
+    """Returns size of vendor and image headers"""
+    try:
+        fw = firmware.parse(firmware_data)
+    except Exception as e:
+        click.echo(e)
+        sys.exit(2)
+
+    if isinstance(fw, firmware.VendorFirmware):
+        return fw.firmware.header.header_len + fw.vendor_header.header_len
+
+    return 0
+
+
 @click.group(name="firmware")
 def cli() -> None:
     """Firmware commands."""
@@ -438,22 +540,22 @@ def verify(
     """
     # Deciding if to take the device into account
     bootloader_onev2: Optional[bool]
-    trezor_major_version: Optional[int]
+    model: Optional[TrezorModel]
     if check_device:
         with obj.client_context() as client:
             bootloader_onev2 = _is_bootloader_onev2(client)
-            trezor_major_version = client.features.major_version
+            model = client.model
     else:
         bootloader_onev2 = None
-        trezor_major_version = None
+        model = None
 
     firmware_data = filename.read()
     validate_firmware(
         firmware_data=firmware_data,
         fingerprint=fingerprint,
         bootloader_onev2=bootloader_onev2,
-        trezor_major_version=trezor_major_version,
-        prompt_unsigned=False,
+        model=model,
+        verify_only=True,
     )
 
 
@@ -461,20 +563,22 @@ def verify(
 # fmt: off
 @click.option("-o", "--output", type=click.File("wb"), help="Output file to save firmware data to")
 @click.option("-v", "--version", help="Which version to download")
+@click.option("-m", "--model", type=MODEL_CHOICE, help="Which model to download firmware for")
 @click.option("-s", "--skip-check", is_flag=True, help="Do not validate firmware integrity")
 @click.option("--beta", is_flag=True, help="Use firmware from BETA channel")
-@click.option("--bitcoin-only", is_flag=True, help="Use bitcoin-only firmware (if possible)")
+@click.option("--bitcoin-only/--universal", is_flag=True, default=None, help="Download bitcoin-only or universal firmware (defaults to universal)")
 @click.option("--fingerprint", help="Expected firmware fingerprint in hex")
 @click.pass_obj
 # fmt: on
 def download(
     obj: "TrezorConnection",
     output: Optional[BinaryIO],
+    model: Optional[TrezorModel],
     version: Optional[str],
     skip_check: bool,
     fingerprint: Optional[str],
     beta: bool,
-    bitcoin_only: bool,
+    bitcoin_only: Optional[bool],
 ) -> None:
     """Download and save the firmware image.
 
@@ -483,19 +587,20 @@ def download(
     """
     # When a version is specified, we do not even need the client connection
     #   (and we will not be checking device when validating)
-    if version:
+    if model and version:
         url, fp = find_specified_firmware_version(
-            version=version, beta=beta, bitcoin_only=bitcoin_only
+            model, version, beta, bool(bitcoin_only)
         )
         bootloader_onev2 = None
-        trezor_major_version = None
     else:
         with obj.client_context() as client:
             url, fp = find_best_firmware_version(
                 client=client, version=version, beta=beta, bitcoin_only=bitcoin_only
             )
             bootloader_onev2 = _is_bootloader_onev2(client)
-            trezor_major_version = client.features.major_version
+            if model is not None and model != client.model:
+                click.echo("Warning: ignoring --model option.")
+            model = client.model
 
     firmware_data = download_firmware_data(url)
 
@@ -507,7 +612,7 @@ def download(
             firmware_data=firmware_data,
             fingerprint=fingerprint,
             bootloader_onev2=bootloader_onev2,
-            trezor_major_version=trezor_major_version,
+            model=model,
         )
 
     if not output:
@@ -524,14 +629,15 @@ def download(
 @click.option("-v", "--version", help="Which version to download")
 @click.option("-s", "--skip-check", is_flag=True, help="Do not validate firmware integrity")
 @click.option("-n", "--dry-run", is_flag=True, help="Perform all steps but do not actually upload the firmware")
+@click.option("-l", "--language", help="Language code, blob, or URL")
 @click.option("--beta", is_flag=True, help="Use firmware from BETA channel")
-@click.option("--bitcoin-only", is_flag=True, help="Use bitcoin-only firmware (if possible)")
+@click.option("--bitcoin-only/--universal", is_flag=True, default=None, help="Download bitcoin-only or universal firmware (defaults to universal)")
 @click.option("--raw", is_flag=True, help="Push raw firmware data to Trezor")
 @click.option("--fingerprint", help="Expected firmware fingerprint in hex")
 # fmt: on
-@with_client
+@click.pass_obj
 def update(
-    client: "TrezorClient",
+    obj: "TrezorConnection",
     filename: Optional[BinaryIO],
     url: Optional[str],
     version: Optional[str],
@@ -540,11 +646,10 @@ def update(
     raw: bool,
     dry_run: bool,
     beta: bool,
-    bitcoin_only: bool,
+    bitcoin_only: Optional[bool],
+    language: Optional[str],
 ) -> None:
     """Upload new firmware to device.
-
-    Device must be in bootloader mode.
 
     You can specify a filename or URL from which the firmware can be downloaded.
     You can also explicitly specify a firmware version that you want.
@@ -555,43 +660,88 @@ def update(
     against downloaded firmware fingerprint. Otherwise fingerprint is checked
     against data.trezor.io information, if available.
     """
-    if sum(bool(x) for x in (filename, url, version)) > 1:
-        click.echo("You can use only one of: filename, url, version.")
-        sys.exit(1)
+    with obj.client_context() as client:
+        if sum(bool(x) for x in (filename, url, version)) > 1:
+            click.echo("You can use only one of: filename, url, version.")
+            sys.exit(1)
 
-    if not dry_run and not client.features.bootloader_mode:
-        click.echo("Please switch your device to bootloader mode.")
-        sys.exit(1)
+        language_data = b""
+        if language is not None:
+            if client.features.bootloader_mode:
+                click.echo("Language data cannot be uploaded in bootloader mode.")
+                sys.exit(1)
 
-    if filename:
-        firmware_data = filename.read()
-    else:
-        if not url:
-            url, fp = find_best_firmware_version(
-                client=client, version=version, beta=beta, bitcoin_only=bitcoin_only
+            assert language is not None
+            try:
+                language_data = Path(language).read_bytes()
+            except Exception:
+                try:
+                    language_data = requests.get(language).content
+                except Exception:
+                    raise click.ClickException(
+                        f"Failed to load translations from {language}"
+                    ) from None
+
+        if filename:
+            firmware_data = filename.read()
+        else:
+            if not url:
+                url, fp = find_best_firmware_version(
+                    client=client, version=version, beta=beta, bitcoin_only=bitcoin_only
+                )
+                if not fingerprint:
+                    fingerprint = fp
+
+            firmware_data = download_firmware_data(url)
+
+        if not raw and not skip_check:
+            validate_firmware(
+                firmware_data=firmware_data,
+                fingerprint=fingerprint,
+                bootloader_onev2=_is_bootloader_onev2(client),
+                model=client.model,
             )
-            if not fingerprint:
-                fingerprint = fp
 
-        firmware_data = download_firmware_data(url)
+            if not raw:
+                firmware_data = extract_embedded_fw(
+                    firmware_data=firmware_data,
+                    bootloader_onev2=_is_bootloader_onev2(client),
+                )
 
-    if not raw and not skip_check:
-        validate_firmware(
-            firmware_data=firmware_data,
-            fingerprint=fingerprint,
-            bootloader_onev2=_is_bootloader_onev2(client),
-            trezor_major_version=client.features.major_version,
-        )
+        if dry_run:
+            click.echo("Dry run. Not uploading firmware to device.")
+            return
 
-    if not raw:
-        firmware_data = extract_embedded_fw(
-            firmware_data=firmware_data,
-            bootloader_onev2=_is_bootloader_onev2(client),
-        )
+        if not client.features.bootloader_mode:
+            if _is_strict_update(client, firmware_data):
+                header_size = _get_firmware_header_size(firmware_data)
+                device.reboot_to_bootloader(
+                    client,
+                    boot_command=messages.BootCommand.INSTALL_UPGRADE,
+                    firmware_header=firmware_data[:header_size],
+                    language_data=language_data,
+                )
+            else:
+                if language_data:
+                    click.echo(
+                        "WARNING: Seamless installation not possible, language data will not be uploaded."
+                    )
+                device.reboot_to_bootloader(client)
 
-    if dry_run:
-        click.echo("Dry run. Not uploading firmware to device.")
-    else:
+            click.echo("Waiting for bootloader...")
+            while True:
+                time.sleep(0.5)
+                try:
+                    obj.get_transport()
+                    break
+                except Exception:
+                    pass
+
+    with obj.client_context() as client:
+        if not client.features.bootloader_mode:
+            click.echo("Please switch your device to bootloader mode.")
+            sys.exit(1)
+
         upload_firmware_into_device(client=client, firmware_data=firmware_data)
 
 

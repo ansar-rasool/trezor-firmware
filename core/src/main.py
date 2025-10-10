@@ -36,11 +36,8 @@ import trezor.pin  # noqa: F401
 # usb imports trezor.utils and trezor.io which is a C module
 import usb
 
-# create an unimport manager that will be reused in the main loop
-unimport_manager = utils.unimport()
-
 # unlock the device, unload the boot module afterwards
-with unimport_manager:
+with utils.unimport():
     import boot
     del boot
 
@@ -49,7 +46,21 @@ import storage.device
 
 usb.bus.open(storage.device.get_device_id())
 
+
+# enable BLE, allow connections
+if utils.USE_BLE:
+    import trezorble as ble
+    ble.start_comm()
+
+    # allow connections from bonded peers if any
+    if ble.peer_count() > 0:
+        ble.start_advertising(True, storage.device.get_label())
+
+    del ble
+
+
 # run the endless loop
+unimport_manager = utils.unimport()
 while True:
     with unimport_manager:
         import session  # noqa: F401

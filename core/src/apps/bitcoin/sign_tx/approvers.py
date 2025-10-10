@@ -1,30 +1,28 @@
 from micropython import const
 from typing import TYPE_CHECKING
 
-from trezor.crypto.curve import bip340, secp256k1
-from trezor.crypto.hashlib import sha256
-from trezor.utils import HashWriter
 from trezor.wire import DataError, ProcessError
 
 from apps.common import safety_checks
 
-from .. import writers
-from ..common import input_is_external_unverified
-from ..keychain import SLIP44_TESTNET, validate_path_against_script_type
+from ..common import CHANGE_OUTPUT_TO_INPUT_SCRIPT_TYPES, input_is_external_unverified
+from ..keychain import validate_path_against_script_type
 from . import helpers, tx_weight
-from .sig_hasher import BitcoinSigHasher
 from .tx_info import OriginalTxInfo
 
 if TYPE_CHECKING:
+    from typing import Optional
+
     from trezor.crypto import bip32
-    from trezor.messages import SignTx, TxInput, TxOutput, TxAckPaymentRequest
+    from trezor.messages import SignTx, TxAckPaymentRequest, TxInput, TxOutput
 
     from apps.common.coininfo import CoinInfo
     from apps.common.keychain import Keychain
 
     from ..authorization import CoinJoinAuthorization
-    from .tx_info import TxInfo
+    from .bitcoin import Bitcoin
     from .payment_request import PaymentRequestVerifier
+    from .tx_info import TxInfo
 
 
 # An Approver object computes the transaction totals and either prompts the user
@@ -52,6 +50,9 @@ class Approver:
 
         self.amount_unit = tx.amount_unit
         self.has_unverified_external_input = False
+
+        # output numbering to be used in confirmation dialogs
+        self.external_output_index = 0
 
     def is_payjoin(self) -> bool:
         # A PayJoin is a replacement transaction which manipulates the external inputs of the
@@ -115,6 +116,7 @@ class Approver:
         self,
         txo: TxOutput,
         script_pubkey: bytes,
+        tx_info: TxInfo | None,
         orig_txo: TxOutput | None = None,
     ) -> None:
         await self._add_output(txo, script_pubkey)
@@ -129,7 +131,12 @@ class Approver:
     ) -> None:
         raise NotImplementedError
 
-    async def approve_tx(self, tx_info: TxInfo, orig_txs: list[OriginalTxInfo]) -> None:
+    async def approve_tx(
+        self,
+        tx_info: TxInfo,
+        orig_txs: list[OriginalTxInfo],
+        signer: Optional[Bitcoin],
+    ) -> None:
         self.finish_payment_request()
 
 
@@ -141,6 +148,7 @@ class BasicApprover(Approver):
         super().__init__(tx, coin)
         self.change_count = 0  # the number of change-outputs
         self.foreign_address_confirmed = False
+        self.chunkify = bool(tx.chunkify)
 
     async def add_internal_input(self, txi: TxInput, node: bip32.HDNode) -> None:
         if not validate_path_against_script_type(self.coin, txi):
@@ -161,8 +169,6 @@ class BasicApprover(Approver):
             raise ProcessError("Transaction has changed during signing")
 
     async def _add_output(self, txo: TxOutput, script_pubkey: bytes) -> None:
-        from ..common import CHANGE_OUTPUT_TO_INPUT_SCRIPT_TYPES
-
         if txo.address_n and not validate_path_against_script_type(
             self.coin,
             address_n=txo.address_n,
@@ -181,11 +187,12 @@ class BasicApprover(Approver):
         self,
         txo: TxOutput,
         script_pubkey: bytes,
+        tx_info: TxInfo | None,
         orig_txo: TxOutput | None = None,
     ) -> None:
         from trezor.enums import OutputScriptType
 
-        await super().add_external_output(txo, script_pubkey, orig_txo)
+        await super().add_external_output(txo, script_pubkey, tx_info, orig_txo)
 
         if orig_txo:
             if txo.amount < orig_txo.amount:
@@ -218,9 +225,20 @@ class BasicApprover(Approver):
                     "Adding new OP_RETURN outputs in replacement transactions is not supported."
                 )
         elif txo.payment_req_index is None or self.show_payment_req_details:
+            source_path = (
+                tx_info.change_detector.wallet_path.get_path() if tx_info else None
+            )
             # Ask user to confirm output, unless it is part of a payment
             # request, which gets confirmed separately.
-            await helpers.confirm_output(txo, self.coin, self.amount_unit)
+            await helpers.confirm_output(
+                txo,
+                self.coin,
+                self.amount_unit,
+                self.external_output_index,
+                self.chunkify,
+                source_path,
+            )
+            self.external_output_index += 1
 
     async def add_payment_request(
         self, msg: TxAckPaymentRequest, keychain: Keychain
@@ -229,9 +247,10 @@ class BasicApprover(Approver):
         if msg.amount is None:
             raise DataError("Missing payment request amount.")
 
-        result = await helpers.confirm_payment_request(msg, self.coin, self.amount_unit)
-        # When user wants to see more info, the result will be False.
-        self.show_payment_req_details = result is False
+        result = await helpers.should_show_payment_request_details(
+            msg, self.coin, self.amount_unit
+        )
+        self.show_payment_req_details = result is True
 
     async def approve_orig_txids(
         self, tx_info: TxInfo, orig_txs: list[OriginalTxInfo]
@@ -239,30 +258,44 @@ class BasicApprover(Approver):
         if not orig_txs:
             return
 
+        title = self._replacement_title(tx_info, orig_txs)
+        for orig in orig_txs:
+            await helpers.confirm_replacement(title, orig.orig_hash)
+
+    def _replacement_title(
+        self, tx_info: TxInfo, orig_txs: list[OriginalTxInfo]
+    ) -> str:
+        from trezor import TR
+
         if self.is_payjoin():
-            description = "PayJoin"
+            return TR.bitcoin__title_payjoin
         elif tx_info.rbf_disabled() and any(
             not orig.rbf_disabled() for orig in orig_txs
         ):
-            description = "Finalize transaction"
+            return TR.bitcoin__title_finalize_transaction
         elif len(orig_txs) > 1:
-            description = "Meld transactions"
+            return TR.bitcoin__title_meld_transaction
         else:
-            description = "Update transaction"
+            return TR.bitcoin__title_update_transaction
 
-        for orig in orig_txs:
-            await helpers.confirm_replacement(description, orig.orig_hash)
-
-    async def approve_tx(self, tx_info: TxInfo, orig_txs: list[OriginalTxInfo]) -> None:
+    async def approve_tx(
+        self,
+        tx_info: TxInfo,
+        orig_txs: list[OriginalTxInfo],
+        signer: Optional[Bitcoin],
+    ) -> None:
         from trezor.wire import NotEnoughFunds
 
         coin = self.coin  # local_cache_attribute
         amount_unit = self.amount_unit  # local_cache_attribute
 
-        await super().approve_tx(tx_info, orig_txs)
+        await super().approve_tx(tx_info, orig_txs, signer)
 
         if self.has_unverified_external_input:
             await helpers.confirm_unverified_external_input()
+
+        if tx_info.change_detector.wallet_path.get_path() is None:
+            await helpers.confirm_multiple_accounts()
 
         fee = self.total_in - self.total_out
 
@@ -316,18 +349,24 @@ class BasicApprover(Approver):
                     )
 
             if not self.is_payjoin():
+                if signer is not None:
+                    signer.init_signing()
+                title = self._replacement_title(tx_info, orig_txs)
                 # Not a PayJoin: Show the actual fee difference, since any difference in the fee is
                 # coming entirely from the user's own funds and from decreases of external outputs.
                 # We consider the decreases as belonging to the user.
                 await helpers.confirm_modify_fee(
-                    fee - orig_fee, fee, fee_rate, coin, amount_unit
+                    title, fee - orig_fee, fee, fee_rate, coin, amount_unit
                 )
             elif spending > orig_spending:
+                if signer is not None:
+                    signer.init_signing()
+                title = self._replacement_title(tx_info, orig_txs)
                 # PayJoin and user is spending more: Show the increase in the user's contribution
                 # to the fee, ignoring any contribution from external inputs. Decreasing of
                 # external outputs is not allowed in PayJoin, so there is no need to handle those.
                 await helpers.confirm_modify_fee(
-                    spending - orig_spending, fee, fee_rate, coin, amount_unit
+                    title, spending - orig_spending, fee, fee_rate, coin, amount_unit
                 )
             else:
                 # PayJoin and user is not spending more: When new external inputs are involved and
@@ -341,8 +380,18 @@ class BasicApprover(Approver):
                     tx_info.tx.lock_time, tx_info.lock_time_disabled()
                 )
 
+            if signer is not None:
+                signer.init_signing()
+
             if not self.external_in:
-                await helpers.confirm_total(total, fee, fee_rate, coin, amount_unit)
+                await helpers.confirm_total(
+                    total,
+                    fee,
+                    fee_rate,
+                    coin,
+                    amount_unit,
+                    tx_info.change_detector.wallet_path.get_path(),
+                )
             else:
                 await helpers.confirm_joint_total(spending, total, coin, amount_unit)
 
@@ -355,16 +404,8 @@ class CoinJoinApprover(Approver):
     # Largest possible weight of an output supported by Trezor (P2TR or P2WSH).
     MAX_OUTPUT_WEIGHT = 4 * (8 + 1 + 1 + 1 + 32)
 
-    # Masks for the signable and no_fee bits in coinjoin_flags.
-    COINJOIN_FLAGS_SIGNABLE = const(0x01)
+    # Mask for the no_fee bits in coinjoin_flags.
     COINJOIN_FLAGS_NO_FEE = const(0x02)
-
-    # The public key used for verifying coinjoin requests in production on mainnet.
-    COINJOIN_REQ_PUBKEY = b"\x02W\x03\xbb\xe1[\xb0\x8e\x98!\xfed\xaf\xf6\xb2\xef\x1a1`\xe3y\x9d\xd8\xf0\xce\xbf,y\xe8g\xdd\x12]"
-
-    # The public key used for verifying coinjoin requests on testnet and in debug mode.
-    # secp256k1 public key of m/0h for "all all ... all" seed.
-    COINJOIN_REQ_PUBKEY_TEST = b"\x03\x0f\xdf^(\x9bZ\xefSb\x90\x95:\xe8\x1c\xe6\x0e\x84\x1f\xf9V\xf3f\xac\x12?\xa6\x9d\xb3\xc7\x9f!\xb0"
 
     def __init__(
         self,
@@ -381,45 +422,13 @@ class CoinJoinApprover(Approver):
         self.authorization = authorization
         self.coordination_fee_base = 0
 
-        # Begin hashing the coinjoin request.
-        self.h_request = HashWriter(sha256(b"CJR1"))  # "CJR1" = Coinjoin Request v1.
-        writers.write_bytes_prefixed(
-            self.h_request, authorization.params.coordinator.encode()
-        )
-        writers.write_uint32(self.h_request, coin.slip44)
-        writers.write_uint32(self.h_request, self.request.fee_rate)
-        writers.write_uint64(self.h_request, self.request.no_fee_threshold)
-        writers.write_uint64(self.h_request, self.request.min_registrable_amount)
-        writers.write_bytes_fixed(self.h_request, self.request.mask_public_key, 33)
-        writers.write_compact_size(self.h_request, tx.inputs_count)
-
         # Upper bound on the user's contribution to the weight of the transaction.
         self.our_weight = tx_weight.TxWeightCalculator()
-
-    def _add_input(self, txi: TxInput) -> None:
-        super()._add_input(txi)
-        writers.write_uint8(self.h_request, txi.coinjoin_flags)
 
     async def add_internal_input(self, txi: TxInput, node: bip32.HDNode) -> None:
         self.our_weight.add_input(txi)
         if not self.authorization.check_internal_input(txi):
             raise ProcessError("Unauthorized path")
-
-        # Compute the masking bit for the signable bit in coinjoin flags.
-        internal_private_key = node.private_key()
-        output_private_key = bip340.tweak_secret_key(internal_private_key)
-        shared_secret = secp256k1.multiply(
-            output_private_key, self.request.mask_public_key
-        )
-        h_mask = HashWriter(sha256())
-        writers.write_bytes_fixed(h_mask, shared_secret[1:33], 32)
-        writers.write_bytes_reversed(h_mask, txi.prev_hash, writers.TX_HASH_SIZE)
-        writers.write_uint32(h_mask, txi.prev_index)
-        mask = h_mask.get_digest()[0] & 1
-
-        # Ensure that the input can be signed.
-        if bool(txi.coinjoin_flags & self.COINJOIN_FLAGS_SIGNABLE) ^ mask != 1:
-            raise ProcessError("Unauthorized input")
 
         # Add to coordination_fee_base, except for remixes and small inputs which are
         # not charged a coordination fee.
@@ -455,40 +464,15 @@ class CoinJoinApprover(Approver):
     ) -> None:
         pass
 
-    def _verify_coinjoin_request(self, tx_info: TxInfo):
-        if not isinstance(tx_info.sig_hasher, BitcoinSigHasher):
-            raise ProcessError("Unexpected signature hasher.")
-
-        # Finish hashing the coinjoin request.
-        writers.write_bytes_fixed(
-            self.h_request, tx_info.sig_hasher.h_prevouts.get_digest(), 32
-        )
-        writers.write_bytes_fixed(
-            self.h_request, tx_info.sig_hasher.h_outputs.get_digest(), 32
-        )
-
-        # Verify the coinjoin request signature.
-        if __debug__ or self.coin.slip44 == SLIP44_TESTNET:
-            if secp256k1.verify(
-                self.COINJOIN_REQ_PUBKEY_TEST,
-                self.request.signature,
-                self.h_request.get_digest(),
-            ):
-                return True
-
-        return secp256k1.verify(
-            self.COINJOIN_REQ_PUBKEY,
-            self.request.signature,
-            self.h_request.get_digest(),
-        )
-
-    async def approve_tx(self, tx_info: TxInfo, orig_txs: list[OriginalTxInfo]) -> None:
+    async def approve_tx(
+        self,
+        tx_info: TxInfo,
+        orig_txs: list[OriginalTxInfo],
+        signer: Optional[Bitcoin],
+    ) -> None:
         from ..authorization import FEE_RATE_DECIMALS
 
-        await super().approve_tx(tx_info, orig_txs)
-
-        if not self._verify_coinjoin_request(tx_info):
-            raise DataError("Invalid signature in coinjoin request.")
+        await super().approve_tx(tx_info, orig_txs, signer)
 
         # The mining fee of the transaction as a whole.
         mining_fee = self.total_in - self.total_out

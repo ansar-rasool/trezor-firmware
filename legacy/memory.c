@@ -108,7 +108,7 @@ int memory_firmware_hash(const uint8_t *challenge, uint32_t challenge_size,
   }
 
   for (int i = FLASH_CODE_SECTOR_FIRST; i <= FLASH_CODE_SECTOR_LAST; i++) {
-    uint32_t size = flash_sector_size(i);
+    uint32_t size = flash_sector_size(i, 1);
     const void *data = flash_get_address(i, 0, size);
     if (data == NULL) {
       return 1;

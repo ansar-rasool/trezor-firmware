@@ -23,10 +23,10 @@ from .. import eos, tools
 from . import with_client
 
 if TYPE_CHECKING:
-    from ..client import TrezorClient
     from .. import messages
+    from ..client import TrezorClient
 
-PATH_HELP = "BIP-32 path, e.g. m/44'/194'/0'/0/0"
+PATH_HELP = "BIP-32 path, e.g. m/44h/194h/0h/0/0"
 
 
 @click.group(name="eos")
@@ -49,12 +49,19 @@ def get_public_key(client: "TrezorClient", address: str, show_display: bool) -> 
 @click.argument("file", type=click.File("r"))
 @click.option("-n", "--address", required=True, help=PATH_HELP)
 @click.option("-f", "--file", "_ignore", is_flag=True, hidden=True, expose_value=False)
+@click.option("-C", "--chunkify", is_flag=True)
 @with_client
 def sign_transaction(
-    client: "TrezorClient", address: str, file: TextIO
+    client: "TrezorClient", address: str, file: TextIO, chunkify: bool
 ) -> "messages.EosSignedTx":
     """Sign EOS transaction."""
     tx_json = json.load(file)
 
     address_n = tools.parse_path(address)
-    return eos.sign_tx(client, address_n, tx_json["transaction"], tx_json["chain_id"])
+    return eos.sign_tx(
+        client,
+        address_n,
+        tx_json["transaction"],
+        tx_json["chain_id"],
+        chunkify=chunkify,
+    )

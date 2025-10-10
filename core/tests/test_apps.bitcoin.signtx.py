@@ -1,34 +1,35 @@
-from common import *
+# flake8: noqa: F403,F405
+from common import *  # isort:skip
 
-from trezor.utils import chunks
 from trezor.crypto import bip39
-from trezor.messages import SignTx
-from trezor.messages import TxAckInput
-from trezor.messages import TxAckInputWrapper
-from trezor.messages import TxInput
-from trezor.messages import TxAckOutput
-from trezor.messages import TxAckOutputWrapper
-from trezor.messages import TxOutput
-from trezor.messages import TxAckPrevMeta
-from trezor.messages import PrevTx
-from trezor.messages import TxAckPrevInput
-from trezor.messages import TxAckPrevInputWrapper
-from trezor.messages import PrevInput
-from trezor.messages import TxAckPrevOutput
-from trezor.messages import TxAckPrevOutputWrapper
-from trezor.messages import PrevOutput
-from trezor.messages import TxRequest
-from trezor.enums.RequestType import TXINPUT, TXOUTPUT, TXMETA, TXFINISHED
-from trezor.messages import TxRequestDetailsType
-from trezor.messages import TxRequestSerializedType
-from trezor.enums import AmountUnit
-from trezor.enums import OutputScriptType
+from trezor.enums import AmountUnit, OutputScriptType
+from trezor.enums.RequestType import TXFINISHED, TXINPUT, TXMETA, TXOUTPUT
+from trezor.messages import (
+    PrevInput,
+    PrevOutput,
+    PrevTx,
+    SignTx,
+    TxAckInput,
+    TxAckInputWrapper,
+    TxAckOutput,
+    TxAckOutputWrapper,
+    TxAckPrevInput,
+    TxAckPrevInputWrapper,
+    TxAckPrevMeta,
+    TxAckPrevOutput,
+    TxAckPrevOutputWrapper,
+    TxInput,
+    TxOutput,
+    TxRequest,
+    TxRequestDetailsType,
+    TxRequestSerializedType,
+)
+from trezor.utils import chunks
 
-from apps.common import coins
-from apps.common.keychain import Keychain
 from apps.bitcoin.keychain import _get_schemas_for_coin
 from apps.bitcoin.sign_tx import bitcoin, helpers
-
+from apps.common import coins
+from apps.common.keychain import Keychain
 
 EMPTY_SERIALIZED = TxRequestSerializedType(serialized_tx=bytearray())
 
@@ -111,9 +112,18 @@ class TestSignTx(unittest.TestCase):
                 serialized=EMPTY_SERIALIZED,
             ),
             TxAckOutput(tx=TxAckOutputWrapper(output=out1)),
-            helpers.UiConfirmOutput(out1, coin_bitcoin, AmountUnit.BITCOIN),
+            helpers.UiConfirmOutput(
+                out1, coin_bitcoin, AmountUnit.BITCOIN, 0, False, [H_(44), H_(0), H_(0)]
+            ),
             True,
-            helpers.UiConfirmTotal(3_801_747, 50_000, fee_rate, coin_bitcoin, AmountUnit.BITCOIN),
+            helpers.UiConfirmTotal(
+                3_801_747,
+                50_000,
+                fee_rate,
+                coin_bitcoin,
+                AmountUnit.BITCOIN,
+                inp1.address_n[:3],
+            ),
             True,
             # ButtonRequest(code=ButtonRequest_ConfirmOutput),
             # ButtonRequest(code=ButtonRequest_SignTx),

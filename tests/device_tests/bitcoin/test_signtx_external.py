@@ -16,12 +16,13 @@
 
 import pytest
 
-from trezorlib import btc, device, messages
+from trezorlib import btc, device, messages, models
 from trezorlib.debuglink import TrezorClientDebugLink as Client
 from trezorlib.exceptions import TrezorFailure
 from trezorlib.messages import SafetyCheckLevel
 from trezorlib.tools import parse_path
 
+from ...common import is_core
 from ...tx_cache import TxCache
 from .signtx import (
     assert_tx_matches,
@@ -80,7 +81,7 @@ TXHASH_1010b2 = bytes.fromhex(
 )
 
 
-@pytest.mark.skip_t1
+@pytest.mark.models("core")
 def test_p2pkh_presigned(client: Client):
     inp1 = messages.TxInputType(
         # mvbu1Gdy8SUjTenqerxUaZyYjmveZvt33q
@@ -177,7 +178,7 @@ def test_p2pkh_presigned(client: Client):
         )
 
 
-@pytest.mark.skip_t1
+@pytest.mark.models("core")
 def test_p2wpkh_in_p2sh_presigned(client: Client):
     inp1 = messages.TxInputType(
         # 2N1LGaGg836mqSQqiuUBLfcyGBhyZbremDX
@@ -222,13 +223,13 @@ def test_p2wpkh_in_p2sh_presigned(client: Client):
                 request_input(1),
                 request_output(0),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                messages.ButtonRequest(code=B.ConfirmOutput),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 request_output(1),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                messages.ButtonRequest(code=B.ConfirmOutput),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 request_output(2),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                messages.ButtonRequest(code=B.ConfirmOutput),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 messages.ButtonRequest(code=B.SignTx),
                 request_input(0),
                 request_meta(TXHASH_20912f),
@@ -273,13 +274,13 @@ def test_p2wpkh_in_p2sh_presigned(client: Client):
                 request_input(1),
                 request_output(0),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                messages.ButtonRequest(code=B.ConfirmOutput),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 request_output(1),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                messages.ButtonRequest(code=B.ConfirmOutput),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 request_output(2),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                messages.ButtonRequest(code=B.ConfirmOutput),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 messages.ButtonRequest(code=B.SignTx),
                 request_input(0),
                 request_meta(TXHASH_20912f),
@@ -300,7 +301,7 @@ def test_p2wpkh_in_p2sh_presigned(client: Client):
             )
 
 
-@pytest.mark.skip_t1
+@pytest.mark.models("core")
 def test_p2wpkh_presigned(client: Client):
     inp1 = messages.TxInputType(
         # tb1qkvwu9g3k2pdxewfqr7syz89r3gj557l3uuf9r9
@@ -365,7 +366,7 @@ def test_p2wpkh_presigned(client: Client):
         )
 
 
-@pytest.mark.skip_t1
+@pytest.mark.models("core")
 def test_p2wsh_external_presigned(client: Client):
     inp1 = messages.TxInputType(
         address_n=parse_path("m/84h/1h/0h/0/0"),
@@ -405,7 +406,7 @@ def test_p2wsh_external_presigned(client: Client):
                 request_input(1),
                 request_output(0),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                messages.ButtonRequest(code=B.ConfirmOutput),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 messages.ButtonRequest(code=B.SignTx),
                 request_input(0),
                 request_meta(TXHASH_ec16dc),
@@ -450,7 +451,7 @@ def test_p2wsh_external_presigned(client: Client):
                 request_input(1),
                 request_output(0),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                messages.ButtonRequest(code=B.ConfirmOutput),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 messages.ButtonRequest(code=B.SignTx),
                 request_input(0),
                 request_meta(TXHASH_ec16dc),
@@ -473,7 +474,7 @@ def test_p2wsh_external_presigned(client: Client):
             )
 
 
-@pytest.mark.skip_t1
+@pytest.mark.models("core")
 def test_p2tr_external_presigned(client: Client):
     inp1 = messages.TxInputType(
         # tb1p8tvmvsvhsee73rhym86wt435qrqm92psfsyhy6a3n5gw455znnpqm8wald
@@ -515,7 +516,7 @@ def test_p2tr_external_presigned(client: Client):
                 request_input(1),
                 request_output(0),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                messages.ButtonRequest(code=B.ConfirmOutput),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 request_output(1),
                 messages.ButtonRequest(code=B.SignTx),
                 request_input(1),
@@ -547,7 +548,7 @@ def test_p2tr_external_presigned(client: Client):
                 request_input(1),
                 request_output(0),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                messages.ButtonRequest(code=B.ConfirmOutput),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 request_output(1),
                 messages.ButtonRequest(code=B.SignTx),
                 request_input(1),
@@ -565,13 +566,13 @@ def test_p2tr_external_presigned(client: Client):
             )
 
 
-@pytest.mark.skip_t1
+@pytest.mark.models("core")
 def test_p2pkh_with_proof(client: Client):
     # TODO
     pass
 
 
-@pytest.mark.skip_t1
+@pytest.mark.models("core")
 def test_p2wpkh_in_p2sh_with_proof(client: Client):
     # TODO
     pass
@@ -610,18 +611,17 @@ def test_p2wpkh_with_proof(client: Client):
     )
 
     with client:
-        t1 = client.features.model == "1"
-        tt = client.features.model == "T"
+        is_t1 = client.model is models.T1B1
         client.set_expected_responses(
             [
                 request_input(0),
                 request_input(1),
                 request_output(0),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                (tt, messages.ButtonRequest(code=B.ConfirmOutput)),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 request_output(1),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                (tt, messages.ButtonRequest(code=B.ConfirmOutput)),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 messages.ButtonRequest(code=B.SignTx),
                 request_input(0),
                 request_meta(TXHASH_e5b7e2),
@@ -637,7 +637,7 @@ def test_p2wpkh_with_proof(client: Client):
                 request_input(1),
                 request_output(0),
                 request_output(1),
-                (t1, request_input(0)),
+                (is_t1, request_input(0)),
                 request_input(1),
                 request_finished(),
             ]
@@ -704,20 +704,19 @@ def test_p2tr_with_proof(client: Client):
     )
 
     with client:
-        t1 = client.features.model == "1"
-        tt = client.features.model == "T"
+        is_t1 = client.model is models.T1B1
         client.set_expected_responses(
             [
                 request_input(0),
                 request_input(1),
                 request_output(0),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                (tt, messages.ButtonRequest(code=B.ConfirmOutput)),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 messages.ButtonRequest(code=B.SignTx),
                 request_input(0),
                 request_input(1),
                 request_output(0),
-                (t1, request_input(0)),
+                (is_t1, request_input(0)),
                 request_input(1),
                 request_finished(),
             ]

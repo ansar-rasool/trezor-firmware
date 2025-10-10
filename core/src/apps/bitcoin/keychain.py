@@ -1,33 +1,31 @@
 from micropython import const
 from typing import TYPE_CHECKING
 
+from trezor.enums import InputScriptType
 from trezor.messages import AuthorizeCoinJoin, SignMessage
 
-from apps.common.paths import PATTERN_BIP44, PATTERN_CASA, PathSchema
+from apps.common.paths import PATTERN_BIP44, PATTERN_CASA, PathSchema, unharden
 
 from . import authorization
-from .common import BITCOIN_NAMES
+from .common import BIP32_WALLET_DEPTH, BITCOIN_NAMES
 
 if TYPE_CHECKING:
     from typing import Awaitable, Callable, Iterable, TypeVar
-    from typing_extensions import Protocol
 
-    from trezor.protobuf import MessageType
-    from trezor.wire import Context
-
-    from trezor.enums import InputScriptType
     from trezor.messages import (
         GetAddress,
         GetOwnershipId,
-        GetPublicKey,
-        VerifyMessage,
         GetOwnershipProof,
+        GetPublicKey,
         SignTx,
+        VerifyMessage,
     )
+    from trezor.protobuf import MessageType
+    from typing_extensions import Protocol
 
-    from apps.common.keychain import Keychain, MsgOut, Handler
-    from apps.common.paths import Bip32Path
     from apps.common import coininfo
+    from apps.common.keychain import Handler, Keychain, MsgOut
+    from apps.common.paths import Bip32Path
 
     BitcoinMessage = (
         AuthorizeCoinJoin
@@ -82,7 +80,6 @@ PATTERN_UNCHAINED_HARDENED = (
 PATTERN_UNCHAINED_UNHARDENED = (
     "m/45'/coin_type/account/[0-1000000]/change/address_index"
 )
-PATTERN_UNCHAINED_DEPRECATED = "m/45'/coin_type'/account'/[0-1000000]/address_index"
 
 # Model 1 firmware signing.
 # 826421588 is ASCII string "T1B1" as a little-endian 32-bit integer.
@@ -140,7 +137,6 @@ def validate_path_against_script_type(
         if coin.coin_name in BITCOIN_NAMES:
             append(PATTERN_UNCHAINED_HARDENED)
             append(PATTERN_UNCHAINED_UNHARDENED)
-            append(PATTERN_UNCHAINED_DEPRECATED)
 
     elif coin.segwit and script_type == InputScriptType.SPENDP2SHWITNESS:
         append(PATTERN_BIP49)
@@ -160,6 +156,9 @@ def validate_path_against_script_type(
         if slip44 == SLIP44_BITCOIN:
             append(PATTERN_GREENADDRESS_A)
             append(PATTERN_GREENADDRESS_B)
+        if coin.coin_name in BITCOIN_NAMES and multisig:
+            append(PATTERN_UNCHAINED_HARDENED)
+            append(PATTERN_UNCHAINED_UNHARDENED)
 
     elif coin.taproot and script_type == InputScriptType.SPENDTAPROOT:
         append(PATTERN_BIP86)
@@ -206,7 +205,6 @@ def _get_schemas_for_coin(
                 PATTERN_CASA_UNHARDENED,
                 PATTERN_UNCHAINED_HARDENED,
                 PATTERN_UNCHAINED_UNHARDENED,
-                PATTERN_UNCHAINED_DEPRECATED,
             )
         )
 
@@ -252,8 +250,9 @@ def get_schemas_from_patterns(
 
 
 def _get_coin_by_name(coin_name: str | None) -> coininfo.CoinInfo:
-    from apps.common import coininfo
     from trezor import wire
+
+    from apps.common import coininfo
 
     if coin_name is None:
         coin_name = "Bitcoin"
@@ -265,7 +264,6 @@ def _get_coin_by_name(coin_name: str | None) -> coininfo.CoinInfo:
 
 
 async def _get_keychain_for_coin(
-    ctx: Context,
     coin: coininfo.CoinInfo,
     unlock_schemas: Iterable[PathSchema] = (),
 ) -> Keychain:
@@ -273,7 +271,7 @@ async def _get_keychain_for_coin(
 
     schemas = _get_schemas_for_coin(coin, unlock_schemas)
     slip21_namespaces = [[b"SLIP-0019"], [b"SLIP-0024"]]
-    keychain = await get_keychain(ctx, coin.curve_name, schemas, slip21_namespaces)
+    keychain = await get_keychain(coin.curve_name, schemas, slip21_namespaces)
     return keychain
 
 
@@ -318,18 +316,160 @@ def _get_unlock_schemas(
 
 def with_keychain(func: HandlerWithCoinInfo[MsgOut]) -> Handler[MsgIn, MsgOut]:
     async def wrapper(
-        ctx: Context,
-        msg: MsgIn,
+        msg: BitcoinMessage,
         auth_msg: MessageType | None = None,
     ) -> MsgOut:
         coin = _get_coin_by_name(msg.coin_name)
         unlock_schemas = _get_unlock_schemas(msg, auth_msg, coin)
-        keychain = await _get_keychain_for_coin(ctx, coin, unlock_schemas)
+        keychain = await _get_keychain_for_coin(coin, unlock_schemas)
         if AuthorizeCoinJoin.is_type_of(auth_msg):
             auth_obj = authorization.from_cached_message(auth_msg)
-            return await func(ctx, msg, keychain, coin, auth_obj)
+            return await func(msg, keychain, coin, auth_obj)
         else:
             with keychain:
-                return await func(ctx, msg, keychain, coin)
+                return await func(msg, keychain, coin)
 
     return wrapper
+
+
+class AccountType:
+    def __init__(
+        self,
+        account_name: str,
+        pattern: str,
+        script_type: InputScriptType,
+        require_segwit: bool,
+        require_bech32: bool,
+        require_taproot: bool,
+        account_level: bool = False,
+    ) -> None:
+        self.account_name = account_name
+        self.pattern = pattern
+        self.script_type = script_type
+        self.require_segwit = require_segwit
+        self.require_bech32 = require_bech32
+        self.require_taproot = require_taproot
+        self.account_level = account_level
+
+    def get_name(
+        self,
+        coin: coininfo.CoinInfo,
+        address_n: Bip32Path,
+        script_type: InputScriptType | None,
+        show_account_str: bool,
+    ) -> str | None:
+        pattern = self.pattern
+        if self.account_level:
+            # Discard the last two parts of the pattern. For bitcoin these generally are `change`
+            # and `address_index`. The result can be used to match XPUB paths.
+            pattern = "/".join(pattern.split("/")[:-BIP32_WALLET_DEPTH])
+
+        if (
+            (script_type is not None and script_type != self.script_type)
+            or not PathSchema.parse(pattern, coin.slip44).match(address_n)
+            or (not coin.segwit and self.require_segwit)
+            or (not coin.bech32_prefix and self.require_bech32)
+            or (not coin.taproot and self.require_taproot)
+        ):
+            return None
+
+        name = self.account_name
+        if show_account_str:
+            name = f"{self.account_name} account"
+        account_pos = pattern.find("/account'")
+        if account_pos >= 0:
+            i = pattern.count("/", 0, account_pos)
+            account_number = unharden(address_n[i]) + 1
+            name += f" #{account_number}"
+
+        return name
+
+
+def address_n_to_name(
+    coin: coininfo.CoinInfo,
+    address_n: Bip32Path,
+    script_type: InputScriptType | None = None,
+    account_level: bool = False,
+    show_account_str: bool = False,
+) -> str | None:
+    ACCOUNT_TYPES = (
+        AccountType(
+            "Legacy",
+            PATTERN_BIP44,
+            InputScriptType.SPENDADDRESS,
+            require_segwit=True,
+            require_bech32=False,
+            require_taproot=False,
+            account_level=account_level,
+        ),
+        AccountType(
+            "",
+            PATTERN_BIP44,
+            InputScriptType.SPENDADDRESS,
+            require_segwit=False,
+            require_bech32=False,
+            require_taproot=False,
+            account_level=account_level,
+        ),
+        AccountType(
+            "L. SegWit",
+            PATTERN_BIP49,
+            InputScriptType.SPENDP2SHWITNESS,
+            require_segwit=True,
+            require_bech32=False,
+            require_taproot=False,
+            account_level=account_level,
+        ),
+        AccountType(
+            "SegWit",
+            PATTERN_BIP84,
+            InputScriptType.SPENDWITNESS,
+            require_segwit=True,
+            require_bech32=True,
+            require_taproot=False,
+            account_level=account_level,
+        ),
+        AccountType(
+            "Taproot",
+            PATTERN_BIP86,
+            InputScriptType.SPENDTAPROOT,
+            require_segwit=False,
+            require_bech32=True,
+            require_taproot=True,
+            account_level=account_level,
+        ),
+        AccountType(
+            "Coinjoin",
+            PATTERN_SLIP25_TAPROOT,
+            InputScriptType.SPENDTAPROOT,
+            require_segwit=False,
+            require_bech32=True,
+            require_taproot=True,
+            account_level=account_level,
+        ),
+    )
+
+    for account in ACCOUNT_TYPES:
+        name = account.get_name(coin, address_n, script_type, show_account_str)
+        if name:
+            return name
+
+    return None
+
+
+def address_n_to_name_or_unknown(
+    coin: coininfo.CoinInfo,
+    address_n: Bip32Path,
+    script_type: InputScriptType | None = None,
+    account_level: bool = False,
+    show_account_str: bool = False,
+) -> str:
+    from trezor import TR
+
+    account_name = address_n_to_name(coin, address_n, script_type)
+    if account_name is None:
+        return TR.bitcoin__unknown_path
+    elif account_name == "":
+        return coin.coin_shortcut
+    else:
+        return f"{coin.coin_shortcut} {account_name}"

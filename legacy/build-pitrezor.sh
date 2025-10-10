@@ -7,6 +7,7 @@ export PYTHON=python3
 #export DEBUG_LINK=1
 #export OPTFLAGS=-O0
 #export DBGFLAGS=-g3 -ggdb3
+#export DEBUG_RNG=1
 
 case "$1" in
   "-clean")

@@ -1,13 +1,21 @@
+from __future__ import annotations
+
+import typing as t
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING
+
+import typing_extensions as tx
 
 from trezorlib.client import PASSPHRASE_ON_DEVICE
+from trezorlib.messages import DebugWaitType
 from trezorlib.transport import udp
 
-if TYPE_CHECKING:
-    from trezorlib.messages import Features
-    from trezorlib.debuglink import DebugLink, TrezorClientDebugLink as Client
+if t.TYPE_CHECKING:
     from trezorlib._internal.emulator import Emulator
+    from trezorlib.debuglink import DebugLink
+    from trezorlib.debuglink import TrezorClientDebugLink as Client
+    from trezorlib.messages import Features
+
+    P = tx.ParamSpec("P")
 
 
 udp.SOCKET_TIMEOUT = 0.1
@@ -33,19 +41,33 @@ class NullUI:
 class BackgroundDeviceHandler:
     _pool = ThreadPoolExecutor()
 
-    def __init__(self, client: "Client") -> None:
+    def __init__(self, client: "Client", nowait: bool = False) -> None:
         self._configure_client(client)
         self.task = None
+        self.nowait = nowait
 
     def _configure_client(self, client: "Client") -> None:
         self.client = client
         self.client.ui = NullUI  # type: ignore [NullUI is OK UI]
         self.client.watch_layout(True)
+        self.client.debug.input_wait_type = DebugWaitType.CURRENT_LAYOUT
 
-    def run(self, function, *args, **kwargs) -> None:
+    def run(
+        self,
+        function: t.Callable[tx.Concatenate["Client", P], t.Any],
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> None:
+        """Runs some function that interacts with a device.
+
+        Makes sure the UI is updated before returning.
+        """
         if self.task is not None:
             raise RuntimeError("Wait for previous task first")
-        self.task = self._pool.submit(function, self.client, *args, **kwargs)
+
+        # wait for the first UI change triggered by the task running in the background
+        with self.debuglink().wait_for_layout_change():
+            self.task = self._pool.submit(function, self.client, *args, **kwargs)
 
     def kill_task(self) -> None:
         if self.task is not None:
@@ -55,7 +77,7 @@ class BackgroundDeviceHandler:
             while self.client.session_counter > 0:
                 self.client.close()
             try:
-                self.task.result()
+                self.task.result(timeout=1)
             except Exception:
                 pass
         self.task = None
@@ -66,11 +88,11 @@ class BackgroundDeviceHandler:
         emulator.restart()
         self._configure_client(emulator.client)  # type: ignore [client cannot be None]
 
-    def result(self):
+    def result(self, timeout: float | None = None) -> t.Any:
         if self.task is None:
             raise RuntimeError("No task running")
         try:
-            return self.task.result()
+            return self.task.result(timeout=timeout)
         finally:
             self.task = None
 

@@ -1,6 +1,7 @@
 use super::{Component, Event, EventCtx, Never};
-use crate::ui::geometry::Rect;
+use crate::ui::{geometry::Rect, shape::Renderer};
 
+#[derive(Clone)]
 pub struct Empty;
 
 impl Component for Empty {
@@ -14,13 +15,12 @@ impl Component for Empty {
         None
     }
 
-    fn paint(&mut self) {}
+    fn render<'s>(&'s self, _target: &mut impl Renderer<'s>) {}
 }
 
 #[cfg(feature = "ui_debug")]
 impl crate::trace::Trace for Empty {
     fn trace(&self, t: &mut dyn crate::trace::Tracer) {
-        t.open("Empty");
-        t.close();
+        t.component("Empty");
     }
 }

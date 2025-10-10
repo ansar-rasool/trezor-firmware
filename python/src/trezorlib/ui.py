@@ -63,14 +63,11 @@ CAN_HANDLE_HIDDEN_INPUT = sys.stdin and sys.stdin.isatty()
 
 
 class TrezorClientUI(Protocol):
-    def button_request(self, br: messages.ButtonRequest) -> None:
-        ...
+    def button_request(self, br: messages.ButtonRequest) -> None: ...
 
-    def get_pin(self, code: Optional[PinMatrixRequestType]) -> str:
-        ...
+    def get_pin(self, code: Optional[PinMatrixRequestType]) -> str: ...
 
-    def get_passphrase(self, available_on_device: bool) -> Union[str, object]:
-        ...
+    def get_passphrase(self, available_on_device: bool) -> Union[str, object]: ...
 
 
 def echo(*args: Any, **kwargs: Any) -> None:
@@ -90,15 +87,24 @@ class ClickUI:
         self, always_prompt: bool = False, passphrase_on_host: bool = False
     ) -> None:
         self.pinmatrix_shown = False
-        self.prompt_shown = False
+        self.last_prompt_shown = ""
         self.always_prompt = always_prompt
         self.passphrase_on_host = passphrase_on_host
 
-    def button_request(self, _br: messages.ButtonRequest) -> None:
-        if not self.prompt_shown:
-            echo("Please confirm action on your Trezor device.")
+    def _prompt_for_button(self, br: messages.ButtonRequest) -> str:
+        if br.code == messages.ButtonRequestType.PassphraseEntry:
+            return "Please enter passphrase on your Trezor device."
+        if br.code == messages.ButtonRequestType.PinEntry:
+            return "Please enter PIN on your Trezor device."
+
+        return "Please confirm action on your Trezor device."
+
+    def button_request(self, br: messages.ButtonRequest) -> None:
+        prompt = self._prompt_for_button(br)
+        if prompt != self.last_prompt_shown:
+            echo(prompt)
         if not self.always_prompt:
-            self.prompt_shown = True
+            self.last_prompt_shown = prompt
 
     def get_pin(self, code: Optional[PinMatrixRequestType] = None) -> str:
         if code == PIN_CURRENT:

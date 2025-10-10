@@ -20,9 +20,9 @@ from trezorlib import device, messages
 from trezorlib.debuglink import TrezorClientDebugLink as Client
 from trezorlib.exceptions import TrezorFailure
 
-from ...common import recovery_enter_shares
+from ...input_flows import InputFlowSlip39BasicRecoveryDryRun
 
-pytestmark = pytest.mark.skip_t1
+pytestmark = pytest.mark.models("core")
 
 SHARES_20_2of3 = [
     "crush merchant academic acid dream decision orbit smug trend trust painting slice glad crunch veteran lunch friar satoshi engage aquatic",
@@ -38,51 +38,32 @@ INVALID_SHARES_20_2of3 = [
 
 @pytest.mark.setup_client(mnemonic=SHARES_20_2of3[0:2])
 def test_2of3_dryrun(client: Client):
-    debug = client.debug
-
-    def input_flow():
-        yield  # Confirm Dryrun
-        debug.press_yes()
-        # run recovery flow
-        yield from recovery_enter_shares(debug, SHARES_20_2of3[1:3])
-
     with client:
-        client.set_input_flow(input_flow)
-        ret = device.recover(
-            client,
-            passphrase_protection=False,
-            pin_protection=False,
-            label="label",
-            language="en-US",
-            dry_run=True,
-        )
-
-    # Dry run was successful
-    assert ret == messages.Success(
-        message="The seed is valid and matches the one in the device"
-    )
-
-
-@pytest.mark.setup_client(mnemonic=SHARES_20_2of3[0:2])
-def test_2of3_invalid_seed_dryrun(client: Client):
-    debug = client.debug
-
-    def input_flow():
-        yield  # Confirm Dryrun
-        debug.press_yes()
-        # run recovery flow
-        yield from recovery_enter_shares(debug, INVALID_SHARES_20_2of3)
-
-    # test fails because of different seed on device
-    with client, pytest.raises(
-        TrezorFailure, match=r"The seed does not match the one in the device"
-    ):
-        client.set_input_flow(input_flow)
+        IF = InputFlowSlip39BasicRecoveryDryRun(client, SHARES_20_2of3[1:3])
+        client.set_input_flow(IF.get())
         device.recover(
             client,
             passphrase_protection=False,
             pin_protection=False,
             label="label",
-            language="en-US",
-            dry_run=True,
+            type=messages.RecoveryType.DryRun,
+        )
+
+
+@pytest.mark.setup_client(mnemonic=SHARES_20_2of3[0:2])
+def test_2of3_invalid_seed_dryrun(client: Client):
+    # test fails because of different seed on device
+    with client, pytest.raises(
+        TrezorFailure, match=r"The seed does not match the one in the device"
+    ):
+        IF = InputFlowSlip39BasicRecoveryDryRun(
+            client, INVALID_SHARES_20_2of3, mismatch=True
+        )
+        client.set_input_flow(IF.get())
+        device.recover(
+            client,
+            passphrase_protection=False,
+            pin_protection=False,
+            label="label",
+            type=messages.RecoveryType.DryRun,
         )

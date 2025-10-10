@@ -22,6 +22,7 @@
 #include "config.h"
 #include "fsm.h"
 #include "gettext.h"
+#include "hmac.h"
 #include "layout2.h"
 #include "memzero.h"
 #include "messages.h"
@@ -34,26 +35,37 @@
 
 static uint32_t strength;
 static uint8_t int_entropy[32];
-static bool awaiting_entropy = false;
+static uint8_t seed[64];
+static const char *reset_mnemonic;
 static bool skip_backup = false;
 static bool no_backup = false;
+static bool entropy_check = false;
 
-void reset_init(bool display_random, uint32_t _strength,
-                bool passphrase_protection, bool pin_protection,
-                const char *language, const char *label, uint32_t u2f_counter,
-                bool _skip_backup, bool _no_backup) {
+static enum {
+  RESET_NONE = 0,
+  RESET_ENTROPY_REQUEST,
+  RESET_ENTROPY_CHECK_READY,
+} reset_state = RESET_NONE;
+
+static void send_entropy_request(bool set_prev_entropy);
+static void reset_finish(void);
+
+static void entropy_check_progress(uint32_t iter, uint32_t total) {
+  (void)iter;
+  (void)total;
+  layoutProgress(_("Entropy check"), 0);
+}
+
+void reset_init(uint32_t _strength, bool passphrase_protection,
+                bool pin_protection, const char *language, const char *label,
+                uint32_t u2f_counter, bool _skip_backup, bool _no_backup,
+                bool _entropy_check) {
   if (_strength != 128 && _strength != 192 && _strength != 256) return;
 
   strength = _strength;
   skip_backup = _skip_backup;
   no_backup = _no_backup;
-
-  if (display_random && (skip_backup || no_backup)) {
-    fsm_sendFailure(FailureType_Failure_ProcessError,
-                    "Can't show internal entropy when backup is skipped");
-    layoutHome();
-    return;
-  }
+  entropy_check = _entropy_check;
 
   layoutDialogSwipe(&bmp_icon_question, _("Cancel"), _("Confirm"), NULL,
                     _("Do you really want to"), _("create a new wallet?"), NULL,
@@ -62,41 +74,6 @@ void reset_init(bool display_random, uint32_t _strength,
     fsm_sendFailure(FailureType_Failure_ActionCancelled, NULL);
     layoutHome();
     return;
-  }
-
-  random_buffer(int_entropy, 32);
-
-  if (display_random) {
-    for (int start = 0; start < 2; start++) {
-      char ent_str[4][17] = {0};
-      char desc[] = "Internal entropy _/2:";
-      data2hex(int_entropy + start * 16, 4, ent_str[0]);
-      data2hex(int_entropy + start * 16 + 4, 4, ent_str[1]);
-      data2hex(int_entropy + start * 16 + 8, 4, ent_str[2]);
-      data2hex(int_entropy + start * 16 + 12, 4, ent_str[3]);
-      layoutLast = layoutDialogSwipe;
-      layoutSwipe();
-      desc[17] = '1' + start;
-      oledDrawStringCenter(OLED_WIDTH / 2, 0, desc, FONT_STANDARD);
-      oledDrawStringCenter(OLED_WIDTH / 2, 2 + 1 * 9, ent_str[0], FONT_FIXED);
-      oledDrawStringCenter(OLED_WIDTH / 2, 2 + 2 * 9, ent_str[1], FONT_FIXED);
-      oledDrawStringCenter(OLED_WIDTH / 2, 2 + 3 * 9, ent_str[2], FONT_FIXED);
-      oledDrawStringCenter(OLED_WIDTH / 2, 2 + 4 * 9, ent_str[3], FONT_FIXED);
-      oledHLine(OLED_HEIGHT - 13);
-      layoutButtonNo(_("Cancel"), &bmp_btn_cancel);
-      layoutButtonYes(_("Continue"), &bmp_btn_confirm);
-      // 40 is the maximum pixels used for a row
-      oledSCA(2 + 1 * 9, 2 + 1 * 9 + 6, 40);
-      oledSCA(2 + 2 * 9, 2 + 2 * 9 + 6, 40);
-      oledSCA(2 + 3 * 9, 2 + 3 * 9 + 6, 40);
-      oledSCA(2 + 4 * 9, 2 + 4 * 9 + 6, 40);
-      oledRefresh();
-      if (!protectButton(ButtonRequestType_ButtonRequest_ResetDevice, false)) {
-        fsm_sendFailure(FailureType_Failure_ActionCancelled, NULL);
-        layoutHome();
-        return;
-      }
-    }
   }
 
   if (pin_protection && !protectChangePin(false)) {
@@ -108,36 +85,79 @@ void reset_init(bool display_random, uint32_t _strength,
   config_setLanguage(language);
   config_setLabel(label);
   config_setU2FCounter(u2f_counter);
+  send_entropy_request(false);
+}
 
+static void send_entropy_request(bool set_prev_entropy) {
   EntropyRequest resp = {0};
-  memzero(&resp, sizeof(EntropyRequest));
+  if (set_prev_entropy) {
+    memcpy(resp.prev_entropy.bytes, int_entropy, sizeof(int_entropy));
+    resp.prev_entropy.size = sizeof(int_entropy);
+    resp.has_prev_entropy = true;
+  }
+
+  random_buffer(int_entropy, sizeof(int_entropy));
+  if (entropy_check) {
+    hmac_sha256(int_entropy, sizeof(int_entropy), NULL, 0,
+                resp.entropy_commitment.bytes);
+    resp.entropy_commitment.size = SHA256_DIGEST_LENGTH;
+    resp.has_entropy_commitment = true;
+  }
   msg_write(MessageType_MessageType_EntropyRequest, &resp);
-  awaiting_entropy = true;
+  reset_state = RESET_ENTROPY_REQUEST;
 }
 
 void reset_entropy(const uint8_t *ext_entropy, uint32_t len) {
-  if (!awaiting_entropy) {
+  if (reset_state != RESET_ENTROPY_REQUEST) {
     fsm_sendFailure(FailureType_Failure_UnexpectedMessage,
-                    _("Not in Reset mode"));
+                    _("Entropy not requested"));
     return;
   }
-  awaiting_entropy = false;
 
+  uint8_t secret[SHA256_DIGEST_LENGTH] = {0};
   SHA256_CTX ctx = {0};
   sha256_Init(&ctx);
-  sha256_Update(&ctx, int_entropy, 32);
+  SHA256_UPDATE_BYTES(&ctx, int_entropy, 32);
   sha256_Update(&ctx, ext_entropy, len);
-  sha256_Final(&ctx, int_entropy);
-  const char *mnemonic = mnemonic_from_data(int_entropy, strength / 8);
-  memzero(int_entropy, 32);
+  sha256_Final(&ctx, secret);
+  reset_mnemonic = mnemonic_from_data(secret, strength / 8);
+  memzero(secret, sizeof(secret));
+  if (!entropy_check) {
+    reset_finish();
+    return;
+  }
 
+  reset_state = RESET_ENTROPY_CHECK_READY;
+  mnemonic_to_seed(reset_mnemonic, "", seed, entropy_check_progress);
+  EntropyCheckReady resp = {0};
+  msg_write(MessageType_MessageType_EntropyCheckReady, &resp);
+}
+
+void reset_continue(bool finish) {
+  if (reset_state != RESET_ENTROPY_CHECK_READY) {
+    fsm_sendFailure(FailureType_Failure_UnexpectedMessage,
+                    _("Entropy check not ready"));
+    return;
+  }
+
+  if (finish) {
+    reset_finish();
+  } else {
+    send_entropy_request(true);
+  }
+}
+
+static void reset_finish(void) {
+  memzero(int_entropy, sizeof(int_entropy));
+  memzero(seed, sizeof(seed));
+  reset_state = RESET_NONE;
   if (skip_backup || no_backup) {
     if (no_backup) {
       config_setNoBackup();
     } else {
       config_setNeedsBackup(true);
     }
-    if (config_setMnemonic(mnemonic)) {
+    if (config_setMnemonic(reset_mnemonic)) {
       fsm_sendSuccess(_("Device successfully initialized"));
     } else {
       fsm_sendFailure(FailureType_Failure_ProcessError,
@@ -145,9 +165,16 @@ void reset_entropy(const uint8_t *ext_entropy, uint32_t len) {
     }
     layoutHome();
   } else {
-    reset_backup(false, mnemonic);
+    reset_backup(false, reset_mnemonic);
   }
   mnemonic_clear();
+}
+
+const uint8_t *reset_get_seed(void) {
+  if (reset_state != RESET_ENTROPY_CHECK_READY) {
+    return NULL;
+  }
+  return seed;
 }
 
 static char current_word[10];
@@ -209,6 +236,16 @@ void reset_backup(bool separated, const char *mnemonic) {
     }
   }
   layoutHome();
+}
+
+void reset_abort(void) {
+  memzero(int_entropy, sizeof(int_entropy));
+  memzero(seed, sizeof(seed));
+  mnemonic_clear();
+  if (reset_state != RESET_NONE) {
+    reset_state = RESET_NONE;
+    layoutHome();
+  }
 }
 
 #if DEBUG_LINK

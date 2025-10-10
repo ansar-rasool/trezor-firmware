@@ -7,7 +7,7 @@ import shutil
 import typing as t
 import warnings
 from copy import deepcopy
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from difflib import SequenceMatcher
 from functools import cached_property
 from itertools import zip_longest
@@ -37,7 +37,7 @@ FixturesType = t.NewType("FixturesType", "dict[str, dict[str, dict[str, str]]]")
 FIXTURES: FixturesType = FixturesType({})
 
 
-def get_fixtures() -> FixturesType:
+def get_current_fixtures() -> FixturesType:
     global FIXTURES
     if not FIXTURES and FIXTURES_FILE.exists():
         FIXTURES = FixturesType(json.loads(FIXTURES_FILE.read_text()))
@@ -51,41 +51,62 @@ def prepare_fixtures(
 ) -> tuple[FixturesType, set[TestCase]]:
     """Prepare contents of fixtures.json"""
     # set up brand new contents
-    grouped_tests: dict[tuple[str, str], dict[str, str]] = {}
+    grouped_tests: dict[tuple[str, str, str], dict[str, str]] = {}
     for result in results:
-        idx = result.test.model, result.test.group
+        idx = result.test.model, result.test.group, result.test.language
         group = grouped_tests.setdefault(idx, {})
         group[result.test.fixtures_name] = result.actual_hash
 
     missing_tests: set[TestCase] = set()
 
     # merge with previous fixtures
-    fixtures = deepcopy(get_fixtures())
-    for (model, group), new_content in grouped_tests.items():
+    fixtures = deepcopy(get_current_fixtures())
+    for (model, group, language), new_content in grouped_tests.items():
         # for every model/group, update the data with the new content
         current_content = fixtures.setdefault(model, {}).setdefault(group, {})
         if remove_missing:
+            # Need to preserve all the languages except the current one
+            diff_languages: dict[str, str] = {}
+            for key in list(current_content.keys()):
+                if TestCase.get_language_from_fixture_name(key) != language:
+                    diff_languages[key] = current_content.pop(key)
+
             new_tests = set(new_content.keys())
             old_tests = set(current_content.keys())
             missing_tests |= {
-                TestCase(model, group, test) for test in old_tests - new_tests
+                TestCase(model, group, test, language) for test in old_tests - new_tests
             }
             current_content.clear()
+            current_content.update(diff_languages)
 
         current_content.update(new_content)
 
     return fixtures, missing_tests
 
 
-def write_fixtures(
+def write_fixtures_only_new_results(
+    results: t.Iterable[TestResult],
+    dest: Path,
+) -> None:
+    """Generate new results file with only the tests that were actually run."""
+    content: dict[str, dict[str, dict[str, str]]] = {}
+    for res in results:
+        model = content.setdefault(res.test.model, {})
+        group = model.setdefault(res.test.group, {})
+        group[res.test.fixtures_name] = res.actual_hash
+    dest.write_text(json.dumps(content, indent=0, sort_keys=True) + "\n")
+
+
+def write_fixtures_complete(
     results: t.Iterable[TestResult],
     remove_missing: bool = False,
     dest: Path = FIXTURES_FILE,
 ) -> None:
+    """Generate new fixtures.json file with all the results, updated for the latest run."""
     global FIXTURES
     content, _ = prepare_fixtures(results, remove_missing)
-    FIXTURES = FixturesType(content)
     dest.write_text(json.dumps(content, indent=0, sort_keys=True) + "\n")
+    FIXTURES = FixturesType({})  # reset the cache
 
 
 def _rename_records(screen_path: Path) -> None:
@@ -163,6 +184,21 @@ def _get_test_name_and_group(node_id: str) -> tuple[str, str]:
     return shortened_name, group_name
 
 
+def get_screen_path(test_case: TestCase) -> Path | None:
+    test_name = test_case.id
+    path = SCREENS_DIR / test_name / "actual"
+    if path.exists():
+        return path
+    path = SCREENS_DIR / test_name / "recorded"
+    if path.exists():
+        print(
+            f"WARNING: no actual screens for {test_name}, recording may be outdated: {path}"
+        )
+        return path
+    print(f"WARNING: missing screens for {test_name}. Did the test run?")
+    return None
+
+
 def screens_diff(
     expected_hashes: list[str], actual_hashes: list[str]
 ) -> t.Iterator[tuple[str | None, str | None]]:
@@ -192,23 +228,37 @@ class TestCase:
     model: str
     group: str
     name: str
+    language: str
 
     @classmethod
     def build(cls, client: Client, request: pytest.FixtureRequest) -> Self:
         name, group = _get_test_name_and_group(request.node.nodeid)
+        full_language = client.features.language
+        assert full_language
+        language = full_language[:2]
         return cls(
-            model=f"T{client.features.model}",
+            model=client.model.internal_name,
             name=name,
             group=group,
+            language=language,
         )
+
+    @staticmethod
+    def get_language_from_fixture_name(fixture_name: str) -> str:
+        return fixture_name.split("_")[1]
 
     @property
     def id(self) -> str:
-        return f"{self.model}-{self.group}-{self.name}"
+        return f"{self.model}_{self.language}-{self.group}-{self.name}"
 
     @property
     def fixtures_name(self) -> str:
-        return f"{self.model}_{self.name}"
+        return f"{self.model}_{self.language}_{self.name}"
+
+    @classmethod
+    def from_fixtures(cls, fixtures_name: str, group: str) -> Self:
+        model, lang, name = fixtures_name.split("_", maxsplit=2)
+        return cls(model=model, group=group, name=name, language=lang)
 
     @property
     def dir(self) -> Path:
@@ -246,6 +296,9 @@ class TestCase:
         result.save_metadata()
         return result
 
+    def replace(self, **kwargs) -> Self:
+        return replace(self, **kwargs)
+
 
 @dataclass
 class TestResult:
@@ -258,7 +311,7 @@ class TestResult:
     def __post_init__(self) -> None:
         if self.expected_hash is None:
             self.expected_hash = (
-                get_fixtures()
+                get_current_fixtures()
                 .get(self.test.model, {})
                 .get(self.test.group, {})
                 .get(self.test.fixtures_name)
@@ -270,7 +323,8 @@ class TestResult:
             json.dumps(metadata, indent=2, sort_keys=True) + "\n"
         )
 
-    def succeeded_in_ui_comparison(self) -> bool:
+    @property
+    def ui_passed(self) -> bool:
         return self.actual_hash == self.expected_hash
 
     @classmethod
@@ -280,6 +334,7 @@ class TestResult:
             model=metadata["test"]["model"],
             group=metadata["test"]["group"],
             name=metadata["test"]["name"],
+            language=metadata["test"]["language"],
         )
         return cls(
             test=test,
@@ -301,7 +356,7 @@ class TestResult:
     def recent_ui_failures(cls) -> t.Iterator[Self]:
         """Returning just the results that resulted in UI failure."""
         for result in cls.recent_results():
-            if not result.succeeded_in_ui_comparison():
+            if not result.ui_passed:
                 yield result
 
     def store_recorded(self) -> None:

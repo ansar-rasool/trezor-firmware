@@ -34,10 +34,14 @@
 #include "timer.h"
 #include "usb.h"
 #include "util.h"
+
 #if !EMULATOR
 #include <libopencm3/stm32/desig.h>
 #include "otp.h"
+#else
+#include <stdio.h>
 #endif
+
 #ifdef USE_SECP256K1_ZKP
 #include "zkp_context.h"
 #endif
@@ -45,13 +49,13 @@
 #ifdef USE_SECP256K1_ZKP
 void secp256k1_default_illegal_callback_fn(const char *str, void *data) {
   (void)data;
-  __fatal_error(NULL, str, __FILE__, __LINE__, __func__);
+  __fatal_error(str, __FILE__, __LINE__);
   return;
 }
 
 void secp256k1_default_error_callback_fn(const char *str, void *data) {
   (void)data;
-  __fatal_error(NULL, str, __FILE__, __LINE__, __func__);
+  __fatal_error(str, __FILE__, __LINE__);
   return;
 }
 #endif
@@ -181,6 +185,13 @@ int main(void) {
 #if !EMULATOR
   config_wipe();
 #endif
+#endif
+
+#if EMULATOR
+  printf(
+      "\x1b[1;31m"
+      "*** TREZOR EMULATOR IS FOR DEVELOPMENT PURPOSES ONLY ***"
+      "\x1b[0m\n");
 #endif
 
   oledDrawBitmap(40, 0, &bmp_logo64_half);

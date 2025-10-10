@@ -3,40 +3,61 @@ import sys
 from trezorutils import (  # noqa: F401
     BITCOIN_ONLY,
     EMULATOR,
+    HOMESCREEN_MAXSIZE,
+    INTERNAL_MODEL,
     MODEL,
+    MODEL_FULL_NAME,
+    MODEL_USB_MANUFACTURER,
+    MODEL_USB_PRODUCT,
     SCM_REVISION,
-    VERSION_MAJOR,
-    VERSION_MINOR,
-    VERSION_PATCH,
+    UI_LAYOUT,
+    USE_BACKLIGHT,
+    USE_BLE,
+    USE_BUTTON,
+    USE_HAPTIC,
+    USE_OPTIGA,
+    USE_SD_CARD,
+    USE_THP,
+    USE_TOUCH,
+    USE_TROPIC,
+    VERSION,
+    bootloader_locked,
+    check_firmware_header,
     consteq,
     firmware_hash,
     firmware_vendor,
     halt,
     memcpy,
     reboot_to_bootloader,
-    usb_data_connected,
+    sd_hotswap_enabled,
+    unit_btconly,
+    unit_color,
+    unit_packaging,
 )
 from typing import TYPE_CHECKING
 
-DISABLE_ANIMATION = 0
-
 if __debug__:
+    from trezorutils import LOG_STACK_USAGE, check_free_heap, check_heap_fragmentation
+
+    if LOG_STACK_USAGE:
+        from trezorutils import estimate_unused_stack, zero_unused_stack  # noqa: F401
+
     if EMULATOR:
         import uos
 
-        DISABLE_ANIMATION = int(uos.getenv("TREZOR_DISABLE_ANIMATION") or "0")
-        LOG_MEMORY = int(uos.getenv("TREZOR_LOG_MEMORY") or "0")
+        DISABLE_ANIMATION = uos.getenv("TREZOR_DISABLE_ANIMATION") == "1"
+        LOG_MEMORY = uos.getenv("TREZOR_LOG_MEMORY") == "1"
     else:
+        from trezorutils import DISABLE_ANIMATION
+
         LOG_MEMORY = 0
 
+else:
+    DISABLE_ANIMATION = False
+    LOG_STACK_USAGE = False
+
 if TYPE_CHECKING:
-    from typing import (
-        Any,
-        Iterator,
-        Protocol,
-        TypeVar,
-        Sequence,
-    )
+    from typing import Any, Iterator, Protocol, Sequence, TypeVar
 
     from trezor.protobuf import MessageType
 
@@ -46,10 +67,8 @@ def unimport_begin() -> set[str]:
 
 
 def unimport_end(mods: set[str], collect: bool = True) -> None:
-    # static check that the size of sys.modules never grows above value of
-    # MICROPY_LOADED_MODULES_DICT_SIZE, so that the sys.modules dict is never
-    # reallocated at run-time
-    assert len(sys.modules) <= 160, "Please bump preallocated size in mpconfigport.h"
+    if __debug__:
+        check_heap_fragmentation()
 
     for mod in sys.modules:  # pylint: disable=consider-using-dict-items
         if mod not in mods:
@@ -75,16 +94,21 @@ def unimport_end(mods: set[str], collect: bool = True) -> None:
 class unimport:
     def __init__(self) -> None:
         self.mods: set[str] | None = None
+        if __debug__:
+            self.free_heap = 0
 
     def __enter__(self) -> None:
         self.mods = unimport_begin()
 
-    def __exit__(self, _exc_type: Any, _exc_value: Any, _tb: Any) -> None:
+    def __exit__(self, exc_type: Any, _exc_value: Any, _tb: Any) -> None:
         assert self.mods is not None
         unimport_end(self.mods, collect=False)
         self.mods.clear()
         self.mods = None
         gc.collect()
+
+        if __debug__ and exc_type is not SystemExit:
+            self.free_heap = check_free_heap(self.free_heap)
 
 
 def presize_module(modname: str, size: int) -> None:
@@ -102,6 +126,14 @@ def presize_module(modname: str, size: int) -> None:
 
 
 if __debug__:
+    from ubinascii import hexlify
+
+    try:
+        from trezorutils import enable_oom_dump
+
+        enable_oom_dump()
+    except ImportError:
+        pass
 
     def mem_dump(filename: str) -> None:
         from micropython import mem_info
@@ -117,6 +149,10 @@ if __debug__:
             mem_info()
         else:
             mem_info(True)
+
+    def get_bytes_as_str(a: bytes) -> str:
+        """Converts the provided bytes to a hexadecimal string (decoded as `utf-8`)."""
+        return hexlify(a).decode("utf-8")
 
 
 def ensure(cond: bool, msg: str | None = None) -> None:
@@ -139,24 +175,19 @@ def chunks(items: Chunkable, size: int) -> Iterator[Chunkable]:
 if TYPE_CHECKING:
 
     class HashContext(Protocol):
-        def update(self, __buf: bytes) -> None:
-            ...
+        def update(self, __buf: bytes) -> None: ...
 
-        def digest(self) -> bytes:
-            ...
+        def digest(self) -> bytes: ...
 
     class HashContextInitable(HashContext, Protocol):
         def __init__(  # pylint: disable=super-init-not-called
             self, __data: bytes | None = None
-        ) -> None:
-            ...
+        ) -> None: ...
 
     class Writer(Protocol):
-        def append(self, __b: int) -> None:
-            ...
+        def append(self, __b: int) -> None: ...
 
-        def extend(self, __buf: bytes) -> None:
-            ...
+        def extend(self, __buf: bytes) -> None: ...
 
 
 if False:  # noqa
@@ -181,8 +212,9 @@ if False:  # noqa
             self.data += hexlify(data).decode() + " "
 
         def digest(self) -> bytes:
-            from trezor import log
             from ubinascii import hexlify
+
+            from trezor import log
 
             digest = self.ctx.digest()
             log.debug(
@@ -297,14 +329,14 @@ class BufferReader:
         return byte
 
 
-def obj_eq(self: Any, __o: Any) -> bool:
+def obj_eq(__self: Any, __o: Any) -> bool:
     """
     Compares object contents.
     """
-    if self.__class__ is not __o.__class__:
+    if __self.__class__ is not __o.__class__:
         return False
-    assert not hasattr(self, "__slots__")
-    return self.__dict__ == __o.__dict__
+    assert not hasattr(__self, "__slots__")
+    return __self.__dict__ == __o.__dict__
 
 
 def obj_repr(self: Any) -> str:
@@ -358,11 +390,11 @@ if __debug__:
 
         yield line_start + msg.MESSAGE_NAME + " {"
         for key, val in msg_dict.items():
-            if type(val) == type(msg):
+            if type(val) is type(msg):
                 sublines = dump_protobuf_lines(val, line_start=key + ": ")
                 for subline in sublines:
                     yield "    " + subline
-            elif val and isinstance(val, list) and type(val[0]) == type(msg):
+            elif val and isinstance(val, list) and type(val[0]) is type(msg):
                 # non-empty list of protobuf messages
                 yield f"    {key}: ["
                 for subval in val:

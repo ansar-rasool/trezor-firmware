@@ -1,11 +1,7 @@
 from micropython import const
-from typing import TYPE_CHECKING
 
 import storage.device as storage_device
 from trezor.wire import DataError
-
-if TYPE_CHECKING:
-    from trezor.wire import Context
 
 _MAX_PASSPHRASE_LEN = const(50)
 
@@ -14,7 +10,7 @@ def is_enabled() -> bool:
     return storage_device.is_passphrase_enabled()
 
 
-async def get(ctx: Context) -> str:
+async def get() -> str:
     from trezor import workflow
 
     if not is_enabled():
@@ -24,23 +20,25 @@ async def get(ctx: Context) -> str:
         if storage_device.get_passphrase_always_on_device():
             from trezor.ui.layouts import request_passphrase_on_device
 
-            passphrase = await request_passphrase_on_device(ctx, _MAX_PASSPHRASE_LEN)
+            passphrase = await request_passphrase_on_device(_MAX_PASSPHRASE_LEN)
         else:
-            passphrase = await _request_on_host(ctx)
+            passphrase = await _request_on_host()
         if len(passphrase.encode()) > _MAX_PASSPHRASE_LEN:
             raise DataError(f"Maximum passphrase length is {_MAX_PASSPHRASE_LEN} bytes")
 
         return passphrase
 
 
-async def _request_on_host(ctx: Context) -> str:
+async def _request_on_host() -> str:
+    from trezor import TR
     from trezor.messages import PassphraseAck, PassphraseRequest
     from trezor.ui.layouts import request_passphrase_on_host
+    from trezor.wire.context import call
 
     request_passphrase_on_host()
 
     request = PassphraseRequest()
-    ack = await ctx.call(request, PassphraseAck)
+    ack = await call(request, PassphraseAck)
     passphrase = ack.passphrase  # local_cache_attribute
 
     if ack.on_device:
@@ -48,7 +46,7 @@ async def _request_on_host(ctx: Context) -> str:
 
         if passphrase is not None:
             raise DataError("Passphrase provided when it should not be")
-        return await request_passphrase_on_device(ctx, _MAX_PASSPHRASE_LEN)
+        return await request_passphrase_on_device(_MAX_PASSPHRASE_LEN)
 
     if passphrase is None:
         raise DataError(
@@ -61,27 +59,26 @@ async def _request_on_host(ctx: Context) -> str:
 
         # We want to hide the passphrase, or show it, according to settings.
         if storage_device.get_hide_passphrase_from_host():
-            explanation = "Passphrase provided by host will be used but will not be displayed due to the device settings."
             await confirm_action(
-                ctx,
                 "passphrase_host1_hidden",
-                "Hidden wallet",
-                description=f"Access hidden wallet?\n\n{explanation}",
+                TR.passphrase__wallet,
+                description=TR.passphrase__from_host_not_shown,
+                prompt_screen=True,
+                prompt_title=TR.passphrase__access_wallet,
             )
         else:
             await confirm_action(
-                ctx,
                 "passphrase_host1",
-                "Hidden wallet",
-                description="Access hidden wallet?\n\nNext screen will show the passphrase!",
+                TR.passphrase__wallet,
+                description=TR.passphrase__next_screen_will_show_passphrase,
+                verb=TR.buttons__continue,
             )
 
             await confirm_blob(
-                ctx,
                 "passphrase_host2",
-                "Hidden wallet",
+                TR.passphrase__title_confirm,
                 passphrase,
-                "Use this passphrase?\n",
+                info=False,
             )
 
     return passphrase

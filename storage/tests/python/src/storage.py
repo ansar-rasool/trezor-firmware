@@ -2,18 +2,16 @@ import hashlib
 import sys
 
 from . import consts, crypto, helpers, prng
-from .norcow import Norcow
-from .pin_log import PinLog
 
 
 class Storage:
-    def __init__(self):
+    def __init__(self, norcow_class):
         self.initialized = False
         self.unlocked = False
         self.dek = None
         self.sak = None
-        self.nc = Norcow()
-        self.pin_log = PinLog(self.nc)
+        self.nc = norcow_class()
+        self.pin_log = self.nc.get_pin_log()
 
     def init(self, hardware_salt: bytes = b""):
         """
@@ -26,7 +24,7 @@ class Storage:
         self.hw_salt_hash = hashlib.sha256(hardware_salt).digest()
 
         edek_esak_pvc = self.nc.get(consts.EDEK_ESEK_PVC_KEY)
-        if not edek_esak_pvc:
+        if edek_esak_pvc is None:
             self._init_pin()
 
     def _init_pin(self):
@@ -44,7 +42,7 @@ class Storage:
         self.pin_log.init()
         self._set_wipe_code(consts.WIPE_CODE_EMPTY)
         self._set_pin(consts.PIN_EMPTY)
-        self.unlocked = False
+        self.unlocked = True
 
     def _set_pin(self, pin: str):
         random_salt = prng.random_buffer(consts.PIN_SALT_SIZE)
@@ -134,7 +132,7 @@ class Storage:
             value = self.nc.get(key)
         else:
             value = self._get_encrypted(key)
-        if value is False:
+        if value is None:
             raise RuntimeError("Failed to find key in storage.")
         return value
 
@@ -153,9 +151,10 @@ class Storage:
         if val > consts.UINT32_MAX:
             raise RuntimeError("Failed to set value in storage.")
 
-        counter = val.to_bytes(4, sys.byteorder) + bytearray(
-            b"\xFF" * consts.COUNTER_TAIL_SIZE
-        )
+        counter = val.to_bytes(4, sys.byteorder)
+
+        if self.nc.is_byte_access():
+            counter += bytearray(b"\xFF" * consts.COUNTER_TAIL_SIZE)
         self.set(key, counter)
 
     def next_counter(self, key: int) -> int:
@@ -163,26 +162,35 @@ class Storage:
         self._check_lock(app)
 
         current = self.nc.get(key)
-        if current is False:
+        if current is None:
             self.set_counter(key, 0)
             return 0
 
         base = int.from_bytes(current[:4], sys.byteorder)
-        tail = helpers.to_int_by_words(current[4:])
-        tail_count = f"{tail:064b}".count("0")
-        increased_count = base + tail_count + 1
-        if increased_count > consts.UINT32_MAX:
-            raise RuntimeError("Failed to set value in storage.")
 
-        if tail_count == consts.COUNTER_MAX_TAIL:
+        if self.nc.is_byte_access():
+            base = int.from_bytes(current[:4], sys.byteorder)
+            tail = helpers.to_int_by_words(current[4:])
+            tail_count = f"{tail:064b}".count("0")
+            increased_count = base + tail_count + 1
+            if increased_count > consts.UINT32_MAX:
+                raise RuntimeError("Failed to set value in storage.")
+
+            if tail_count == consts.COUNTER_MAX_TAIL:
+                self.set_counter(key, increased_count)
+                return increased_count
+
+            self.set(
+                key,
+                current[:4]
+                + helpers.to_bytes_by_words(tail >> 1, consts.COUNTER_TAIL_SIZE),
+            )
+        else:
+            increased_count = base + 1
+            if increased_count > consts.UINT32_MAX:
+                raise RuntimeError("Failed to set value in storage.")
+
             self.set_counter(key, increased_count)
-            return increased_count
-
-        self.set(
-            key,
-            current[:4]
-            + helpers.to_bytes_by_words(tail >> 1, consts.COUNTER_TAIL_SIZE),
-        )
         return increased_count
 
     def delete(self, key: int) -> bool:
@@ -201,10 +209,10 @@ class Storage:
             raise RuntimeError("Storage locked and app is not public-writable")
 
     def _get_encrypted(self, key: int) -> bytes:
-        if not consts.is_app_protected(key):
+        if not consts.is_app_protected(key >> 8):
             raise RuntimeError("Only protected values are encrypted")
         sat = self.nc.get(consts.SAT_KEY)
-        if not sat:
+        if sat is None:
             raise RuntimeError("SAT not found")
         if sat != self._calculate_authentication_tag():
             raise RuntimeError("Storage authentication tag mismatch")
@@ -212,12 +220,13 @@ class Storage:
 
     def _decrypt(self, key: int) -> bytes:
         data = self.nc.get(key)
+        if data is None:
+            raise RuntimeError("Key not found")
         iv = data[: consts.CHACHA_IV_SIZE]
         # cipher text with MAC
-        tag = data[
-            consts.CHACHA_IV_SIZE : consts.CHACHA_IV_SIZE + consts.POLY1305_MAC_SIZE
-        ]
-        ciphertext = data[consts.CHACHA_IV_SIZE + consts.POLY1305_MAC_SIZE :]
+
+        tag = data[len(data) - consts.POLY1305_MAC_SIZE :]
+        ciphertext = data[consts.CHACHA_IV_SIZE : len(data) - consts.POLY1305_MAC_SIZE]
         return crypto.chacha_poly_decrypt(
             self.dek, key, iv, ciphertext + tag, key.to_bytes(2, sys.byteorder)
         )
@@ -237,7 +246,7 @@ class Storage:
         cipher_text, tag = crypto.chacha_poly_encrypt(
             self.dek, iv, val, key.to_bytes(2, sys.byteorder)
         )
-        return self.nc.replace(key, iv + tag + cipher_text)
+        return self.nc.replace(key, iv + cipher_text + tag)
 
     def _calculate_authentication_tag(self) -> bytes:
         keys = []
@@ -256,3 +265,6 @@ class Storage:
 
     def _dump(self) -> bytes:
         return self.nc._dump()
+
+    def _get_active_sector(self) -> int:
+        return self.nc.active_sector

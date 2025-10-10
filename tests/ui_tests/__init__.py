@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from typing import Callable, Generator
 
 import pytest
+from _pytest.nodes import Node
 from _pytest.outcomes import Failed
 
 from trezorlib.debuglink import TrezorClientDebugLink as Client
@@ -14,6 +15,7 @@ from .common import SCREENS_DIR, UI_TESTS_DIR, TestCase, TestResult
 from .reporting import testreport
 
 FIXTURES_SUGGESTION_FILE = UI_TESTS_DIR / "fixtures.suggestion.json"
+FIXTURES_RESULTS_FILE = UI_TESTS_DIR / "fixtures.results.json"
 
 
 def _process_recorded(result: TestResult) -> None:
@@ -22,23 +24,13 @@ def _process_recorded(result: TestResult) -> None:
     testreport.recorded(result)
 
 
-def _process_tested(result: TestResult) -> None:
+def _process_tested(result: TestResult, item: Node) -> None:
     if result.expected_hash is None:
-        file_path = testreport.missing(result)
-        pytest.fail(
-            f"Hash of {result.test.id} not found in fixtures.json\n"
-            f"Expected:  {result.expected_hash}\n"
-            f"Actual:    {result.actual_hash}\n"
-            f"Diff file: {file_path}"
-        )
+        testreport.missing(result)
+        item.user_properties.append(("ui_missing", None))
     elif result.actual_hash != result.expected_hash:
-        file_path = testreport.failed(result)
-        pytest.fail(
-            f"Hash of {result.test.id} differs\n"
-            f"Expected:  {result.expected_hash}\n"
-            f"Actual:    {result.actual_hash}\n"
-            f"Diff file: {file_path}"
-        )
+        testreport.failed(result)
+        item.user_properties.append(("ui_failed", None))
     else:
         testreport.passed(result)
 
@@ -52,8 +44,6 @@ def screen_recording(
         yield
         return
 
-    record_text_layout = request.config.getoption("record_text_layout")
-
     testcase = TestCase.build(client, request)
     testcase.dir.mkdir(exist_ok=True, parents=True)
 
@@ -63,18 +53,13 @@ def screen_recording(
 
     try:
         client.debug.start_recording(str(testcase.actual_dir))
-        if record_text_layout:
-            client.debug.set_screen_text_file(testcase.screen_text_file)
-            client.debug.watch_layout(True)
         yield
     finally:
         client.ensure_open()
+        client.sync_responses()
         # Wait for response to Initialize, which gives the emulator time to catch up
         # and redraw the homescreen. Otherwise there's a race condition between that
         # and stopping recording.
-        if record_text_layout:
-            client.debug.set_screen_text_file(None)
-            client.debug.watch_layout(False)
         client.init_device()
         client.debug.stop_recording()
 
@@ -82,7 +67,7 @@ def screen_recording(
     if test_ui == "record":
         _process_recorded(result)
     else:
-        _process_tested(result)
+        _process_tested(result, request.node)
 
 
 def setup(main_runner: bool) -> None:
@@ -113,7 +98,7 @@ def update_fixtures(remove_missing: bool = False) -> int:
     for result in results:
         result.store_recorded()
 
-    common.write_fixtures(results, remove_missing=remove_missing)
+    common.write_fixtures_complete(results, remove_missing=remove_missing)
     return len(results)
 
 
@@ -155,6 +140,9 @@ def terminal_summary(
 
     if normal_exit:
         println("-------- UI tests summary: --------")
+        for result in TestResult.recent_results():
+            if result.passed and not result.ui_passed:
+                println(f"UI_FAILED: {result.test.id} ({result.actual_hash})")
         println("Run ./tests/show_results.py to open test summary")
         println("")
 
@@ -167,15 +155,23 @@ def sessionfinish(
     exitstatus: pytest.ExitCode,
     test_ui: str,
     check_missing: bool,
-    record_text_layout: bool,
+    do_master_diff: bool,
 ) -> pytest.ExitCode:
     if not _should_write_ui_report(exitstatus):
         return exitstatus
 
-    testreport.generate_reports(record_text_layout)
+    testreport.generate_reports(do_master_diff)
+
+    recents = list(TestResult.recent_results())
+
+    if test_ui == "test":
+        common.write_fixtures_only_new_results(recents, dest=FIXTURES_RESULTS_FILE)
+        if any(t.passed and not t.ui_passed for t in recents):
+            return pytest.ExitCode.TESTS_FAILED
+
     if test_ui == "test" and check_missing and list_missing():
-        common.write_fixtures(
-            TestResult.recent_results(),
+        common.write_fixtures_complete(
+            recents,
             remove_missing=True,
             dest=FIXTURES_SUGGESTION_FILE,
         )

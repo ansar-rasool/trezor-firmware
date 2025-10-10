@@ -21,13 +21,12 @@ from trezorlib.debuglink import TrezorClientDebugLink as Client
 from trezorlib.tools import parse_path
 
 from ...common import parametrize_using_common_fixtures
-
-SHOW_MORE = (143, 167)
+from ...input_flows import InputFlowEIP712Cancel, InputFlowEIP712ShowMore
 
 pytestmark = [pytest.mark.altcoin, pytest.mark.ethereum]
 
 
-@pytest.mark.skip_t1
+@pytest.mark.models("core")
 @parametrize_using_common_fixtures("ethereum/sign_typed_data.json")
 def test_ethereum_sign_typed_data(client: Client, parameters, result):
     with client:
@@ -42,7 +41,7 @@ def test_ethereum_sign_typed_data(client: Client, parameters, result):
         assert f"0x{ret.signature.hex()}" == result["sig"]
 
 
-@pytest.mark.skip_t2
+@pytest.mark.models("legacy")
 @parametrize_using_common_fixtures("ethereum/sign_typed_data.json")
 def test_ethereum_sign_typed_data_blind(client: Client, parameters, result):
     with client:
@@ -52,9 +51,11 @@ def test_ethereum_sign_typed_data_blind(client: Client, parameters, result):
             address_n,
             ethereum.decode_hex(parameters["domain_separator_hash"]),
             # message hash is empty for domain-only hashes
-            ethereum.decode_hex(parameters["message_hash"])
-            if parameters["message_hash"]
-            else None,
+            (
+                ethereum.decode_hex(parameters["message_hash"])
+                if parameters["message_hash"]
+                else None
+            ),
         )
         assert ret.address == result["address"]
         assert f"0x{ret.signature.hex()}" == result["sig"]
@@ -94,63 +95,12 @@ DATA = {
 }
 
 
-def input_flow_show_more(client: Client):
-    """Clicks show_more button wherever possible"""
-    yield  # confirm address
-    client.debug.press_yes()
-
-    yield  # confirm domain
-    client.debug.wait_layout()
-    client.debug.click(SHOW_MORE)
-
-    # confirm domain properties
-    for _ in range(4):
-        yield
-        client.debug.press_yes()
-
-    yield  # confirm message
-    client.debug.wait_layout()
-    client.debug.click(SHOW_MORE)
-
-    yield  # confirm message.from
-    client.debug.wait_layout()
-    client.debug.click(SHOW_MORE)
-
-    # confirm message.from properties
-    for _ in range(2):
-        yield
-        client.debug.press_yes()
-
-    yield  # confirm message.to
-    client.debug.wait_layout()
-    client.debug.click(SHOW_MORE)
-
-    # confirm message.to properties
-    for _ in range(2):
-        yield
-        client.debug.press_yes()
-
-    yield  # confirm message.contents
-    client.debug.press_yes()
-
-    yield  # confirm final hash
-    client.debug.press_yes()
-
-
-def input_flow_cancel(client: Client):
-    """Clicks cancelling button"""
-    yield  # confirm address
-    client.debug.press_yes()
-
-    yield  # confirm domain
-    client.debug.press_no()
-
-
-@pytest.mark.skip_t1
+@pytest.mark.models("core")
 def test_ethereum_sign_typed_data_show_more_button(client: Client):
     with client:
         client.watch_layout()
-        client.set_input_flow(input_flow_show_more(client))
+        IF = InputFlowEIP712ShowMore(client)
+        client.set_input_flow(IF.get())
         ethereum.sign_typed_data(
             client,
             parse_path("m/44h/60h/0h/0/0"),
@@ -159,11 +109,12 @@ def test_ethereum_sign_typed_data_show_more_button(client: Client):
         )
 
 
-@pytest.mark.skip_t1
+@pytest.mark.models("core")
 def test_ethereum_sign_typed_data_cancel(client: Client):
     with client, pytest.raises(exceptions.Cancelled):
         client.watch_layout()
-        client.set_input_flow(input_flow_cancel(client))
+        IF = InputFlowEIP712Cancel(client)
+        client.set_input_flow(IF.get())
         ethereum.sign_typed_data(
             client,
             parse_path("m/44h/60h/0h/0/0"),

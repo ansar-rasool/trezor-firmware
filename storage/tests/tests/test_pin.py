@@ -1,20 +1,23 @@
 import pytest
 
 from python.src import consts
+from python.src.norcow import NC_CLASSES
 
 from . import common
 
 
-def test_init_pin():
-    sc, sp = common.init(uid=b"\x00\x00\x00\x00\x00\x00")
+@pytest.mark.parametrize("nc_class", NC_CLASSES)
+def test_init_pin(nc_class):
+    sc, sp = common.init(nc_class, uid=b"\x00\x00\x00\x00\x00\x00")
     assert common.memory_equals(sc, sp)
 
-    sc, sp = common.init(uid=b"\x22\x00\xDD\x00\x00\xBE")
+    sc, sp = common.init(nc_class, uid=b"\x22\x00\xDD\x00\x00\xBE")
     assert common.memory_equals(sc, sp)
 
 
-def test_change_pin():
-    sc, sp = common.init(unlock=True)
+@pytest.mark.parametrize("nc_class", NC_CLASSES)
+def test_change_pin(nc_class):
+    sc, sp = common.init(nc_class, unlock=True)
     for s in (sc, sp):
         assert s.change_pin("", "222")
         assert not s.change_pin("9999", "")  # invalid PIN
@@ -28,8 +31,9 @@ def test_change_pin():
     assert common.memory_equals(sc, sp)
 
 
-def test_has_pin():
-    sc, sp = common.init()
+@pytest.mark.parametrize("nc_class", NC_CLASSES)
+def test_has_pin(nc_class):
+    sc, sp = common.init(nc_class)
     for s in (sc, sp):
         assert not s.has_pin()
         assert s.unlock("")
@@ -40,8 +44,9 @@ def test_has_pin():
         assert not s.has_pin()
 
 
-def test_wipe_after_max_pin():
-    sc, sp = common.init(unlock=True)
+@pytest.mark.parametrize("nc_class", NC_CLASSES)
+def test_wipe_after_max_pin(nc_class):
+    sc, sp = common.init(nc_class, unlock=True)
     for s in (sc, sp):
         assert s.change_pin("", "222")
         assert s.unlock("222")

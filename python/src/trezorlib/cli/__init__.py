@@ -26,27 +26,34 @@ from ..client import TrezorClient
 from ..ui import ClickUI, ScriptUI
 
 if TYPE_CHECKING:
-    from ..transport import Transport
-    from ..ui import TrezorClientUI
-
     # Needed to enforce a return value from decorators
     # More details: https://www.python.org/dev/peps/pep-0612/
     from typing import TypeVar
-    from typing_extensions import ParamSpec, Concatenate
+
+    from typing_extensions import Concatenate, ParamSpec
+
+    from ..transport import Transport
+    from ..ui import TrezorClientUI
 
     P = ParamSpec("P")
     R = TypeVar("R")
 
 
 class ChoiceType(click.Choice):
-    def __init__(self, typemap: Dict[str, Any]) -> None:
+    def __init__(self, typemap: Dict[str, Any], case_sensitive: bool = True) -> None:
         super().__init__(list(typemap.keys()))
-        self.typemap = typemap
+        self.case_sensitive = case_sensitive
+        if case_sensitive:
+            self.typemap = typemap
+        else:
+            self.typemap = {k.lower(): v for k, v in typemap.items()}
 
-    def convert(self, value: str, param: Any, ctx: click.Context) -> Any:
+    def convert(self, value: Any, param: Any, ctx: click.Context) -> Any:
         if value in self.typemap.values():
             return value
         value = super().convert(value, param, ctx)
+        if isinstance(value, str) and not self.case_sensitive:
+            value = value.lower()
         return self.typemap[value]
 
 
@@ -149,9 +156,7 @@ def with_client(func: "Callable[Concatenate[TrezorClient, P], R]") -> "Callable[
                     except Exception:
                         pass
 
-    # the return type of @click.pass_obj is improperly specified and pyright doesn't
-    # understand that it converts f(obj, *args, **kwargs) to f(*args, **kwargs)
-    return trezorctl_command_with_client  # type: ignore [cannot be assigned to return type]
+    return trezorctl_command_with_client
 
 
 class AliasedGroup(click.Group):

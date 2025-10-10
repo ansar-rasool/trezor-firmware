@@ -37,11 +37,11 @@ on one page here.
     --help                    Show this message and exit.
 
   Commands:
+    benchmark          Benchmark commands.
     binance            Binance Chain commands.
     btc                Bitcoin and Bitcoin-like coins commands.
     cardano            Cardano commands.
     clear-session      Clear session (remove cached PIN, passphrase, etc.).
-    cosi               CoSi (Cothority / collective signing) commands.
     crypto             Miscellaneous cryptography features.
     debug              Miscellaneous debug features.
     device             Device management commands - setup, recover seed, wipe, etc.
@@ -57,11 +57,32 @@ on one page here.
     ping               Send ping message.
     ripple             Ripple commands.
     set                Device settings.
+    solana             Solana commands.
     stellar            Stellar commands.
     tezos              Tezos commands.
     usb-reset          Perform USB reset on stuck devices.
     version            Show version of trezorctl/trezorlib.
     wait-for-emulator  Wait until Trezor Emulator comes up.
+
+Benchmark commands.
+~~~~~~~~~~~~~~~~~~~
+
+.. code::
+
+  trezorctl benchmark --help
+
+.. code::
+
+  Usage: trezorctl benchmark [OPTIONS] COMMAND [ARGS]...
+
+    Benchmark commands.
+
+  Options:
+    --help  Show this message and exit.
+
+  Commands:
+    list-names  List names of all supported benchmarks
+    run         Run benchmark
 
 Binance Chain commands.
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -130,26 +151,6 @@ Cardano commands.
     get-public-key          Get Cardano public key.
     sign-tx                 Sign Cardano transaction.
 
-CoSi (Cothority / collective signing) commands.
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. code::
-
-  trezorctl cosi --help
-
-.. code::
-
-  Usage: trezorctl cosi [OPTIONS] COMMAND [ARGS]...
-
-    CoSi (Cothority / collective signing) commands.
-
-  Options:
-    --help  Show this message and exit.
-
-  Commands:
-    commit  Ask device to commit to CoSi signing.
-    sign    Ask device to sign using CoSi.
-
 Miscellaneous cryptography features.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -188,8 +189,10 @@ Miscellaneous debug features.
     --help  Show this message and exit.
 
   Commands:
-    record      Record screen changes into a specified directory.
-    send-bytes  Send raw bytes to Trezor.
+    optiga-set-sec-max  Set Optiga's security event counter to maximum.
+    prodtest-t1         Perform a prodtest on Model One.
+    record              Record screen changes into a specified directory.
+    send-bytes          Send raw bytes to Trezor.
 
 Device management commands - setup, recover seed, wipe, etc.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -208,14 +211,16 @@ Device management commands - setup, recover seed, wipe, etc.
     --help  Show this message and exit.
 
   Commands:
+    authenticate          Verify the authenticity of the device.
     backup                Perform device seed backup.
     load                  Upload seed and custom configuration to the device.
     reboot-to-bootloader  Reboot device into bootloader mode.
     recover               Start safe recovery workflow.
     sd-protect            Secure the device with SD card protection.
-    self-test             Perform a factory self-test.
     set-busy              Show a "Do not disconnect" dialog.
     setup                 Perform device setup and generate new seed.
+    tutorial              Show on-device tutorial.
+    unlock-bootloader     Unlocks bootloader.
     wipe                  Reset device to factory defaults and remove all private data.
 
 EOS commands.
@@ -251,8 +256,26 @@ Ethereum commands.
 
     Ethereum commands.
 
+    Most Ethereum commands now require the host to specify definition of a network and possibly an
+    ERC-20 token. These definitions can be automatically fetched using the `-a` option.
+
+    You can also specify a custom definition source using the `-d` option. Allowable values are:
+
+    - HTTP or HTTPS URL
+    - path to local directory
+    - path to local tar archive
+    
+
+    For debugging purposes, it is possible to force use a specific network and token definition by
+    using the `--network` and `--token` options. These options accept either a path to a file with a
+    binary blob, or a hex-encoded string.
+
   Options:
-    --help  Show this message and exit.
+    -d, --definitions TEXT  Source for Ethereum definition blobs.
+    -a, --auto-definitions  Automatically download required definitions from trezor.io
+    --network TEXT          Network definition blob.
+    --token TEXT            Token definition blob.
+    --help                  Show this message and exit.
 
   Commands:
     get-address           Get Ethereum address in hex encoding.
@@ -383,15 +406,39 @@ Device settings.
 
   Commands:
     auto-lock-delay        Set auto-lock delay (in seconds).
+    brightness             Set display brightness.
     display-rotation       Set display rotation.
     experimental-features  Enable or disable experimental message types.
     flags                  Set device flags.
+    haptic-feedback        Enable or disable haptic feedback.
     homescreen             Set new homescreen.
     label                  Set new device label.
+    language               Set new language with translations.
     passphrase             Enable, disable or configure passphrase protection.
     pin                    Set, change or remove PIN.
     safety-checks          Set safety check level.
     wipe-code              Set or remove the wipe code.
+
+Solana commands.
+~~~~~~~~~~~~~~~~
+
+.. code::
+
+  trezorctl solana --help
+
+.. code::
+
+  Usage: trezorctl solana [OPTIONS] COMMAND [ARGS]...
+
+    Solana commands.
+
+  Options:
+    --help  Show this message and exit.
+
+  Commands:
+    get-address     Get Solana address.
+    get-public-key  Get Solana public key.
+    sign-tx         Sign Solana transaction.
 
 Stellar commands.
 ~~~~~~~~~~~~~~~~~

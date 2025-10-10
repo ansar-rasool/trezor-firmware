@@ -1,39 +1,39 @@
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from trezor.messages import GetECDHSessionKey, ECDHSessionKey
-    from trezor.wire import Context
+    from trezor.messages import ECDHSessionKey, GetECDHSessionKey
 
 # This module implements the SLIP-0017 Elliptic Curve Diffie-Hellman algorithm, using a
 # deterministic hierarchy, see https://github.com/satoshilabs/slips/blob/master/slip-0017.md.
 
 
-async def get_ecdh_session_key(ctx: Context, msg: GetECDHSessionKey) -> ECDHSessionKey:
-    from trezor.ui.layouts import confirm_address
-    from .sign_identity import (
-        get_identity_path,
-        serialize_identity_without_proto,
-        serialize_identity,
-    )
-    from trezor.wire import DataError
+async def get_ecdh_session_key(msg: GetECDHSessionKey) -> ECDHSessionKey:
     from trezor.messages import ECDHSessionKey
+    from trezor.ui.layouts import confirm_address
+    from trezor.wire import DataError
+
     from apps.common.keychain import get_keychain
     from apps.common.paths import AlwaysMatchingSchema
+
+    from .sign_identity import (
+        get_identity_path,
+        serialize_identity,
+        serialize_identity_without_proto,
+    )
 
     msg_identity = msg.identity  # local_cache_attribute
     peer_public_key = msg.peer_public_key  # local_cache_attribute
     curve_name = msg.ecdsa_curve_name or "secp256k1"
 
-    keychain = await get_keychain(ctx, curve_name, [AlwaysMatchingSchema])
+    keychain = await get_keychain(curve_name, [AlwaysMatchingSchema])
     identity = serialize_identity(msg_identity)
 
     # require_confirm_ecdh_session_key
     proto = msg_identity.proto.upper() if msg_identity.proto else "identity"
     await confirm_address(
-        ctx,
-        f"Decrypt {proto}",
+        f"Decrypt {proto}",  # TODO: translate?
         serialize_identity_without_proto(msg_identity),
-        None,
+        chunkify=False,
     )
     # END require_confirm_ecdh_session_key
 
@@ -54,6 +54,7 @@ async def get_ecdh_session_key(ctx: Context, msg: GetECDHSessionKey) -> ECDHSess
 
         if peer_public_key[0] != 0x40:
             raise DataError("Curve25519 public key should start with 0x40")
+        # The prefix 0x04 doesn't make sense here, and may be changed or removed in the future
         session_key = b"\x04" + curve25519.multiply(
             node.private_key(), peer_public_key[1:]
         )
@@ -61,4 +62,5 @@ async def get_ecdh_session_key(ctx: Context, msg: GetECDHSessionKey) -> ECDHSess
         raise DataError("Unsupported curve for ECDH: " + curve_name)
     # END ecdh
 
+    # For curve25519, the public key has the prefix 0x00, as specified by SLIP-10. However, since this prefix is non-standard, it may be removed in the future.
     return ECDHSessionKey(session_key=session_key, public_key=node.public_key())

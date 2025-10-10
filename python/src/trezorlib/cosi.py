@@ -14,17 +14,10 @@
 # You should have received a copy of the License along with this library.
 # If not, see <https://www.gnu.org/licenses/lgpl-3.0.html>.
 
-import warnings
 from functools import reduce
-from typing import TYPE_CHECKING, Iterable, Optional, Sequence, Tuple
+from typing import Iterable, Sequence, Tuple
 
-from . import _ed25519, messages
-from .tools import expect
-
-if TYPE_CHECKING:
-    from .client import TrezorClient
-    from .tools import Address
-    from .protobuf import MessageType
+from . import _ed25519
 
 # XXX, these could be NewType's, but that would infect users of the cosi module with these types as well.
 # Unsure if we want that.
@@ -111,7 +104,7 @@ def verify(
     if len(selected_keys) < sigs_required:
         raise _ed25519.SignatureMismatch("Insufficient number of signatures.")
     global_pk = combine_keys(selected_keys)
-    return verify_combined(signature, digest, global_pk)
+    verify_combined(signature, digest, global_pk)
 
 
 def pubkey_from_privkey(privkey: Ed25519PrivateKey) -> Ed25519PublicPoint:
@@ -138,36 +131,17 @@ def sign_with_privkey(
     return Ed25519Signature(_ed25519.encodeint(S))
 
 
-# ====== Client functions ====== #
+def sign_with_privkeys(digest: bytes, privkeys: Sequence[bytes]) -> bytes:
+    """Locally produce a CoSi signature from a list of private keys."""
+    pubkeys = [pubkey_from_privkey(sk) for sk in privkeys]
+    nonces = [get_nonce(sk, digest, i) for i, sk in enumerate(privkeys)]
 
+    global_pk = combine_keys(pubkeys)
+    global_R = combine_keys(R for _, R in nonces)
 
-@expect(messages.CosiCommitment)
-def commit(
-    client: "TrezorClient", n: "Address", data: Optional[bytes] = None
-) -> "MessageType":
-    if data is not None:
-        warnings.warn(
-            "'data' argument is deprecated",
-            DeprecationWarning,
-            stacklevel=2,
-        )
+    sigs = [
+        sign_with_privkey(digest, sk, global_pk, r, global_R)
+        for sk, (r, _) in zip(privkeys, nonces)
+    ]
 
-    return client.call(messages.CosiCommit(address_n=n))
-
-
-@expect(messages.CosiSignature)
-def sign(
-    client: "TrezorClient",
-    n: "Address",
-    data: bytes,
-    global_commitment: bytes,
-    global_pubkey: bytes,
-) -> "MessageType":
-    return client.call(
-        messages.CosiSign(
-            address_n=n,
-            data=data,
-            global_commitment=global_commitment,
-            global_pubkey=global_pubkey,
-        )
-    )
+    return combine_sig(global_R, sigs)

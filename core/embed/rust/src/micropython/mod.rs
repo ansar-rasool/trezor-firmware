@@ -3,6 +3,7 @@
 pub mod macros;
 
 pub mod buffer;
+pub mod coveragedata;
 pub mod dict;
 pub mod ffi;
 pub mod func;
@@ -15,7 +16,7 @@ pub mod obj;
 pub mod print;
 pub mod qstr;
 pub mod runtime;
-pub mod time;
+pub mod simple_type;
 pub mod typ;
 pub mod util;
 

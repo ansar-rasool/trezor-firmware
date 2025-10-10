@@ -15,6 +15,7 @@ from .common import COSE_ALG_EDDSA, COSE_ALG_ES256, COSE_CURVE_ED25519, COSE_CUR
 
 if TYPE_CHECKING:
     from typing import Iterable
+
     from trezor.crypto import bip32
 
 
@@ -240,16 +241,16 @@ class Fido2Credential(Credential):
         return cred
 
     def truncate_names(self) -> None:
-        if self.rp_name:
-            self.rp_name = utils.truncate_utf8(self.rp_name, _NAME_MAX_LENGTH)
-
-        if self.user_name:
-            self.user_name = utils.truncate_utf8(self.user_name, _NAME_MAX_LENGTH)
-
-        if self.user_display_name:
-            self.user_display_name = utils.truncate_utf8(
-                self.user_display_name, _NAME_MAX_LENGTH
-            )
+        for name in ("rp_name", "user_name", "user_display_name"):
+            value = getattr(self, name)
+            if value:
+                if value.isspace():
+                    # Don't store blank names.
+                    value = None
+                else:
+                    # If the name is stored then the WebAuthn spec allows truncation.
+                    value = utils.truncate_utf8(value, _NAME_MAX_LENGTH)
+                setattr(self, name, value)
 
     def check_required_fields(self) -> bool:
         return (

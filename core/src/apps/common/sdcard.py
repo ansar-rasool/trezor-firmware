@@ -1,102 +1,92 @@
-from storage.sd_salt import SD_CARD_HOT_SWAPPABLE
-from trezor import io, wire
+from trezor import TR, io, wire
 from trezor.ui.layouts import confirm_action, show_error_and_raise
+from trezor.utils import sd_hotswap_enabled
 
 
 class SdCardUnavailable(wire.ProcessError):
     pass
 
 
-async def _confirm_retry_wrong_card(ctx: wire.GenericContext) -> None:
-    if SD_CARD_HOT_SWAPPABLE:
+async def _confirm_retry_wrong_card() -> None:
+    if sd_hotswap_enabled():
         await confirm_action(
-            ctx,
             "warning_wrong_sd",
-            "SD card protection",
-            "Wrong SD card.",
-            "Please insert the correct SD card for this device.",
-            verb="Retry",
-            verb_cancel="Abort",
+            TR.sd_card__title,
+            TR.sd_card__wrong_sd_card,
+            TR.sd_card__insert_correct_card,
+            verb=TR.buttons__retry,
+            verb_cancel=TR.buttons__abort,
             exc=SdCardUnavailable("Wrong SD card."),
         )
     else:
         await show_error_and_raise(
-            ctx,
             "warning_wrong_sd",
-            "Please unplug the device and insert the correct SD card.",
-            "Wrong SD card.",
+            TR.sd_card__unplug_and_insert_correct,
+            TR.sd_card__wrong_sd_card,
             exc=SdCardUnavailable("Wrong SD card."),
         )
 
 
-async def _confirm_retry_insert_card(ctx: wire.GenericContext) -> None:
-    if SD_CARD_HOT_SWAPPABLE:
+async def _confirm_retry_insert_card() -> None:
+    if sd_hotswap_enabled():
         await confirm_action(
-            ctx,
             "warning_no_sd",
-            "SD card protection",
-            "SD card required.",
-            "Please insert your SD card.",
-            verb="Retry",
-            verb_cancel="Abort",
+            TR.sd_card__title,
+            TR.sd_card__card_required,
+            TR.sd_card__please_insert,
+            verb=TR.buttons__retry,
+            verb_cancel=TR.buttons__abort,
             exc=SdCardUnavailable("SD card required."),
         )
     else:
         await show_error_and_raise(
-            ctx,
             "warning_no_sd",
-            "Please unplug the device and insert your SD card.",
-            "SD card required.",
+            TR.sd_card__please_unplug_and_insert,
+            TR.sd_card__card_required,
             exc=SdCardUnavailable("SD card required."),
         )
 
 
-async def _confirm_format_card(ctx: wire.GenericContext) -> None:
+async def _confirm_format_card() -> None:
     # Format card? yes/no
     await confirm_action(
-        ctx,
         "warning_format_sd",
-        "SD card error",
-        "Unknown filesystem.",
-        "Use a different card or format the SD card to the FAT32 filesystem.",
-        verb="Format",
-        verb_cancel="Cancel",
+        TR.sd_card__error,
+        TR.sd_card__unknown_filesystem,
+        TR.sd_card__use_different_card,
+        verb=TR.buttons__format,
+        verb_cancel=TR.buttons__cancel,
         exc=SdCardUnavailable("SD card not formatted."),
     )
 
     # Confirm formatting
     await confirm_action(
-        ctx,
         "confirm_format_sd",
-        "Format SD card",
-        "All data on the SD card will be lost.",
-        "Do you really want to format the SD card?",
+        TR.sd_card__format_card,
+        TR.sd_card__all_data_will_be_lost,
+        TR.sd_card__wanna_format,
         reverse=True,
-        verb="Format SD card",
+        verb=TR.sd_card__format_card,
         hold=True,
         exc=SdCardUnavailable("SD card not formatted."),
     )
 
 
 async def confirm_retry_sd(
-    ctx: wire.GenericContext,
     exc: wire.ProcessError = SdCardUnavailable("Error accessing SD card."),
 ) -> None:
     await confirm_action(
-        ctx,
         "warning_sd_retry",
-        "SD card problem",
+        TR.sd_card__title_problem,
         None,
-        "There was a problem accessing the SD card.",
-        verb="Retry",
-        verb_cancel="Abort",
+        TR.sd_card__problem_accessing,
+        verb=TR.buttons__retry,
+        verb_cancel=TR.buttons__abort,
         exc=exc,
     )
 
 
-async def ensure_sdcard(
-    ctx: wire.GenericContext, ensure_filesystem: bool = True
-) -> None:
+async def ensure_sdcard(ensure_filesystem: bool = True) -> None:
     """Ensure a SD card is ready for use.
 
     This function runs the UI flow needed to ask the user to insert a SD card if there
@@ -107,9 +97,10 @@ async def ensure_sdcard(
     mounted.
     """
     from trezor import sdcard
+    from trezor.ui.layouts.progress import progress
 
     while not sdcard.is_present():
-        await _confirm_retry_insert_card(ctx)
+        await _confirm_retry_insert_card()
 
     if not ensure_filesystem:
         return
@@ -126,39 +117,40 @@ async def ensure_sdcard(
                 # no error when mounting
                 return
 
-            await _confirm_format_card(ctx)
+            await _confirm_format_card()
 
             # Proceed to formatting. Failure is caught by the outside OSError handler
             with sdcard.filesystem(mounted=False):
-                fatfs.mkfs()
+                progress_obj = progress()
+                progress_obj.start()
+                fatfs.mkfs(progress_obj.report)
                 fatfs.mount()
                 fatfs.setlabel("TREZOR")
+                progress_obj.stop()
 
             # format and mount succeeded
             return
 
         except OSError:
             # formatting failed, or generic I/O error (SD card power-on failed)
-            await confirm_retry_sd(ctx)
+            await confirm_retry_sd()
 
 
-async def request_sd_salt(
-    ctx: wire.GenericContext = wire.DUMMY_CONTEXT,
-) -> bytearray | None:
+async def request_sd_salt() -> bytearray | None:
     import storage.sd_salt as storage_sd_salt
 
     if not storage_sd_salt.is_enabled():
         return None
 
     while True:
-        await ensure_sdcard(ctx, ensure_filesystem=False)
+        await ensure_sdcard(ensure_filesystem=False)
         try:
             return storage_sd_salt.load_sd_salt()
         except (storage_sd_salt.WrongSdCard, io.fatfs.NoFilesystem):
-            await _confirm_retry_wrong_card(ctx)
+            await _confirm_retry_wrong_card()
         except OSError:
             # Generic problem with loading the SD salt (hardware problem, or we could
             # not read the file, or there is a staged salt which cannot be committed).
             # In either case, there is no good way to recover. If the user clicks Retry,
             # we will try again.
-            await confirm_retry_sd(ctx)
+            await confirm_retry_sd()

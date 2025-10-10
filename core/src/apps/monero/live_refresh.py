@@ -5,14 +5,14 @@ from apps.monero import layout, misc
 
 if TYPE_CHECKING:
     from trezor.messages import (
-        MoneroLiveRefreshStepAck,
-        MoneroLiveRefreshStepRequest,
-        MoneroLiveRefreshStartRequest,
         MoneroLiveRefreshFinalAck,
         MoneroLiveRefreshStartAck,
+        MoneroLiveRefreshStartRequest,
+        MoneroLiveRefreshStepAck,
+        MoneroLiveRefreshStepRequest,
     )
     from trezor.ui.layouts.common import ProgressLayout
-    from trezor.wire import Context
+
     from apps.common.keychain import Keychain
 
     from .xmr.credentials import AccountCreds
@@ -20,25 +20,27 @@ if TYPE_CHECKING:
 
 @auto_keychain(__name__)
 async def live_refresh(
-    ctx: Context, msg: MoneroLiveRefreshStartRequest, keychain: Keychain
+    msg: MoneroLiveRefreshStartRequest, keychain: Keychain
 ) -> MoneroLiveRefreshFinalAck:
     import gc
+
     from trezor.enums import MessageType
     from trezor.messages import MoneroLiveRefreshFinalAck, MoneroLiveRefreshStepRequest
+    from trezor.wire.context import call_any
 
     state = LiveRefreshState()
 
-    res = await _init_step(state, ctx, msg, keychain)
+    res = await _init_step(state, msg, keychain)
     progress = layout.monero_live_refresh_progress()
     while True:
-        step = await ctx.call_any(
+        step = await call_any(
             res,
             MessageType.MoneroLiveRefreshStepRequest,
             MessageType.MoneroLiveRefreshFinalRequest,
         )
         del res
         if MoneroLiveRefreshStepRequest.is_type_of(step):
-            res = _refresh_step(state, ctx, step, progress)
+            res = _refresh_step(state, step, progress)
         else:
             return MoneroLiveRefreshFinalAck()
         gc.collect()
@@ -52,19 +54,20 @@ class LiveRefreshState:
 
 async def _init_step(
     s: LiveRefreshState,
-    ctx: Context,
     msg: MoneroLiveRefreshStartRequest,
     keychain: Keychain,
 ) -> MoneroLiveRefreshStartAck:
-    import storage.cache as storage_cache
-    from apps.common import paths
+    from storage.cache_common import APP_MONERO_LIVE_REFRESH
     from trezor.messages import MoneroLiveRefreshStartAck
+    from trezor.wire import context
 
-    await paths.validate_path(ctx, keychain, msg.address_n)
+    from apps.common import paths
 
-    if not storage_cache.get(storage_cache.APP_MONERO_LIVE_REFRESH):
-        await layout.require_confirm_live_refresh(ctx)
-        storage_cache.set(storage_cache.APP_MONERO_LIVE_REFRESH, b"\x01")
+    await paths.validate_path(keychain, msg.address_n)
+
+    if not context.cache_get_bool(APP_MONERO_LIVE_REFRESH):
+        await layout.require_confirm_live_refresh()
+        context.cache_set_bool(APP_MONERO_LIVE_REFRESH, True)
 
     s.creds = misc.get_creds(keychain, msg.address_n, msg.network_type)
 
@@ -73,12 +76,12 @@ async def _init_step(
 
 def _refresh_step(
     s: LiveRefreshState,
-    ctx: Context,
     msg: MoneroLiveRefreshStepRequest,
     progress: ProgressLayout,
 ) -> MoneroLiveRefreshStepAck:
-    from trezor.messages import MoneroLiveRefreshStepAck
     from trezor import log
+    from trezor.messages import MoneroLiveRefreshStepAck
+
     from apps.monero.xmr import chacha_poly, crypto, crypto_helpers, key_image, monero
 
     assert s.creds is not None

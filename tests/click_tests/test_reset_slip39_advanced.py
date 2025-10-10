@@ -15,30 +15,35 @@
 # If not, see <https://www.gnu.org/licenses/lgpl-3.0.html>.
 
 from typing import TYPE_CHECKING
-from unittest import mock
 
 import pytest
 
 from trezorlib import device, messages
 
-from .. import buttons
-from ..common import generate_entropy
+from ..common import EXTERNAL_ENTROPY, MOCK_GET_ENTROPY, generate_entropy
 from . import reset
 
 if TYPE_CHECKING:
     from ..device_handler import BackgroundDeviceHandler
 
 
-EXTERNAL_ENTROPY = b"zlutoucky kun upel divoke ody" * 2
-
-with_mock_urandom = mock.patch("os.urandom", mock.Mock(return_value=EXTERNAL_ENTROPY))
+pytestmark = pytest.mark.models("core")
 
 
-@pytest.mark.skip_t1
 @pytest.mark.setup_client(uninitialized=True)
-@with_mock_urandom
-def test_reset_slip39_advanced_2of2groups_2of2shares(
+@pytest.mark.parametrize(
+    "group_count, group_threshold, share_count, share_threshold",
+    [
+        pytest.param(2, 2, 2, 2, id="2of2"),
+        pytest.param(16, 16, 16, 16, id="16of16", marks=pytest.mark.slow),
+    ],
+)
+def test_reset_slip39_advanced(
     device_handler: "BackgroundDeviceHandler",
+    group_count: int,
+    group_threshold: int,
+    share_count: int,
+    share_threshold: int,
 ):
     features = device_handler.features()
     debug = device_handler.debuglink()
@@ -46,59 +51,101 @@ def test_reset_slip39_advanced_2of2groups_2of2shares(
     assert features.initialized is False
 
     device_handler.run(
-        device.reset,
+        device.setup,
         backup_type=messages.BackupType.Slip39_Advanced,
         pin_protection=False,
+        passphrase_protection=False,
+        entropy_check_count=0,
+        _get_entropy=MOCK_GET_ENTROPY,
     )
 
     # confirm new wallet
-    reset.confirm_wait(debug, "Wallet creation")
+    reset.confirm_new_wallet(debug)
 
     # confirm back up
-    reset.confirm_read(debug, "Success")
+    # TR.assert_in_multiple(
+    #     debug.read_layout().text_content(),
+    #     ["backup__it_should_be_backed_up", "backup__it_should_be_backed_up_now"],
+    # )
+    reset.confirm_read(debug)
+
+    # confirm backup intro
+    # TR.assert_in(debug.read_layout().text_content(), "backup__info_multi_share_backup")
+    reset.confirm_read(debug)
 
     # confirm checklist
-    reset.confirm_read(debug, "Checklist")
+    # TR.assert_in(
+    #     debug.read_layout().text_content(), "reset__slip39_checklist_num_groups"
+    # )
+    reset.confirm_read(debug)
 
-    # set num of groups
-    reset.set_selection(debug, buttons.RESET_MINUS, 3)
+    # set num of groups - default is 5
+    reset.set_selection(debug, group_count - 5)
 
     # confirm checklist
-    reset.confirm_read(debug, "Checklist")
+    # TR.assert_in_multiple(
+    #     debug.read_layout().text_content(),
+    #     [
+    #         "reset__slip39_checklist_set_threshold",  # basic
+    #         "reset__slip39_checklist_set_num_shares",  # advanced (UI bolt and delizia)
+    #         "reset__slip39_checklist_num_shares",  # advanced (UI caesar)
+    #     ],
+    # )
+    reset.confirm_read(debug)
 
     # set group threshold
-    reset.set_selection(debug, buttons.RESET_MINUS, 0)
+    # TODO: could make it general as well
+    if group_count == 2 and group_threshold == 2:
+        reset.set_selection(debug, 0)
+    elif group_count == 16 and group_threshold == 16:
+        reset.set_selection(debug, 11)
+    else:
+        raise RuntimeError("not a supported combination")
 
     # confirm checklist
-    reset.confirm_read(debug, "Checklist")
+    # TR.assert_in_multiple(
+    #     debug.read_layout().text_content(),
+    #     [
+    #         "reset__slip39_checklist_set_sizes",
+    #         "reset__slip39_checklist_set_sizes_longer",
+    #     ],
+    # )
+    reset.confirm_read(debug)
 
     # set share num and threshold for groups
-    for _ in range(2):
-        # set num of shares
-        reset.set_selection(debug, buttons.RESET_MINUS, 3)
+    for _ in range(group_count):
+        # set num of shares - default is 5
+        reset.set_selection(debug, share_count - 5)
 
         # set share threshold
-        reset.set_selection(debug, buttons.RESET_MINUS, 0)
+        # TODO: could make it general as well
+        if share_count == 2 and share_threshold == 2:
+            reset.set_selection(debug, 0)
+        elif share_count == 16 and share_threshold == 16:
+            reset.set_selection(debug, 11)
+        else:
+            raise RuntimeError("not a supported combination")
 
     # confirm backup warning
-    reset.confirm_read(debug, "Caution")
+    # TR.assert_in(debug.read_layout().text_content(), "reset__never_make_digital_copy")
+    reset.confirm_read(debug, middle_r=True)
 
     all_words: list[str] = []
-    for _ in range(2):
-        for _ in range(2):
+    for _ in range(group_count):
+        for _ in range(share_count):
             # read words
-            words = reset.read_words(debug, True)
+            words = reset.read_words(debug, do_htc=False)
 
             # confirm words
             reset.confirm_words(debug, words)
 
             # confirm share checked
-            reset.confirm_read(debug, "Success")
+            reset.confirm_read(debug)
 
             all_words.append(" ".join(words))
 
     # confirm backup done
-    reset.confirm_read(debug, "Success")
+    reset.confirm_read(debug)
 
     # generate secret locally
     internal_entropy = debug.state().reset_entropy
@@ -108,96 +155,12 @@ def test_reset_slip39_advanced_2of2groups_2of2shares(
     # validate that all combinations will result in the correct master secret
     reset.validate_mnemonics(all_words, secret)
 
-    assert device_handler.result() == "Initialized"
+    # retrieve the result to check that it's not a TrezorFailure exception
+    device_handler.result()
 
     features = device_handler.features()
     assert features.initialized is True
-    assert features.needs_backup is False
+    assert features.backup_availability == messages.BackupAvailability.NotAvailable
     assert features.pin_protection is False
     assert features.passphrase_protection is False
-    assert features.backup_type is messages.BackupType.Slip39_Advanced
-
-
-@pytest.mark.skip_t1
-@pytest.mark.setup_client(uninitialized=True)
-@pytest.mark.slow
-@with_mock_urandom
-def test_reset_slip39_advanced_16of16groups_16of16shares(
-    device_handler: "BackgroundDeviceHandler",
-):
-    features = device_handler.features()
-    debug = device_handler.debuglink()
-
-    assert features.initialized is False
-
-    device_handler.run(
-        device.reset,
-        backup_type=messages.BackupType.Slip39_Advanced,
-        pin_protection=False,
-    )
-
-    # confirm new wallet
-    reset.confirm_wait(debug, "Wallet creation")
-
-    # confirm back up
-    reset.confirm_read(debug, "Success")
-
-    # confirm checklist
-    reset.confirm_read(debug, "Checklist")
-
-    # set num of groups
-    reset.set_selection(debug, buttons.RESET_PLUS, 11)
-
-    # confirm checklist
-    reset.confirm_read(debug, "Checklist")
-
-    # set group threshold
-    reset.set_selection(debug, buttons.RESET_PLUS, 11)
-
-    # confirm checklist
-    reset.confirm_read(debug, "Checklist")
-
-    # set share num and threshold for groups
-    for _ in range(16):
-        # set num of shares
-        reset.set_selection(debug, buttons.RESET_PLUS, 11)
-
-        # set share threshold
-        reset.set_selection(debug, buttons.RESET_PLUS, 11)
-
-    # confirm backup warning
-    reset.confirm_read(debug, "Caution")
-
-    all_words: list[str] = []
-    for _ in range(16):
-        for _ in range(16):
-            # read words
-            words = reset.read_words(debug, True)
-
-            # confirm words
-            reset.confirm_words(debug, words)
-
-            # confirm share checked
-            reset.confirm_read(debug, "Success")
-
-            all_words.append(" ".join(words))
-
-    # confirm backup done
-    reset.confirm_read(debug, "Success")
-
-    # generate secret locally
-    internal_entropy = debug.state().reset_entropy
-    assert internal_entropy is not None
-    secret = generate_entropy(128, internal_entropy, EXTERNAL_ENTROPY)
-
-    # validate that all combinations will result in the correct master secret
-    reset.validate_mnemonics(all_words, secret)
-
-    assert device_handler.result() == "Initialized"
-
-    features = device_handler.features()
-    assert features.initialized is True
-    assert features.needs_backup is False
-    assert features.pin_protection is False
-    assert features.passphrase_protection is False
-    assert features.backup_type is messages.BackupType.Slip39_Advanced
+    assert features.backup_type is messages.BackupType.Slip39_Advanced_Extendable

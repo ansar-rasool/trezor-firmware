@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 from collections import OrderedDict, defaultdict
 from pathlib import Path
@@ -24,16 +23,7 @@ except ImportError:
 log = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parent.parent
-
-if os.environ.get("DEFS_DIR"):
-    DEFS_DIR = Path(os.environ.get("DEFS_DIR")).resolve()
-else:
-    DEFS_DIR = ROOT / "defs"
-
-
-class SupportItemBool(TypedDict):
-    supported: dict[str, bool]
-    unsupported: dict[str, bool]
+DEFS_DIR = ROOT / "defs"
 
 
 class SupportItemVersion(TypedDict):
@@ -41,24 +31,9 @@ class SupportItemVersion(TypedDict):
     unsupported: dict[str, str]
 
 
-class SupportData(TypedDict):
-    connect: SupportItemBool
-    suite: SupportItemBool
-    trezor1: SupportItemVersion
-    trezor2: SupportItemVersion
-
-
-class SupportInfoItem(TypedDict):
-    connect: bool
-    suite: bool
-    trezor1: Literal[False] | str
-    trezor2: Literal[False] | str
-
-
+SupportData = Dict[str, SupportItemVersion]
+SupportInfoItem = Dict[str, Literal[False] | str]
 SupportInfo = Dict[str, SupportInfoItem]
-
-WalletItems = Dict[str, str]
-WalletInfo = Dict[str, WalletItems]
 
 
 class Coin(TypedDict):
@@ -96,7 +71,6 @@ class Coin(TypedDict):
 
     # Other fields optionally coming from JSON
     links: dict[str, str]
-    wallet: WalletItems
     curve: str
     decimals: int
 
@@ -107,9 +81,9 @@ class Coin(TypedDict):
     icon: str
 
     # Special ETH fields
+    coingecko_id: str
     chain: str
-    chain_id: str
-    rskip60: bool
+    chain_id: int
     url: str
 
     # Special erc20 fields
@@ -117,7 +91,6 @@ class Coin(TypedDict):
     address: str
     address_bytes: bytes
     dup_key_nontoken: bool
-    deprecation: dict[str, str]
 
     # Special NEM fields
     ticker: str
@@ -126,6 +99,7 @@ class Coin(TypedDict):
     unsupported: bool
     duplicate: bool
     support: SupportInfoItem
+    is_testnet: bool
 
     # Backend-oriented fields
     blockchain_link: dict[str, Any]
@@ -143,6 +117,7 @@ class FidoApp(TypedDict):
     u2f: list[dict[str, str]]
     use_sign_count: bool
     use_self_attestation: bool
+    use_compact: bool
     no_icon: bool
 
     key: str
@@ -160,6 +135,10 @@ def load_json(*path: str | Path) -> Any:
         file = Path(DEFS_DIR, *path)
 
     return json.loads(file.read_text(), object_pairs_hook=OrderedDict)
+
+
+def get_btc_testnet_status(name: str) -> bool:
+    return any((mark in name.lower()) for mark in ("testnet", "regtest"))
 
 
 # ====== CoinsInfo ======
@@ -253,7 +232,10 @@ def check_key(
 BTC_CHECKS = [
     check_key("coin_name", str, regex=r"^[A-Z]"),
     check_key("coin_shortcut", str, regex=r"^t?[A-Z]{3,}$"),
-    check_key("coin_label", str, regex=r"^x?[A-Z]"),
+    # coin_label expects an uppercase first letter. This doesn't
+    # work for eCash and xRhodium, so an exception is added for the lowercase
+    # 'e' and 'x' only.
+    check_key("coin_label", str, regex=r"^[ex]?[A-Z]"),
     check_key("website", str, regex=r"^https://.*[^/]$"),
     check_key("github", str, regex=r"^https://git(hu|la)b.com/.*[^/]$"),
     check_key("maintainer", str),
@@ -325,7 +307,7 @@ def validate_btc(coin: Coin) -> list[str]:
     if not coin["max_address_length"] >= coin["min_address_length"]:
         errors.append("max address length must not be smaller than min address length")
 
-    if "testnet" in coin["coin_name"].lower() and coin["slip44"] != 1:
+    if coin["is_testnet"] and coin["slip44"] != 1:
         errors.append("testnet coins must use slip44 coin type 1")
 
     if coin["segwit"]:
@@ -359,74 +341,45 @@ def _load_btc_coins() -> Coins:
             shortcut=coin["coin_shortcut"],
             key=f"bitcoin:{coin['coin_shortcut']}",
             icon=str(file.with_suffix(".png")),
+            is_testnet=get_btc_testnet_status(coin["coin_label"]),
         )
         coins.append(coin)
 
     return coins
 
 
-def _load_ethereum_networks() -> Coins:
+def _load_builtin_ethereum_networks() -> Coins:
     """Load ethereum networks from `ethereum/networks.json`"""
-    chains_path = DEFS_DIR / "ethereum" / "chains" / "_data" / "chains"
+    chains_data = load_json("ethereum", "networks.json")
     networks: Coins = []
-    for chain in sorted(
-        chains_path.glob("eip155-*.json"),
-        key=lambda x: int(x.stem.replace("eip155-", "")),
-    ):
-        chain_data = load_json(chain)
-        shortcut = chain_data["nativeCurrency"]["symbol"]
-        name = chain_data["name"]
-        title = chain_data.get("title", "")
-        is_testnet = "testnet" in name.lower() or "testnet" in title.lower()
-        if is_testnet:
-            slip44 = 1
-        else:
-            slip44 = chain_data.get("slip44", 60)
-
-        if is_testnet and not shortcut.lower().startswith("t"):
-            shortcut = "t" + shortcut
-
-        rskip60 = shortcut in ("RBTC", "TRBTC")
-
-        # strip out bullcrap in network naming
-        if "mainnet" in name.lower():
-            name = re.sub(r" mainnet.*$", "", name, flags=re.IGNORECASE)
-
-        network = dict(
-            chain=chain_data["shortName"],
-            chain_id=chain_data["chainId"],
-            slip44=slip44,
-            shortcut=shortcut,
-            name=name,
-            rskip60=rskip60,
-            url=chain_data["infoURL"],
-            key=f"eth:{shortcut}",
-        )
-        networks.append(cast(Coin, network))
+    for chain_data in chains_data:
+        chain_data["key"] = f"eth:{chain_data['shortcut']}:{chain_data['chain_id']}"
+        # is_testnet is present in the JSON
+        networks.append(cast(Coin, chain_data))
 
     return networks
 
 
-def _load_erc20_tokens() -> Coins:
-    """Load ERC20 tokens from `ethereum/tokens` submodule."""
-    networks = _load_ethereum_networks()
-    tokens: Coins = []
-    for network in networks:
-        chain = network["chain"]
+def _load_builtin_erc20_tokens() -> Coins:
+    """Load ERC20 tokens from `ethereum/tokens.json`."""
+    tokens_data = load_json("ethereum", "tokens.json")
+    all_tokens: Coins = []
 
-        chain_path = DEFS_DIR / "ethereum" / "tokens" / "tokens" / chain
-        for file in sorted(chain_path.glob("*.json")):
-            token: Coin = load_json(file)
+    for chain_id_and_chain, tokens in tokens_data.items():
+        chain_id, chain = chain_id_and_chain.split(";", maxsplit=1)
+        for token in tokens:
             token.update(
                 chain=chain,
-                chain_id=network["chain_id"],
+                chain_id=int(chain_id),
+                address=token["address"].lower(),
                 address_bytes=bytes.fromhex(token["address"][2:]),
-                shortcut=token["symbol"],
-                key=f"erc20:{chain}:{token['symbol']}",
+                symbol=token["shortcut"],
+                key=f"erc20:{chain}:{token['shortcut']}",
+                is_testnet=False,
             )
-            tokens.append(token)
+            all_tokens.append(cast(Coin, token))
 
-    return tokens
+    return all_tokens
 
 
 def _load_nem_mosaics() -> Coins:
@@ -434,7 +387,11 @@ def _load_nem_mosaics() -> Coins:
     mosaics: Coins = load_json("nem/nem_mosaics.json")
     for mosaic in mosaics:
         shortcut = mosaic["ticker"].strip()
-        mosaic.update(shortcut=shortcut, key=f"nem:{shortcut}")
+        mosaic.update(
+            shortcut=shortcut,
+            key=f"nem:{shortcut}",
+            is_testnet=False,
+        )
     return mosaics
 
 
@@ -442,7 +399,10 @@ def _load_misc() -> Coins:
     """Loads miscellaneous networks from `misc/misc.json`"""
     others: Coins = load_json("misc/misc.json")
     for other in others:
-        other.update(key=f"misc:{other['shortcut']}")
+        other.update(
+            key=f"misc:{other['shortcut']}",
+            is_testnet=False,
+        )
     return others
 
 
@@ -454,6 +414,7 @@ def _load_fido_apps() -> FidoApps:
         app = load_json(file)
         app.setdefault("use_sign_count", None)
         app.setdefault("use_self_attestation", None)
+        app.setdefault("use_compact", None)
         app.setdefault("u2f", [])
         app.setdefault("webauthn", [])
 
@@ -472,8 +433,6 @@ def _load_fido_apps() -> FidoApps:
 # ====== support info ======
 
 RELEASES_URL = "https://data.trezor.io/firmware/{}/releases.json"
-MISSING_SUPPORT_MEANS_NO = ("connect", "suite")
-VERSIONED_SUPPORT_INFO = ("trezor1", "trezor2")
 
 
 def get_support_data() -> SupportData:
@@ -481,20 +440,22 @@ def get_support_data() -> SupportData:
     return load_json("support.json")
 
 
+def get_models() -> list[str]:
+    """Get all models from `support.json`."""
+    return list(get_support_data().keys())
+
+
 def latest_releases() -> dict[str, Any]:
-    """Get latest released firmware versions for Trezor 1 and 2"""
+    """Get latest released firmware versions for all models"""
     if not requests:
         raise RuntimeError("requests library is required for getting release info")
 
     latest: dict[str, Any] = {}
-    for v in ("1", "2"):
-        releases = requests.get(RELEASES_URL.format(v)).json()
-        latest["trezor" + v] = max(tuple(r["version"]) for r in releases)
+    for model in get_models():
+        url_model = model.lower()  # need to be e.g. t1b1 for now
+        releases = requests.get(RELEASES_URL.format(url_model)).json()
+        latest[model] = max(tuple(r["version"]) for r in releases)
     return latest
-
-
-def is_token(coin: Coin) -> bool:
-    return coin["key"].startswith("erc20:")
 
 
 def support_info_single(support_data: SupportData, coin: Coin) -> SupportInfoItem:
@@ -517,8 +478,6 @@ def support_info_single(support_data: SupportData, coin: Coin) -> SupportInfoIte
             support_value: Any = False
         elif key in values["supported"]:
             support_value = values["supported"][key]
-        elif device in MISSING_SUPPORT_MEANS_NO:
-            support_value = False
         else:
             support_value = None
         support_info_item[device] = support_value
@@ -530,7 +489,7 @@ def support_info(coins: Iterable[Coin] | CoinsInfo | dict[str, Coin]) -> Support
 
     Takes a collection of coins and generates a support-info entry for each.
     The support-info is a dict with keys based on `support.json` keys.
-    These are usually: "trezor1", "trezor2", "connect" and "suite".
+    These are usually: "T1B1", "T2T1", "T2B1", "connect" and "suite".
 
     The `coins` argument can be a `CoinsInfo` object, a list or a dict of
     coin items.
@@ -548,115 +507,6 @@ def support_info(coins: Iterable[Coin] | CoinsInfo | dict[str, Coin]) -> Support
         support[coin["key"]] = support_info_single(support_data, coin)
 
     return support
-
-
-# ====== wallet info ======
-
-WALLET_SUITE = {"Trezor Suite": "https://suite.trezor.io"}
-WALLET_NEM = {"Nano Wallet": "https://nemplatform.com/wallets/#desktop"}
-WALLETS_ETH_3RDPARTY = {
-    "MyEtherWallet": "https://www.myetherwallet.com",
-    "MyCrypto": "https://mycrypto.com",
-}
-
-
-def get_wallet_data() -> WalletInfo:
-    """Get wallet data from `wallets.json`."""
-    return load_json("wallets.json")
-
-
-def _suite_support(coin: Coin, support: SupportInfoItem) -> bool:
-    """Check the "suite" support property.
-    If set, check that at least one of the backends run on trezor.io.
-    If yes, assume we support the coin in our wallet.
-    Otherwise it's probably working with a custom backend, which means don't
-    link to our wallet.
-    """
-    if not support["suite"]:
-        return False
-    return any(".trezor.io" in url for url in coin["blockbook"])
-
-
-def wallet_info_single(
-    support_data: SupportInfo,
-    eth_networks_support_data: SupportInfo,
-    wallet_data: WalletInfo,
-    coin: Coin,
-) -> WalletItems:
-    """Adds together a dict of all wallets for a coin."""
-    wallets: WalletItems = {}
-
-    key = coin["key"]
-
-    # Add wallets from the coin itself
-    # (usually not there, only for the `misc` category)
-    wallets.update(coin.get("wallet", {}))
-
-    # Each coin category has different further logic
-    if key.startswith("bitcoin:"):
-        if _suite_support(coin, support_data[key]):
-            wallets.update(WALLET_SUITE)
-    elif key.startswith("eth:"):
-        if support_data[key]["suite"]:
-            wallets.update(WALLET_SUITE)
-        else:
-            wallets.update(WALLETS_ETH_3RDPARTY)
-    elif key.startswith("erc20:"):
-        if eth_networks_support_data[coin["chain"]]["suite"]:
-            wallets.update(WALLET_SUITE)
-        else:
-            wallets.update(WALLETS_ETH_3RDPARTY)
-    elif key.startswith("nem:"):
-        wallets.update(WALLET_NEM)
-    elif key.startswith("misc:"):
-        pass  # no special logic here
-    else:
-        raise ValueError(f"Unknown coin category: {key}")
-
-    # Add wallets from `wallets.json`
-    # This must come last as it offers the ability to override existing wallets
-    # (for example with `"MyEtherWallet": null` we delete the MyEtherWallet from the coin)
-    wallets.update(wallet_data.get(key, {}))
-
-    # Removing potentially disabled wallets from the last step
-    wallets = {name: url for name, url in wallets.items() if url}
-
-    return wallets
-
-
-def wallet_info(coins: Iterable[Coin] | CoinsInfo | dict[str, Coin]) -> WalletInfo:
-    """Generate Trezor wallet information.
-
-    Takes a collection of coins and generates a WalletItems entry for each.
-    The WalletItems is a dict with keys being the names of the wallets and
-    values being the URLs to those - same format as in `wallets.json`.
-
-    The `coins` argument can be a `CoinsInfo` object, a list or a dict of
-    coin items.
-
-    Wallet information is taken from `wallets.json`.
-    """
-    if isinstance(coins, CoinsInfo):
-        coins = coins.as_list()
-    elif isinstance(coins, dict):
-        coins = coins.values()
-
-    support_data = support_info(coins)
-    wallet_data = get_wallet_data()
-
-    # Needed to find out suitable wallets for all the erc20 coins (Suite vs 3rd party)
-    eth_networks = [coin for coin in coins if coin["key"].startswith("eth:")]
-    eth_networks_support_data = {
-        n["chain"]: support_data[n["key"]] for n in eth_networks
-    }
-
-    wallet: WalletInfo = {}
-    for coin in coins:
-        wallet[coin["key"]] = wallet_info_single(
-            support_data, eth_networks_support_data, wallet_data, coin
-        )
-
-    return wallet
 
 
 # ====== data cleanup functions ======
@@ -715,74 +565,7 @@ def apply_duplicity_overrides(coins: Coins) -> Coins:
     return override_bucket
 
 
-def deduplicate_erc20(buckets: CoinBuckets, networks: Coins) -> None:
-    """Apply further processing to ERC20 duplicate buckets.
-
-    This function works on results of `mark_duplicate_shortcuts`.
-
-    Buckets that contain at least one non-token are ignored - symbol collisions
-    with non-tokens always apply.
-
-    Otherwise the following rules are applied:
-
-    1. If _all tokens_ in the bucket have shortcuts with distinct suffixes, e.g.,
-    `CAT (BitClave)` and `CAT (Blockcat)`, the bucket is cleared - all are considered
-    non-duplicate.
-
-    (If even one token in the bucket _does not_ have a distinct suffix, e.g.,
-    `MIT` and `MIT (Mychatcoin)`, this rule does not apply and ALL tokens in the bucket
-    are still considered duplicate.)
-
-    2. If there is only one "main" token in the bucket, the bucket is cleared.
-    That means that all other tokens must either be on testnets, or they must be marked
-    as deprecated, with a deprecation pointing to the "main" token.
-    """
-
-    testnet_networks = {n["chain"] for n in networks if n["slip44"] == 1}
-
-    def clear_bucket(bucket: Coins) -> None:
-        # allow all coins, except those that are explicitly marked through overrides
-        for coin in bucket:
-            coin["duplicate"] = False
-
-    for bucket in buckets.values():
-        # Only check buckets that contain purely ERC20 tokens. Collision with
-        # a non-token is always forbidden.
-        if not all(is_token(c) for c in bucket):
-            continue
-
-        splits = (symbol_from_shortcut(coin["shortcut"]) for coin in bucket)
-        suffixes = {suffix for _, suffix in splits}
-        # if 1. all suffixes are distinct and 2. none of them are empty
-        if len(suffixes) == len(bucket) and all(suffixes):
-            clear_bucket(bucket)
-            continue
-
-        # protected categories:
-        testnets = [coin for coin in bucket if coin["chain"] in testnet_networks]
-        deprecated_by_same = [
-            coin
-            for coin in bucket
-            if "deprecation" in coin
-            and any(
-                other["address"] == coin["deprecation"]["new_address"]
-                for other in bucket
-            )
-        ]
-        remaining = [
-            coin
-            for coin in bucket
-            if coin not in testnets and coin not in deprecated_by_same
-        ]
-        if len(remaining) <= 1:
-            for coin in deprecated_by_same:
-                deprecated_symbol = "[deprecated] " + coin["symbol"]
-                coin["shortcut"] = coin["symbol"] = deprecated_symbol
-                coin["key"] += ":deprecated"
-            clear_bucket(bucket)
-
-
-def deduplicate_keys(all_coins: Coins) -> None:
+def find_duplicate_keys(all_coins: Coins) -> None:
     dups: CoinBuckets = defaultdict(list)
     for coin in all_coins:
         dups[coin["key"]].append(coin)
@@ -790,14 +573,8 @@ def deduplicate_keys(all_coins: Coins) -> None:
     for coins in dups.values():
         if len(coins) <= 1:
             continue
-        for i, coin in enumerate(coins):
-            if is_token(coin):
-                coin["key"] += ":" + coin["address"][2:6].lower()  # first 4 hex chars
-            elif "chain_id" in coin:
-                coin["key"] += ":" + str(coin["chain_id"])
-            else:
-                coin["key"] += f":{i}"
-                coin["dup_key_nontoken"] = True
+        coin = coins[0]
+        raise ValueError(f"Duplicate key {coin['key']}")
 
 
 def fill_blockchain_links(all_coins: CoinsInfo) -> None:
@@ -829,8 +606,8 @@ def collect_coin_info() -> CoinsInfo:
     """
     all_coins = CoinsInfo(
         bitcoin=_load_btc_coins(),
-        eth=_load_ethereum_networks(),
-        erc20=_load_erc20_tokens(),
+        eth=_load_builtin_ethereum_networks(),
+        erc20=_load_builtin_erc20_tokens(),
         nem=_load_nem_mosaics(),
         misc=_load_misc(),
     )
@@ -866,10 +643,8 @@ def coin_info_with_duplicates() -> tuple[CoinsInfo, CoinBuckets]:
     coin_list = all_coins.as_list()
     # generate duplicity buckets based on shortcuts
     buckets = mark_duplicate_shortcuts(all_coins.as_list())
-    # apply further processing to ERC20 tokens, generate deprecations etc.
-    deduplicate_erc20(buckets, all_coins.eth)
-    # ensure the whole list has unique keys (taking into account changes from deduplicate_erc20)
-    deduplicate_keys(coin_list)
+    # ensure the whole list has unique keys
+    find_duplicate_keys(coin_list)
     # apply duplicity overrides
     buckets["_override"] = apply_duplicity_overrides(coin_list)
     sort_coin_infos(all_coins)
@@ -883,9 +658,6 @@ def coin_info() -> CoinsInfo:
     Does not auto-delete duplicates. This should now be based on support info.
     """
     all_coins, _ = coin_info_with_duplicates()
-    # all_coins["erc20"] = [
-    #     coin for coin in all_coins["erc20"] if not coin.get("duplicate")
-    # ]
     return all_coins
 
 

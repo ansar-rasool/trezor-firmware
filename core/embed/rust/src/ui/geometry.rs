@@ -1,5 +1,5 @@
 use crate::ui::lerp::Lerp;
-use core::ops::{Add, Neg, Sub};
+use core::ops::{Add, Mul, Neg, Sub};
 
 const fn min(a: i16, b: i16) -> i16 {
     if a < b {
@@ -128,15 +128,33 @@ impl Sub<Offset> for Offset {
     }
 }
 
+impl Mul<f32> for Offset {
+    type Output = Offset;
+
+    fn mul(self, rhs: f32) -> Self::Output {
+        Offset::new(
+            (f32::from(self.x) * rhs) as i16,
+            (f32::from(self.y) * rhs) as i16,
+        )
+    }
+}
+
 impl From<Point> for Offset {
     fn from(val: Point) -> Self {
         Offset::new(val.x, val.y)
     }
 }
 
+impl Lerp for Offset {
+    fn lerp(a: Self, b: Self, t: f32) -> Self {
+        Offset::new(i16::lerp(a.x, b.x, t), i16::lerp(a.y, b.y, t))
+    }
+}
+
 /// A point in 2D space defined by the the `x` and `y` coordinate. Relative
 /// coordinates, vectors, and offsets are represented by the `Offset` type.
 #[derive(Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "debug", derive(ufmt::derive::uDebug))]
 pub struct Point {
     pub x: i16,
     pub y: i16,
@@ -188,6 +206,17 @@ impl Sub<Point> for Point {
     }
 }
 
+impl core::ops::Neg for Point {
+    type Output = Point;
+
+    fn neg(self) -> Self::Output {
+        Point {
+            x: -self.x,
+            y: -self.y,
+        }
+    }
+}
+
 impl Lerp for Point {
     fn lerp(a: Self, b: Self, t: f32) -> Self {
         Point::new(i16::lerp(a.x, b.x, t), i16::lerp(a.y, b.y, t))
@@ -202,6 +231,8 @@ impl From<Offset> for Point {
 
 /// A rectangle in 2D space defined by the top-left point `x0`,`y0` and the
 /// bottom-right point `x1`,`y1`.
+/// NOTE: bottom-right point is not included in the rectangle, it is outside of
+/// it.
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct Rect {
     pub x0: i16,
@@ -237,6 +268,25 @@ impl Rect {
             x1: p0.x + size.x,
             y1: p0.y + size.y,
         }
+    }
+
+    pub const fn from_size(size: Offset) -> Self {
+        Self::from_top_left_and_size(Point::zero(), size)
+    }
+
+    pub const fn from_top_right_and_size(p0: Point, size: Offset) -> Self {
+        let top_left = Point::new(p0.x - size.x, p0.y);
+        Self::from_top_left_and_size(top_left, size)
+    }
+
+    pub const fn from_bottom_left_and_size(p0: Point, size: Offset) -> Self {
+        let top_left = Point::new(p0.x, p0.y - size.y);
+        Self::from_top_left_and_size(top_left, size)
+    }
+
+    pub const fn from_bottom_right_and_size(p0: Point, size: Offset) -> Self {
+        let top_left = Point::new(p0.x - size.x, p0.y - size.y);
+        Self::from_top_left_and_size(top_left, size)
     }
 
     pub const fn from_center_and_size(p: Point, size: Offset) -> Self {
@@ -304,10 +354,28 @@ impl Rect {
         self.bottom_left().center(self.bottom_right())
     }
 
+    pub const fn left_center(&self) -> Point {
+        self.bottom_left().center(self.top_left())
+    }
+
+    pub const fn right_center(&self) -> Point {
+        self.bottom_right().center(self.top_right())
+    }
+
+    /// Checks if the rectangle is empty.
+    ///
+    /// It is possible to custruct a rectangle with negative width or height.
+    /// All such rectangles are considered as empty.
+    pub const fn is_empty(&self) -> bool {
+        self.x0 >= self.x1 || self.y0 >= self.y1
+    }
+
+    /// Whether a `Point` is inside the `Rect`.
     pub const fn contains(&self, point: Point) -> bool {
         point.x >= self.x0 && point.x < self.x1 && point.y >= self.y0 && point.y < self.y1
     }
 
+    /// Create a bigger `Rect` that contains both `self` and `other`.
     pub const fn union(&self, other: Self) -> Self {
         Self {
             x0: min(self.x0, other.x0),
@@ -317,6 +385,8 @@ impl Rect {
         }
     }
 
+    /// Create a smaller `Rect` from the bigger one by moving
+    /// all the four sides closer to the center.
     pub const fn inset(&self, insets: Insets) -> Self {
         Self {
             x0: self.x0 + insets.left,
@@ -326,24 +396,26 @@ impl Rect {
         }
     }
 
-    pub const fn cut_from_left(&self, width: i16) -> Self {
+    pub const fn outset(&self, insets: Insets) -> Self {
         Self {
-            x0: self.x0,
-            y0: self.y0,
-            x1: self.x0 + width,
-            y1: self.y1,
+            x0: self.x0 - insets.left,
+            y0: self.y0 - insets.top,
+            x1: self.x1 + insets.right,
+            y1: self.y1 + insets.bottom,
         }
     }
 
-    pub const fn cut_from_right(&self, width: i16) -> Self {
-        Self {
-            x0: self.x1 - width,
-            y0: self.y0,
-            x1: self.x1,
-            y1: self.y1,
-        }
+    /// Move all the sides further from the center by the same distance.
+    pub const fn expand(&self, size: i16) -> Self {
+        self.outset(Insets::uniform(size))
     }
 
+    /// Move all the sides closer to the center by the same distance.
+    pub const fn shrink(&self, size: i16) -> Self {
+        self.inset(Insets::uniform(size))
+    }
+
+    /// Split `Rect` into top and bottom, given the top one's `height`.
     pub const fn split_top(self, height: i16) -> (Self, Self) {
         let height = clamp(height, 0, self.height());
 
@@ -358,10 +430,12 @@ impl Rect {
         (top, bottom)
     }
 
+    /// Split `Rect` into top and bottom, given the bottom one's `height`.
     pub const fn split_bottom(self, height: i16) -> (Self, Self) {
         self.split_top(self.height() - height)
     }
 
+    /// Split `Rect` into left and right, given the left one's `width`.
     pub const fn split_left(self, width: i16) -> (Self, Self) {
         let width = clamp(width, 0, self.width());
 
@@ -376,10 +450,31 @@ impl Rect {
         (left, right)
     }
 
+    /// Split `Rect` into left and right, given the right one's `width`.
     pub const fn split_right(self, width: i16) -> (Self, Self) {
         self.split_left(self.width() - width)
     }
 
+    /// Split `Rect` into left, center and right, given the center one's
+    /// `width`. Center element is symmetric, left and right have the same
+    /// size. In case left and right cannot be the same size, right is 1px
+    /// wider.
+    pub const fn split_center(self, width: i16) -> (Self, Self, Self) {
+        let left_right_width = (self.width() - width) / 2;
+        let (left, center_right) = self.split_left(left_right_width);
+        let (center, right) = center_right.split_left(width);
+        (left, center, right)
+    }
+
+    /// Calculates the intersection of two rectangles.
+    ///
+    /// If the rectangles do not intersect, an "empty" rectangle is returned.
+    ///
+    /// The implementation may yield rectangles with negative width or height
+    /// if there's no intersection. Such rectangles are considered empty,
+    /// and subsequent operations like clamp, union, and translation
+    /// work correctly with them. However, it's important to be aware of this
+    /// behavior.
     pub const fn clamp(self, limit: Rect) -> Self {
         Self {
             x0: max(self.x0, limit.x0),
@@ -397,6 +492,7 @@ impl Rect {
         }
     }
 
+    /// Moving `Rect` by the given offset.
     pub const fn translate(&self, offset: Offset) -> Self {
         Self {
             x0: self.x0 + offset.x,
@@ -404,6 +500,16 @@ impl Rect {
             x1: self.x1 + offset.x,
             y1: self.y1 + offset.y,
         }
+    }
+
+    /// Get all four corner points.
+    pub fn corner_points(&self) -> [Point; 4] {
+        [
+            self.top_left(),
+            self.top_right() - Offset::x(1),
+            self.bottom_right() - Offset::uniform(1),
+            self.bottom_left() - Offset::y(1),
+        ]
     }
 }
 
@@ -457,16 +563,23 @@ pub enum Alignment {
     End,
 }
 
-pub type Alignment2D = (Alignment, Alignment);
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub struct Alignment2D(pub Alignment, pub Alignment);
 
-pub const TOP_LEFT: Alignment2D = (Alignment::Start, Alignment::Start);
-pub const TOP_RIGHT: Alignment2D = (Alignment::End, Alignment::Start);
-pub const TOP_CENTER: Alignment2D = (Alignment::Center, Alignment::Start);
-pub const CENTER: Alignment2D = (Alignment::Center, Alignment::Center);
-pub const BOTTOM_LEFT: Alignment2D = (Alignment::Start, Alignment::End);
-pub const BOTTOM_RIGHT: Alignment2D = (Alignment::End, Alignment::End);
+impl Alignment2D {
+    pub const TOP_LEFT: Alignment2D = Alignment2D(Alignment::Start, Alignment::Start);
+    pub const TOP_RIGHT: Alignment2D = Alignment2D(Alignment::End, Alignment::Start);
+    pub const TOP_CENTER: Alignment2D = Alignment2D(Alignment::Center, Alignment::Start);
+    pub const CENTER: Alignment2D = Alignment2D(Alignment::Center, Alignment::Center);
+    pub const CENTER_LEFT: Alignment2D = Alignment2D(Alignment::Start, Alignment::Center);
+    pub const CENTER_RIGHT: Alignment2D = Alignment2D(Alignment::End, Alignment::Center);
+    pub const BOTTOM_LEFT: Alignment2D = Alignment2D(Alignment::Start, Alignment::End);
+    pub const BOTTOM_RIGHT: Alignment2D = Alignment2D(Alignment::End, Alignment::End);
+    pub const BOTTOM_CENTER: Alignment2D = Alignment2D(Alignment::Center, Alignment::End);
+}
 
 #[derive(Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "debug", derive(ufmt::derive::uDebug))]
 pub enum Axis {
     Horizontal,
     Vertical,
@@ -528,7 +641,7 @@ impl Grid {
         let cell_height = (self.area.height() - spacing_height) / nrows;
 
         // Not every area can be fully covered by equal-sized cells and spaces, there
-        // might be serveral pixels left unused. We'll distribute them by 1px to
+        // might be several pixels left unused. We'll distribute them by 1px to
         // the leftmost cells.
         let leftover_width = (self.area.width() - spacing_width) % ncols;
         let leftover_height = (self.area.height() - spacing_height) % nrows;
@@ -578,20 +691,20 @@ pub struct LinearPlacement {
 }
 
 impl LinearPlacement {
-    pub const fn horizontal() -> Self {
+    pub const fn new(axis: Axis) -> Self {
         Self {
-            axis: Axis::Horizontal,
+            axis,
             align: Alignment::Start,
             spacing: 0,
         }
     }
 
+    pub const fn horizontal() -> Self {
+        Self::new(Axis::Horizontal)
+    }
+
     pub const fn vertical() -> Self {
-        Self {
-            axis: Axis::Vertical,
-            align: Alignment::Start,
-            spacing: 0,
-        }
+        Self::new(Axis::Vertical)
     }
 
     pub const fn align_at_start(self) -> Self {
@@ -691,4 +804,56 @@ impl LinearPlacement {
 pub trait Dimensions {
     fn fit(&mut self, bounds: Rect);
     fn area(&self) -> Rect;
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, ToPrimitive, FromPrimitive)]
+#[cfg_attr(feature = "debug", derive(ufmt::derive::uDebug))]
+pub enum Direction {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+impl Direction {
+    pub fn as_offset(self, size: Offset) -> Offset {
+        match self {
+            Direction::Up => Offset::y(-size.y),
+            Direction::Down => Offset::y(size.y),
+            Direction::Left => Offset::x(-size.x),
+            Direction::Right => Offset::x(size.x),
+        }
+    }
+
+    pub fn iter() -> DirectionIterator {
+        DirectionIterator::new()
+    }
+}
+
+pub struct DirectionIterator {
+    current: Option<Direction>,
+}
+
+impl DirectionIterator {
+    pub fn new() -> Self {
+        DirectionIterator {
+            current: Some(Direction::Up),
+        }
+    }
+}
+
+impl Iterator for DirectionIterator {
+    type Item = Direction;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let next_state = match self.current {
+            Some(Direction::Up) => Some(Direction::Down),
+            Some(Direction::Down) => Some(Direction::Left),
+            Some(Direction::Left) => Some(Direction::Right),
+            Some(Direction::Right) => None,
+            None => None,
+        };
+
+        core::mem::replace(&mut self.current, next_state)
+    }
 }

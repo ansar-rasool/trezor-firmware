@@ -1,8 +1,18 @@
 #!/usr/bin/env bash
 
-base_branch=master
+set -u
+
+base_branch=main
 fail=0
-subdirs="core core/embed/boardloader core/embed/bootloader core/embed/bootloader_ci legacy/bootloader legacy/firmware legacy/intermediate_fw python"
+subdirs="core
+    core/embed/projects/boardloader
+    core/embed/projects/bootloader
+    core/embed/projects/bootloader_ci
+    core/embed/projects/prodtest
+    legacy/bootloader
+    legacy/firmware
+    legacy/intermediate_fw
+    python"
 
 # $ignored_files is a newline-separated list of patterns for grep
 # therefore there must not be empty lines at start or end
@@ -51,7 +61,8 @@ check_release_branch () {
     fi
 }
 
-if echo "$CI_COMMIT_BRANCH" | grep -Eq "^(release|secfix)/"; then
+# github, TODO this only makes sense running on branches but not pull requests
+if $(git branch --show-current) | grep -Eq "^(release|secfix)/"; then
     check_release_branch
 else
     check_feature_branch

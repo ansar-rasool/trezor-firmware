@@ -1,9 +1,16 @@
 from typing import TYPE_CHECKING
 
+from trezor.enums import InputScriptType
+from trezor.messages import TxOutput
+
+from ..common import BIP32_WALLET_DEPTH, CHANGE_OUTPUT_TO_INPUT_SCRIPT_TYPES
+
 if TYPE_CHECKING:
     from typing import Any, Generic, TypeVar
 
-    from trezor.messages import TxInput, TxOutput
+    from trezor.messages import TxInput
+
+    from apps.common.paths import Bip32Path
 
     T = TypeVar("T")
 else:
@@ -84,11 +91,14 @@ class MatchChecker(Generic[T]):
 
 class WalletPathChecker(MatchChecker):
     def attribute_from_tx(self, txio: TxInput | TxOutput) -> Any:
-        from ..common import BIP32_WALLET_DEPTH
-
         if len(txio.address_n) <= BIP32_WALLET_DEPTH:
             return None
         return txio.address_n[:-BIP32_WALLET_DEPTH]
+
+    def get_path(self) -> Bip32Path | None:
+        if isinstance(self.attribute, list):
+            return self.attribute
+        return None
 
 
 class MultisigFingerprintChecker(MatchChecker):
@@ -96,16 +106,16 @@ class MultisigFingerprintChecker(MatchChecker):
         from .. import multisig
 
         if not txio.multisig:
-            return None
+            # The fingerprint of a singlesig input or output is defined as an empty byte string.
+            # This has two consequences: First, a singlesig output matches if and only if all
+            # the added inputs are singlesig. Second, a multisig output does not match if any of
+            # the added inputs is singlesig.
+            return bytes()
         return multisig.multisig_fingerprint(txio.multisig)
 
 
 class ScriptTypeChecker(MatchChecker):
     def attribute_from_tx(self, txio: TxInput | TxOutput) -> Any:
-        from trezor.enums import InputScriptType
-        from trezor.messages import TxOutput
-        from ..common import CHANGE_OUTPUT_TO_INPUT_SCRIPT_TYPES
-
         if TxOutput.is_type_of(txio):
             script_type = CHANGE_OUTPUT_TO_INPUT_SCRIPT_TYPES[txio.script_type]
         else:

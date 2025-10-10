@@ -23,6 +23,7 @@ from trezorlib.debuglink import TrezorClientDebugLink as Client
 from trezorlib.exceptions import TrezorFailure
 from trezorlib.tools import parse_path
 
+from ...common import is_core
 from ...tx_cache import TxCache
 from .payment_req import make_coinjoin_request
 from .signtx import (
@@ -56,8 +57,9 @@ ROUND_ID_LEN = 32
 SLIP25_PATH = parse_path("m/10025h")
 
 
+@pytest.mark.parametrize("chunkify", (True, False))
 @pytest.mark.setup_client(pin=PIN)
-def test_sign_tx(client: Client):
+def test_sign_tx(client: Client, chunkify: bool):
     # NOTE: FAKE input tx
 
     commitment_data = b"\x0fwww.example.com" + (1).to_bytes(ROUND_ID_LEN, "big")
@@ -228,6 +230,7 @@ def test_sign_tx(client: Client):
             coinjoin_request=coinjoin_req,
             preauthorized=True,
             serialize=False,
+            chunkify=chunkify,
         )
 
     assert serialized_tx == b""
@@ -247,6 +250,7 @@ def test_sign_tx(client: Client):
         prev_txes=TX_CACHE_TESTNET,
         coinjoin_request=coinjoin_req,
         preauthorized=True,
+        chunkify=chunkify,
     )
 
     # Test for a third time, number of rounds should be exceeded.
@@ -259,6 +263,7 @@ def test_sign_tx(client: Client):
             prev_txes=TX_CACHE_TESTNET,
             coinjoin_request=coinjoin_req,
             preauthorized=True,
+            chunkify=chunkify,
         )
 
 
@@ -271,7 +276,7 @@ def test_sign_tx_large(client: Client):
     own_output_count = 30
     total_output_count = 1200
     output_denom = 10_000  # sats
-    max_expected_delay = 60  # seconds
+    max_expected_delay = 80  # seconds
 
     with client:
         btc.authorize_coinjoin(
@@ -449,18 +454,16 @@ def test_sign_tx_spend(client: Client):
         )
 
     with client:
-        tt = client.features.model == "T"
         client.set_expected_responses(
             [
                 messages.ButtonRequest(code=B.Other),
-                messages.UnlockedPathRequest(),
+                messages.UnlockedPathRequest,
                 request_input(0),
                 request_output(0),
                 request_output(1),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                (tt, messages.ButtonRequest(code=B.ConfirmOutput)),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 messages.ButtonRequest(code=B.SignTx),
-                (tt, messages.ButtonRequest(code=B.SignTx)),
                 request_input(0),
                 request_output(0),
                 request_output(1),
@@ -525,18 +528,16 @@ def test_sign_tx_migration(client: Client):
         )
 
     with client:
-        tt = client.features.model == "T"
         client.set_expected_responses(
             [
                 messages.ButtonRequest(code=B.Other),
-                messages.UnlockedPathRequest(),
+                messages.UnlockedPathRequest,
                 request_input(0),
                 request_input(1),
                 request_output(0),
                 messages.ButtonRequest(code=B.ConfirmOutput),
-                (tt, messages.ButtonRequest(code=B.ConfirmOutput)),
+                (is_core(client), messages.ButtonRequest(code=B.ConfirmOutput)),
                 messages.ButtonRequest(code=B.SignTx),
-                (tt, messages.ButtonRequest(code=B.SignTx)),
                 request_input(0),
                 request_meta(TXHASH_2cc3c1),
                 request_input(0, TXHASH_2cc3c1),
@@ -730,16 +731,18 @@ def test_get_address(client: Client):
         unlock_path_mac = device.unlock_path(client, SLIP25_PATH)
 
     # Ensure that the SLIP-0025 external chain is accessible after user confirmation.
-    resp = btc.get_address(
-        client,
-        "Testnet",
-        parse_path("m/10025h/1h/0h/1h/0/0"),
-        script_type=messages.InputScriptType.SPENDTAPROOT,
-        show_display=True,
-        unlock_path=SLIP25_PATH,
-        unlock_path_mac=unlock_path_mac,
-    )
-    assert resp == "tb1pl3y9gf7xk2ryvmav5ar66ra0d2hk7lhh9mmusx3qvn0n09kmaghqh32ru7"
+    for chunkify in (True, False):
+        resp = btc.get_address(
+            client,
+            "Testnet",
+            parse_path("m/10025h/1h/0h/1h/0/0"),
+            script_type=messages.InputScriptType.SPENDTAPROOT,
+            show_display=True,
+            unlock_path=SLIP25_PATH,
+            unlock_path_mac=unlock_path_mac,
+            chunkify=chunkify,
+        )
+        assert resp == "tb1pl3y9gf7xk2ryvmav5ar66ra0d2hk7lhh9mmusx3qvn0n09kmaghqh32ru7"
 
     resp = btc.get_address(
         client,

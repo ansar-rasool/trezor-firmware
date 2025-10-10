@@ -12,7 +12,9 @@ from .helpers.utils import get_public_key_hash
 
 if TYPE_CHECKING:
     from typing import Any
+
     from trezor import messages
+
     from .seed import Keychain
 
 
@@ -43,6 +45,8 @@ ADDRESS_TYPES_PAYMENT_SCRIPT = (
     CardanoAddressType.POINTER_SCRIPT,
     CardanoAddressType.ENTERPRISE_SCRIPT,
 )
+
+ADDRESS_TYPES_PAYMENT = ADDRESS_TYPES_PAYMENT_KEY + ADDRESS_TYPES_PAYMENT_SCRIPT
 
 _MIN_ADDRESS_BYTES_LENGTH = const(29)
 _MAX_ADDRESS_BYTES_LENGTH = const(65)
@@ -125,7 +129,7 @@ def _validate_address_parameters_structure(
     script_staking_hash = parameters.script_staking_hash  # local_cache_attribute
     CAT = CardanoAddressType  # local_cache_global
 
-    fields_to_be_empty: dict[CAT, tuple[Any, ...]] = {
+    fields_to_be_empty: dict[CardanoAddressType, tuple[Any, ...]] = {
         CAT.BASE: (
             certificate_pointer,
             script_payment_hash,
@@ -231,6 +235,13 @@ def validate_output_address_parameters(
     assert_params_cond(parameters.address_type in ADDRESS_TYPES_PAYMENT_KEY)
 
 
+def validate_cvote_payment_address_parameters(
+    parameters: messages.CardanoAddressParametersType,
+) -> None:
+    validate_address_parameters(parameters)
+    assert_params_cond(parameters.address_type in ADDRESS_TYPES_SHELLEY)
+
+
 def assert_cond(condition: bool) -> None:
     if not condition:
         raise ProcessError("Invalid address")
@@ -285,6 +296,13 @@ def validate_reward_address(address: str, protocol_magic: int, network_id: int) 
     assert_cond(
         address_type in (CardanoAddressType.REWARD, CardanoAddressType.REWARD_SCRIPT)
     )
+
+
+def validate_cvote_payment_address(
+    address: str, protocol_magic: int, network_id: int
+) -> None:
+    address_type = _validate_and_get_type(address, protocol_magic, network_id)
+    assert_cond(address_type in ADDRESS_TYPES_SHELLEY)
 
 
 def get_bytes_unsafe(address: str) -> bytes:

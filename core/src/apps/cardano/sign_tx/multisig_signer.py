@@ -1,5 +1,6 @@
 from typing import TYPE_CHECKING
 
+from trezor import TR
 from trezor.wire import ProcessError
 
 from .signer import Signer
@@ -13,7 +14,7 @@ class MultisigSigner(Signer):
     The multisig signing mode only allows signing with multisig (and minting) keys.
     """
 
-    SIGNING_MODE_TITLE = "Confirming a multisig transaction."
+    SIGNING_MODE_TITLE = TR.cardano__confirming_a_multisig_transaction
 
     def _validate_tx_init(self) -> None:
         msg = self.msg  # local_cache_attribute
@@ -32,12 +33,11 @@ class MultisigSigner(Signer):
 
         # super() omitted intentionally
         is_network_id_verifiable = self._is_network_id_verifiable()
-        await layout.confirm_tx(
-            self.ctx,
-            msg.fee,
+        await layout.confirm_tx_details(
             msg.network_id,
             msg.protocol_magic,
             msg.ttl,
+            msg.fee,
             msg.validity_interval_start,
             msg.total_collateral,
             is_network_id_verifiable,

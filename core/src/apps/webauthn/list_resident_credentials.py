@@ -1,23 +1,24 @@
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from trezor.messages import WebAuthnListResidentCredentials, WebAuthnCredentials
-    from trezor.wire import Context
+    from trezor.messages import WebAuthnCredentials, WebAuthnListResidentCredentials
 
 
 async def list_resident_credentials(
-    ctx: Context, msg: WebAuthnListResidentCredentials
+    msg: WebAuthnListResidentCredentials,
 ) -> WebAuthnCredentials:
+    from trezor import TR
     from trezor.messages import WebAuthnCredential, WebAuthnCredentials
     from trezor.ui.layouts import confirm_action
 
     from . import resident_credentials
 
     await confirm_action(
-        ctx,
         "credentials_list",
-        "List credentials",
-        description="Do you want to export information about the resident credentials stored on this device?",
+        TR.fido__title_list_credentials,
+        description=TR.fido__export_credentials,
+        verb=TR.buttons__export,
+        prompt_screen=True,
     )
     creds = [
         WebAuthnCredential(
