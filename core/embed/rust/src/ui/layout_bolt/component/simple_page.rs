@@ -17,7 +17,6 @@ pub struct SimplePage<T> {
     swipe: Swipe,
     scrollbar: ScrollBar,
     axis: Axis,
-    swipe_right_to_go_back: bool,
     fade: Cell<Option<u8>>,
 }
 
@@ -33,7 +32,6 @@ where
             pad: Pad::with_background(background),
             scrollbar: ScrollBar::new(axis),
             axis,
-            swipe_right_to_go_back: false,
             fade: Cell::new(None),
         }
     }
@@ -46,11 +44,6 @@ where
         Self::new(content, Axis::Vertical, background)
     }
 
-    pub fn with_swipe_right_to_go_back(mut self) -> Self {
-        self.swipe_right_to_go_back = true;
-        self
-    }
-
     pub fn inner(&self) -> &T {
         &self.content
     }
@@ -58,12 +51,10 @@ where
     fn setup_swipe(&mut self) {
         if self.is_horizontal() {
             self.swipe.allow_left = self.scrollbar.has_next_page();
-            self.swipe.allow_right =
-                self.scrollbar.has_previous_page() || self.swipe_right_to_go_back;
+            self.swipe.allow_right = self.scrollbar.has_previous_page();
         } else {
             self.swipe.allow_up = self.scrollbar.has_next_page();
             self.swipe.allow_down = self.scrollbar.has_previous_page();
-            self.swipe.allow_right = self.swipe_right_to_go_back;
         }
     }
 
@@ -75,7 +66,7 @@ where
 
         // Change the page in the content, make sure it gets completely repainted and
         // clear the background under it.
-        self.content.change_page(self.scrollbar.active_page);
+        self.content.change_page(self.scrollbar.pager().current());
         self.content.request_complete_repaint(ctx);
         self.pad.clear();
 
@@ -107,7 +98,7 @@ where
         };
 
         self.content.place(bounds);
-        if self.content.page_count() > 1 {
+        if !self.content.pager().is_single() {
             self.pad.place(content);
             self.content.place(content);
         } else {
@@ -122,25 +113,19 @@ where
                 .place(scrollbar.inset(Insets::right(SCROLLBAR_BORDER)));
         }
 
-        self.scrollbar
-            .set_count_and_active_page(self.content.page_count(), 0);
+        self.scrollbar.set_pager(self.content.pager());
         self.setup_swipe();
 
         bounds
     }
 
     fn event(&mut self, ctx: &mut EventCtx, event: Event) -> Option<Self::Msg> {
-        ctx.set_page_count(self.scrollbar.page_count);
+        ctx.set_page_count(self.scrollbar.pager().total());
         if let Some(swipe) = self.swipe.event(ctx, event) {
             match (swipe, self.axis) {
                 (SwipeDirection::Left, Axis::Horizontal) | (SwipeDirection::Up, Axis::Vertical) => {
                     self.change_page(ctx, 1);
                     return None;
-                }
-                (SwipeDirection::Right, _)
-                    if self.swipe_right_to_go_back && self.scrollbar.active_page == 0 =>
-                {
-                    return Some(PageMsg::Cancelled);
                 }
                 (SwipeDirection::Right, Axis::Horizontal)
                 | (SwipeDirection::Down, Axis::Vertical) => {
@@ -158,7 +143,7 @@ where
     fn render<'s>(&'s self, target: &mut impl Renderer<'s>) {
         self.pad.render(target);
         self.content.render(target);
-        if self.scrollbar.has_pages() {
+        if !self.scrollbar.pager().is_single() {
             self.scrollbar.render(target);
         }
         if let Some(val) = self.fade.take() {
@@ -175,8 +160,8 @@ where
 {
     fn trace(&self, t: &mut dyn crate::trace::Tracer) {
         t.component("SimplePage");
-        t.int("active_page", self.scrollbar.active_page as i64);
-        t.int("page_count", self.scrollbar.page_count as i64);
+        t.int("active_page", self.scrollbar.pager().current() as i64);
+        t.int("page_count", self.scrollbar.pager().total() as i64);
         t.child("content", &self.content);
     }
 }

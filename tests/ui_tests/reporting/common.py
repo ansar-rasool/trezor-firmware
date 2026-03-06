@@ -1,3 +1,4 @@
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,15 @@ LEGACY_MODEL_NAMES = {
     "TR": "T3B1",
     "T2B1": "T3B1",
 }
+
+
+def get_status_icon(diff: bool) -> Path:
+    status_icon = "success-diff.png"
+    if diff:
+        status_icon = "failure-diff.png"
+    result = HERE / status_icon
+    assert result.exists()
+    return result
 
 
 def generate_master_diff_report(
@@ -158,6 +168,10 @@ def _create_testcase_html_diff_file(
 ) -> Path:
     test_name = test_case.id
     doc = document(title=test_name, model=test_case.model)
+    with doc.head:
+        script(
+            type="text/javascript", src="https://cdn.jsdelivr.net/npm/pixelmatch@5.3.0"
+        )
     with doc:
         h1(test_name)
         p("This UI test differs from master.", style="color: grey; font-weight: bold;")
@@ -212,6 +226,8 @@ def _differing_screens_report(
                             i(testcase.id)
 
     html.write(base_dir, doc, "master_diff.html")
+    status_icon = get_status_icon(unique_differing_screens)
+    shutil.copy(status_icon, base_dir / "main_diff.png")
 
 
 def _get_unique_differing_screens(

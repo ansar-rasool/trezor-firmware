@@ -6,6 +6,23 @@ on:
       - 'core/v*'
       - 'legacy/v*'
   workflow_dispatch:
+    inputs:
+      project:
+        type: choice
+        required: true
+        default: core
+        options:
+          - core
+          - legacy
+      version:
+        description: version string
+        type: string
+        required: true
+      models_json:
+        description: models as a JSON list
+        type: string
+        required: true
+        default: "[\"T2B1\",\"T2T1\",\"T3B1\",\"T3T1\"]"
 
 permissions:
   id-token: write       # for fetching the OIDC token
@@ -25,16 +42,20 @@ jobs:
         run: |
           if [[ $GITHUB_REF == refs/tags/core/* ]]; then
             VERSION=${GITHUB_REF#refs/tags/core/v}
-            MODELS=$(jq -r --arg version "$VERSION" '.firmware[$version] | join(",")' ./common/releases.json)
+            MODELS=$(jq -cr --arg version "$VERSION" '.firmware[$version]' ./common/releases.json)
           elif [[ $GITHUB_REF == refs/tags/legacy/* ]]; then
             VERSION=${GITHUB_REF#refs/tags/legacy/v}
-            MODELS=$(jq -r --arg version "$VERSION" '.firmware[$version] | join(",")' ./common/releases.json)
+            MODELS=$(jq -cr --arg version "$VERSION" '.firmware[$version]' ./common/releases.json)
+          else
+            VERSION="${{ inputs.version }}"
+            MODELS='${{ inputs.models_json }}'
           fi
           echo "models=$MODELS" >> $GITHUB_OUTPUT
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          cat $GITHUB_OUTPUT
 
   core_emu:
-    if: startsWith(github.ref, 'refs/tags/core/v')
+    if: startsWith(github.ref, 'refs/tags/core/v') || inputs.project == 'core'
     name: Build emu
     needs: get_models
     runs-on: ubuntu-latest
@@ -59,9 +80,9 @@ jobs:
         with:
           submodules: recursive
       - uses: ./.github/actions/environment
-      - run: nix-shell --run "poetry run make -C core build_bootloader_emu"
+      - run: nix-shell --run "uv run make -C core build_bootloader_emu"
         if: matrix.coins == 'universal'
-      - run: nix-shell --run "poetry run make -C core build_unix_frozen"
+      - run: nix-shell --run "uv run make -C core build_unix_frozen"
       - run: cp core/build/unix/trezor-emu-core core/build/unix/trezor-emu-core-${{ matrix.model }}-v${{ needs.get_models.outputs.version }}
 
       - name: Configure aws credentials
@@ -84,7 +105,7 @@ jobs:
           retention-days: 7
 
   core_emu_arm:
-    if: startsWith(github.ref, 'refs/tags/core/v')
+    if: startsWith(github.ref, 'refs/tags/core/v') || inputs.project == 'core'
     name: Build core emu arm
     needs: get_models
     runs-on: ubuntu-latest-arm64
@@ -109,9 +130,9 @@ jobs:
         with:
           submodules: recursive
       - uses: ./.github/actions/environment
-      - run: nix-shell --run "poetry run make -C core build_bootloader_emu"
+      - run: nix-shell --run "uv run make -C core build_bootloader_emu"
         if: matrix.coins == 'universal'
-      - run: nix-shell --run "poetry run make -C core build_unix_frozen"
+      - run: nix-shell --run "uv run make -C core build_unix_frozen"
       - run: mv core/build/unix/trezor-emu-core core/build/unix/trezor-emu-core-${{ matrix.model }}-v${{ needs.get_models.outputs.version }}-arm
 
       - name: Configure aws credentials
@@ -127,14 +148,14 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: core-emu-${{ matrix.model }}-${{ matrix.coins }}-${{ matrix.type }}-${{ matrix.asan }}
+          name: core-emu-arm-${{ matrix.model }}-${{ matrix.coins }}-${{ matrix.type }}-${{ matrix.asan }}
           path: |
             core/build/unix/trezor-emu-core*
             core/build/bootloader_emu/bootloader.elf
           retention-days: 7
 
   legacy_emu:
-    if: startsWith(github.ref, 'refs/tags/legacy/v')
+    if: startsWith(github.ref, 'refs/tags/legacy/v') || inputs.project == 'legacy'
     name: Build legacy emu
     needs: get_models
     runs-on: ubuntu-latest
@@ -154,7 +175,7 @@ jobs:
         with:
           submodules: recursive
       - uses: ./.github/actions/environment
-      - run: nix-shell --run "poetry run legacy/script/cibuild"
+      - run: nix-shell --run "uv run legacy/script/cibuild"
       - run: mv legacy/firmware/trezor.elf legacy/firmware/trezor-emu-legacy-T1B1-v${{ needs.get_models.outputs.version }}
 
       - name: Configure aws credentials
@@ -170,7 +191,7 @@ jobs:
 
 
   legacy_emu_arm:
-    if: startsWith(github.ref, 'refs/tags/legacy/v')
+    if: startsWith(github.ref, 'refs/tags/legacy/v') || inputs.project == 'legacy'
     name: Build legacy emu arm
     needs: get_models
     runs-on: ubuntu-latest-arm64
@@ -189,7 +210,7 @@ jobs:
         with:
           submodules: recursive
       - uses: ./.github/actions/environment
-      - run: nix-shell --run "poetry run legacy/script/cibuild"
+      - run: nix-shell --run "uv run legacy/script/cibuild"
       - run: mv legacy/firmware/trezor.elf legacy/firmware/trezor-emu-legacy-T1B1-v${{ needs.get_models.outputs.version }}-arm
 
       - name: Configure aws credentials

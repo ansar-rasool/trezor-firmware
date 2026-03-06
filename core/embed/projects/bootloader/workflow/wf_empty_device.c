@@ -20,6 +20,7 @@
 #include <trezor_model.h>
 #include <trezor_rtl.h>
 
+#include <sys/notify.h>
 #include <sys/systick.h>
 #include <sys/types.h>
 #include <util/flash_utils.h>
@@ -29,7 +30,18 @@
 #include <sec/secret.h>
 #endif
 
+#ifdef USE_BACKUP_RAM
+#include <sys/backup_ram.h>
+#endif
+
+#ifdef USE_BLE
+#include <io/ble.h>
+
+#include "wire/wire_iface_ble.h"
+#endif
+
 #include "bootui.h"
+#include "rust_ui_bootloader.h"
 #include "workflow.h"
 
 workflow_result_t workflow_empty_device(void) {
@@ -39,19 +51,52 @@ workflow_result_t workflow_empty_device(void) {
   secret_bhk_regenerate();
 #endif
   ensure(erase_storage(NULL), NULL);
-
-  // keep the model screen up for a while
-#ifndef USE_BACKLIGHT
-  systick_delay_ms(1500);
-#else
-  // backlight fading takes some time so the explicit delay here is
-  // shorter
-  systick_delay_ms(1000);
+#ifdef USE_BACKUP_RAM
+  ensure(backup_ram_erase_protected() * sectrue, NULL);
 #endif
 
+#ifdef USE_BLE
+  screen_boot_empty();
+  ble_wait_until_ready();
+#endif
+
+  protob_ios_t ios;
+  workflow_ifaces_init(sectrue, &ios);
+  notify_send(NOTIFY_UNLOCK);
+
   workflow_result_t res = WF_CANCELLED;
-  while (res == WF_CANCELLED) {
-    res = workflow_host_control(NULL, NULL, ui_screen_welcome);
+  uint32_t ui_result = WELCOME_CANCEL;
+  while (res == WF_CANCELLED ||
+         (res == WF_OK_UI_ACTION && ui_result == WELCOME_CANCEL)) {
+    c_layout_t layout;
+    memset(&layout, 0, sizeof(layout));
+    screen_welcome(&layout);
+    res = workflow_host_control(NULL, &layout, &ui_result, &ios);
+#ifdef USE_BLE
+    if (res == WF_OK_UI_ACTION && ui_result == WELCOME_PAIRING_MODE) {
+      res = workflow_wireless_setup(NULL, &ios);
+      if (res == WF_OK_PAIRING_COMPLETED || res == WF_OK_PAIRING_FAILED) {
+        res = WF_CANCELLED;
+        ui_result = WELCOME_CANCEL;
+        continue;
+      }
+      break;
+    }
+#endif
+    if (res == WF_OK_UI_ACTION && ui_result == WELCOME_MENU) {
+      do {
+        res = workflow_menu(NULL, &ios);
+      } while (res == WF_CANCELLED);
+
+      if (res == WF_OK) {
+        res = WF_CANCELLED;
+        ui_result = WELCOME_CANCEL;
+        continue;
+      }
+      break;
+    }
   }
+  notify_send(NOTIFY_LOCK);
+  workflow_ifaces_deinit(&ios);
   return res;
 }

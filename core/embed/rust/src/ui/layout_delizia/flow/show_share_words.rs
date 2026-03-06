@@ -7,7 +7,7 @@ use crate::{
         component::{
             swipe_detect::SwipeSettings,
             text::paragraphs::{Paragraph, ParagraphSource, ParagraphVecShort, Paragraphs},
-            ButtonRequestExt, ComponentExt, EventCtx, PaginateFull as _,
+            ButtonRequestExt, ComponentExt, EventCtx, Paginate as _,
         },
         flow::{
             base::{Decision, DecisionBuilder as _},
@@ -82,8 +82,9 @@ pub fn new_show_share_words(
     instructions_paragraphs: ParagraphVecShort<'static>,
     text_footer: Option<TString<'static>>,
     text_confirm: TString<'static>,
+    text_check: TString<'static>,
 ) -> Result<SwipeFlow, error::Error> {
-    let nwords = share_words_vec.len();
+    let nwords = share_words_vec.len() as u16;
     let paragraphs_spacing = 8;
     let title = TR::reset__recovery_wallet_backup_title.into();
 
@@ -105,8 +106,8 @@ pub fn new_show_share_words(
         title,
         InternallySwipableContent::new(ShareWords::new(share_words_vec, subtitle)),
     )
-    .with_swipe(Direction::Up, SwipeSettings::default())
-    .with_swipe(Direction::Down, SwipeSettings::default())
+    .with_swipe(Direction::Up, SwipeSettings::Default)
+    .with_swipe(Direction::Down, SwipeSettings::Default)
     .with_vertical_pages()
     .with_subtitle(subtitle)
     .register_header_update_fn(header_updating_func)
@@ -119,14 +120,14 @@ pub fn new_show_share_words(
         SwipeContent::new(PromptScreen::new_hold_to_confirm()),
     )
     .with_footer(TR::instructions__hold_to_confirm.into(), None)
-    .with_swipe(Direction::Down, SwipeSettings::default())
+    .with_swipe(Direction::Down, SwipeSettings::Default)
     .map(|_| Some(FlowMsg::Confirmed));
 
     let content_check_backup_intro = Frame::left_aligned(
         TR::reset__check_wallet_backup_title.into(),
         SwipeContent::new(Paragraphs::new(Paragraph::new(
             &theme::TEXT_MAIN_GREY_LIGHT,
-            TR::reset__check_backup_instructions,
+            text_check,
         ))),
     )
     .with_swipeup_footer(None)

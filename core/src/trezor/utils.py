@@ -9,14 +9,29 @@ from trezorutils import (  # noqa: F401
     MODEL_FULL_NAME,
     MODEL_USB_MANUFACTURER,
     MODEL_USB_PRODUCT,
+    NOTIFY_BOOT,
+    NOTIFY_DISCONNECT,
+    NOTIFY_LOCK,
+    NOTIFY_PIN_CHANGE,
+    NOTIFY_SETTING_CHANGE,
+    NOTIFY_SOFTLOCK,
+    NOTIFY_SOFTUNLOCK,
+    NOTIFY_UNLOCK,
+    NOTIFY_UNPAIR,
+    NOTIFY_WIPE,
     SCM_REVISION,
     UI_LAYOUT,
     USE_BACKLIGHT,
     USE_BLE,
     USE_BUTTON,
+    USE_DBG_CONSOLE,
     USE_HAPTIC,
+    USE_NRF,
     USE_OPTIGA,
+    USE_POWER_MANAGER,
+    USE_RGB_LED,
     USE_SD_CARD,
+    USE_SERIAL_NUMBER,
     USE_THP,
     USE_TOUCH,
     USE_TROPIC,
@@ -28,16 +43,38 @@ from trezorutils import (  # noqa: F401
     firmware_vendor,
     halt,
     memcpy,
+    memzero,
+    notify_send,
+    presize_module,
+    reboot,
+    reboot_and_upgrade,
     reboot_to_bootloader,
     sd_hotswap_enabled,
     unit_btconly,
     unit_color,
     unit_packaging,
+    unit_production_date,
 )
+
+if USE_NRF:
+    from trezorutils import nrf_get_version  # noqa: F401
+
+if USE_DBG_CONSOLE:
+    from trezorutils import set_log_filter  # noqa: F401
+
+if USE_SERIAL_NUMBER:
+    from trezorutils import serial_number  # noqa: F401
+
 from typing import TYPE_CHECKING
 
 if __debug__:
-    from trezorutils import LOG_STACK_USAGE, check_free_heap, check_heap_fragmentation
+    from trezorutils import get_gc_info  # noqa: F401
+    from trezorutils import (
+        LOG_STACK_USAGE,
+        check_heap_fragmentation,
+        clear_gc_info,
+        update_gc_info,
+    )
 
     if LOG_STACK_USAGE:
         from trezorutils import estimate_unused_stack, zero_unused_stack  # noqa: F401
@@ -57,6 +94,7 @@ else:
     LOG_STACK_USAGE = False
 
 if TYPE_CHECKING:
+    from buffer_types import AnyBuffer, AnyBytes
     from typing import Any, Iterator, Protocol, Sequence, TypeVar
 
     from trezor.protobuf import MessageType
@@ -95,7 +133,7 @@ class unimport:
     def __init__(self) -> None:
         self.mods: set[str] | None = None
         if __debug__:
-            self.free_heap = 0
+            clear_gc_info()
 
     def __enter__(self) -> None:
         self.mods = unimport_begin()
@@ -107,27 +145,14 @@ class unimport:
         self.mods = None
         gc.collect()
 
-        if __debug__ and exc_type is not SystemExit:
-            self.free_heap = check_free_heap(self.free_heap)
-
-
-def presize_module(modname: str, size: int) -> None:
-    """Ensure the module's dict is preallocated to an expected size.
-
-    This is used in modules like `trezor`, whose dict size depends not only on the
-    symbols defined in the file itself, but also on the number of submodules that will
-    be inserted into the module's namespace.
-    """
-    module = sys.modules[modname]
-    for i in range(size):
-        setattr(module, f"___PRESIZE_MODULE_{i}", None)
-    for i in range(size):
-        delattr(module, f"___PRESIZE_MODULE_{i}")
+        # If an exception is being handled here, `update_gc_info()` internal assertion
+        #  will fail (since the exception survives `gc.collect()` call above).
+        # So we prefer to skip the check, in order to preserve the exception.
+        if __debug__ and exc_type is None:
+            update_gc_info()
 
 
 if __debug__:
-    from ubinascii import hexlify
-
     try:
         from trezorutils import enable_oom_dump
 
@@ -150,10 +175,6 @@ if __debug__:
         else:
             mem_info(True)
 
-    def get_bytes_as_str(a: bytes) -> str:
-        """Converts the provided bytes to a hexadecimal string (decoded as `utf-8`)."""
-        return hexlify(a).decode("utf-8")
-
 
 def ensure(cond: bool, msg: str | None = None) -> None:
     if not cond:
@@ -175,19 +196,19 @@ def chunks(items: Chunkable, size: int) -> Iterator[Chunkable]:
 if TYPE_CHECKING:
 
     class HashContext(Protocol):
-        def update(self, __buf: bytes) -> None: ...
+        def update(self, __buf: AnyBytes) -> None: ...
 
         def digest(self) -> bytes: ...
 
     class HashContextInitable(HashContext, Protocol):
         def __init__(  # pylint: disable=super-init-not-called
-            self, __data: bytes | None = None
+            self, __data: AnyBytes | None = None
         ) -> None: ...
 
     class Writer(Protocol):
         def append(self, __b: int) -> None: ...
 
-        def extend(self, __buf: bytes) -> None: ...
+        def extend(self, __buf: AnyBytes) -> None: ...
 
 
 if False:  # noqa
@@ -236,24 +257,20 @@ class HashWriter:
         self.buf[0] = b
         self.ctx.update(self.buf)
 
-    def extend(self, buf: bytes) -> None:
-        self.ctx.update(buf)
+    def extend(self, __buf: AnyBytes) -> None:
+        self.ctx.update(__buf)
 
-    def write(self, buf: bytes) -> None:  # alias for extend()
-        self.ctx.update(buf)
+    def write(self, __buf: AnyBytes) -> None:  # alias for extend()
+        self.ctx.update(__buf)
 
     def get_digest(self) -> bytes:
         return self.ctx.digest()
 
 
-if TYPE_CHECKING:
-    BufferType = bytearray | memoryview
-
-
 class BufferReader:
     """Seekable and readable view into a buffer."""
 
-    def __init__(self, buffer: bytes | memoryview) -> None:
+    def __init__(self, buffer: AnyBytes) -> None:
         if isinstance(buffer, memoryview):
             self.buffer = buffer
         else:
@@ -269,7 +286,7 @@ class BufferReader:
         offset = max(offset, 0)
         self.offset = offset
 
-    def readinto(self, dst: BufferType) -> int:
+    def readinto(self, dst: AnyBuffer) -> int:
         """Read exactly `len(dst)` bytes into `dst`, or raise EOFError.
 
         Returns number of bytes read.
@@ -378,6 +395,17 @@ def empty_bytearray(preallocate: int) -> bytearray:
     b = bytearray(preallocate)
     b[:] = bytes()
     return b
+
+
+def hexlify_if_bytes(data: str | bytes | bytearray | memoryview) -> str:
+    if isinstance(data, str):
+        return data
+    elif isinstance(data, (bytes, bytearray, memoryview)):
+        from ubinascii import hexlify
+
+        return hexlify(data).decode()
+    else:
+        raise TypeError("Expected str, bytes, bytearray, or memoryview")
 
 
 if __debug__:

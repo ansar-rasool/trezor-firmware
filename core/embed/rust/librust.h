@@ -14,8 +14,10 @@ extern mp_obj_module_t mp_module_trezorble;
 
 #if !PYOPT
 mp_obj_t ui_debug_layout_type();
-#endif
+extern mp_obj_module_t mp_module_trezorlog;
 
 #ifdef TREZOR_EMULATOR
 extern mp_obj_module_t mp_module_coveragedata;
+#endif
+
 #endif

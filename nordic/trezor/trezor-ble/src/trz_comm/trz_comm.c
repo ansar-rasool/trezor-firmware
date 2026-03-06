@@ -22,6 +22,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/settings/settings.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/sys/crc.h>
 #include <zephyr/types.h>
 
@@ -37,17 +38,24 @@ static K_FIFO_DEFINE(fifo_uart_rx_ble_manager);
 static K_FIFO_DEFINE(fifo_uart_rx_management);
 static K_FIFO_DEFINE(fifo_uart_rx_prodtest);
 
+atomic_t g_suspended_flag = ATOMIC_INIT(0);
+
 void trz_comm_init(void) {
   spi_init();
-  uart_init();
+  uart_power_down();
 }
 
 bool trz_comm_send_msg(nrf_service_id_t service, const uint8_t *data,
                        uint32_t len) {
-  if (len == SPI_TX_DATA_LEN) {
+  if (atomic_get(&g_suspended_flag) != 0 && service != NRF_SERVICE_BLE &&
+      service != NRF_SERVICE_MANAGEMENT) {
+    return false;
+  }
+
+  atomic_set(&g_suspended_flag, 0);
+
+  if (len <= SPI_TX_DATA_LEN) {
     return spi_send(service, data, len);
-  } else if (len <= MAX_UART_DATA_SIZE) {
-    return uart_send(service, data, len);
   }
   return false;
 }
@@ -55,8 +63,10 @@ bool trz_comm_send_msg(nrf_service_id_t service, const uint8_t *data,
 void process_rx_msg(uint8_t service_id, uint8_t *data, uint32_t len) {
   trz_packet_t *buf = k_malloc(sizeof(*buf));
 
+  atomic_set(&g_suspended_flag, 0);
+
   if (!buf) {
-    LOG_WRN("Not able to allocate UART receive buffer");
+    LOG_WRN("Not able to allocate receive buffer");
     return;
   }
 
@@ -77,7 +87,7 @@ void process_rx_msg(uint8_t service_id, uint8_t *data, uint32_t len) {
       k_fifo_put(&fifo_uart_rx_prodtest, buf);
       break;
     default:
-      LOG_WRN("UART_RX unknown service");
+      LOG_WRN("Unknown service");
       k_free(buf);
       break;
   }
@@ -94,7 +104,15 @@ trz_packet_t *trz_comm_poll_data(nrf_service_id_t service) {
     case NRF_SERVICE_PRODTEST:
       return k_fifo_get(&fifo_uart_rx_prodtest, K_FOREVER);
     default:
-      LOG_WRN("UART_RX unknown service");
+      LOG_WRN("Unknown service");
       return NULL;
   }
 }
+
+void trz_comm_start_uart(void) { uart_init(); }
+
+void trz_comm_stop_uart(void) { uart_deinit(); }
+
+void trz_comm_suspend(void) { atomic_set(&g_suspended_flag, 1); }
+
+void trz_comm_resume(void) { atomic_set(&g_suspended_flag, 0); }

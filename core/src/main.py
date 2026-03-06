@@ -11,13 +11,13 @@ import trezor
 # trezor.utils import only C modules
 from trezor import utils
 # we need space for 30 items in the trezor module
-utils.presize_module("trezor", 30)
+utils.presize_module(trezor, 30)
 
 # storage imports storage.common, storage.cache and storage.device.
 # These import trezor, trezor.config (which is a C module), trezor.utils, and each other.
 import storage
-# we will need space for 12 items in the storage module
-utils.presize_module("storage", 12)
+# we will need space for XX items in the storage module
+utils.presize_module(storage, 20)
 
 if not utils.BITCOIN_ONLY:
     # storage.fido2 only imports C modules
@@ -49,15 +49,12 @@ usb.bus.open(storage.device.get_device_id())
 
 # enable BLE, allow connections
 if utils.USE_BLE:
-    import trezorble as ble
-    ble.start_comm()
+    with utils.unimport():
+        import ble  # noqa: F401
+        del ble
 
-    # allow connections from bonded peers if any
-    if ble.peer_count() > 0:
-        ble.start_advertising(True, storage.device.get_label())
-
-    del ble
-
+# send unlock notification
+utils.notify_send(utils.NOTIFY_UNLOCK)
 
 # run the endless loop
 unimport_manager = utils.unimport()

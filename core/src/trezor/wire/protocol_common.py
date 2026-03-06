@@ -3,8 +3,9 @@ from typing import TYPE_CHECKING
 from trezor import protobuf
 
 if TYPE_CHECKING:
+    from buffer_types import AnyBytes
     from trezorio import WireInterface
-    from typing import Container, TypeVar, overload
+    from typing import Awaitable, Container, TypeVar, overload
 
     from storage.cache_common import DataCache
 
@@ -22,7 +23,7 @@ class Message:
     def __init__(
         self,
         message_type: int,
-        message_data: bytes,
+        message_data: AnyBytes,
     ) -> None:
         self.data = message_data
         self.type = message_type
@@ -36,10 +37,16 @@ class Context:
     single Bluetooth connection, etc.).
     """
 
-    channel_id: bytes
+    channel_id: AnyBytes
 
-    def __init__(self, iface: WireInterface, channel_id: bytes | None = None) -> None:
+    def __init__(
+        self,
+        iface: WireInterface,
+        channel_id: AnyBytes | None = None,
+        message_type_enum_name: str = "MessageType",
+    ) -> None:
         self.iface: WireInterface = iface
+        self.message_type_enum_name = message_type_enum_name
         if channel_id is not None:
             self.channel_id = channel_id
 
@@ -68,7 +75,7 @@ class Context:
         """
         ...
 
-    async def write(self, msg: protobuf.MessageType) -> None:
+    def write(self, msg: protobuf.MessageType) -> Awaitable[None]:
         """Write a message to the wire."""
         ...
 
@@ -79,6 +86,14 @@ class Context:
     ) -> LoadedMessageType:
         """Write a message to the wire, then await and return the response message."""
         assert expected_type.MESSAGE_WIRE_TYPE is not None
+
+        if __debug__:
+            # Check if `expected_type` is in the used `message_type_enum`
+            # Test skipped for MESSAGE_WIRE_TYPE == 22 because of "TxAck polymorphism" (PR #1266)
+            if expected_type.MESSAGE_WIRE_TYPE != 22:
+                protobuf.type_for_wire(
+                    self.message_type_enum_name, expected_type.MESSAGE_WIRE_TYPE
+                )
 
         await self.write(msg)
         del msg

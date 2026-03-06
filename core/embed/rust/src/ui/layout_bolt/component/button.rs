@@ -2,7 +2,7 @@
 use crate::trezorhal::haptic::{self, HapticEffect};
 use crate::{
     strutil::TString,
-    time::Duration,
+    time::ShortDuration,
     ui::{
         component::{
             Component, ComponentExt, Event, EventCtx, FixedHeightBar, MsgMap, Split, Timer,
@@ -24,13 +24,24 @@ pub enum ButtonMsg {
     LongPressed,
 }
 
+/// Fn-pointer callback for CancelInfoConfirm.
+pub trait CancelInfoConfirmHandler = Fn(ButtonMsg) -> Option<CancelInfoConfirmMsg>;
+
+/// Fn-pointer callback for CancelConfirm.
+pub trait ConfirmHandler = Fn(ButtonMsg) -> Option<CancelConfirmMsg>;
+
+/// Fn-pointer callback for select_word.
+pub trait SelectHandler = Fn(ButtonMsg) -> Option<SelectWordMsg>;
+
+// ——————————————————————————————————————————————————————————————————
+
 pub struct Button {
     area: Rect,
-    touch_expand: Option<Insets>,
+    touch_expand: Insets,
     content: ButtonContent,
     styles: ButtonStyleSheet,
     state: State,
-    long_press: Duration,
+    long_press: ShortDuration, // long press requires non-zero duration
     long_timer: Timer,
     haptics: bool,
 }
@@ -44,10 +55,10 @@ impl Button {
         Self {
             content,
             area: Rect::zero(),
-            touch_expand: None,
+            touch_expand: Insets::zero(),
             styles: theme::button_default(),
             state: State::Initial,
-            long_press: Duration::ZERO,
+            long_press: ShortDuration::ZERO,
             long_timer: Timer::new(),
             haptics: true,
         }
@@ -79,11 +90,12 @@ impl Button {
     }
 
     pub const fn with_expanded_touch_area(mut self, expand: Insets) -> Self {
-        self.touch_expand = Some(expand);
+        self.touch_expand = expand;
         self
     }
 
-    pub fn with_long_press(mut self, duration: Duration) -> Self {
+    pub fn with_long_press(mut self, duration: ShortDuration) -> Self {
+        debug_assert_ne!(duration, ShortDuration::ZERO);
         self.long_press = duration;
         self
     }
@@ -224,11 +236,7 @@ impl Component for Button {
     }
 
     fn event(&mut self, ctx: &mut EventCtx, event: Event) -> Option<Self::Msg> {
-        let touch_area = if let Some(expand) = self.touch_expand {
-            self.area.outset(expand)
-        } else {
-            self.area
-        };
+        let touch_area = self.area.outset(self.touch_expand);
 
         match event {
             Event::Touch(TouchEvent::TouchStart(pos)) => {
@@ -244,8 +252,8 @@ impl Component for Button {
                                 haptic::play(HapticEffect::ButtonPress);
                             }
                             self.set(ctx, State::Pressed);
-                            if self.long_press != Duration::ZERO {
-                                self.long_timer.start(ctx, self.long_press)
+                            if self.long_press != ShortDuration::ZERO {
+                                self.long_timer.start(ctx, self.long_press.into())
                             }
                             return Some(ButtonMsg::Pressed);
                         }
@@ -360,10 +368,7 @@ impl Button {
         left: Button,
         right: Button,
         left_is_small: bool,
-    ) -> CancelConfirm<
-        impl Fn(ButtonMsg) -> Option<CancelConfirmMsg>,
-        impl Fn(ButtonMsg) -> Option<CancelConfirmMsg>,
-    > {
+    ) -> CancelConfirm<impl ConfirmHandler, impl ConfirmHandler> {
         let width = if left_is_small {
             theme::BUTTON_WIDTH
         } else {
@@ -384,10 +389,7 @@ impl Button {
     pub fn cancel_confirm_text(
         left: Option<TString<'static>>,
         right: Option<TString<'static>>,
-    ) -> CancelConfirm<
-        impl Fn(ButtonMsg) -> Option<CancelConfirmMsg>,
-        impl Fn(ButtonMsg) -> Option<CancelConfirmMsg>,
-    > {
+    ) -> CancelConfirm<impl ConfirmHandler, impl ConfirmHandler> {
         let left_is_small: bool;
 
         let left = if let Some(verb) = left {
@@ -413,9 +415,9 @@ impl Button {
         confirm: Button,
         verb_info: TString<'static>,
     ) -> CancelInfoConfirm<
-        impl Fn(ButtonMsg) -> Option<CancelInfoConfirmMsg>,
-        impl Fn(ButtonMsg) -> Option<CancelInfoConfirmMsg>,
-        impl Fn(ButtonMsg) -> Option<CancelInfoConfirmMsg>,
+        impl CancelInfoConfirmHandler,
+        impl CancelInfoConfirmHandler,
+        impl CancelInfoConfirmHandler,
     > {
         let right = confirm.map(|msg| {
             (matches!(msg, ButtonMsg::Clicked)).then(|| CancelInfoConfirmMsg::Confirmed)
@@ -440,11 +442,7 @@ impl Button {
 
     pub fn select_word(
         words: [TString<'static>; 3],
-    ) -> CancelInfoConfirm<
-        impl Fn(ButtonMsg) -> Option<SelectWordMsg>,
-        impl Fn(ButtonMsg) -> Option<SelectWordMsg>,
-        impl Fn(ButtonMsg) -> Option<SelectWordMsg>,
-    > {
+    ) -> CancelInfoConfirm<impl SelectHandler, impl SelectHandler, impl SelectHandler> {
         let btn = move |i, word| {
             Button::with_text(word)
                 .styled(theme::button_pin())

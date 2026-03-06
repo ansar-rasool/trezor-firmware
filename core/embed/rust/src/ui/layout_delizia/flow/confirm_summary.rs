@@ -1,15 +1,14 @@
 use heapless::Vec;
 
 use crate::{
-    error::{self},
-    maybe_trace::MaybeTrace,
+    error,
     strutil::TString,
     translations::TR,
     ui::{
-        component::{swipe_detect::SwipeSettings, Component, ComponentExt},
+        component::{swipe_detect::SwipeSettings, ComponentExt},
         flow::{
             base::{Decision, DecisionBuilder as _},
-            FlowController, FlowMsg, Swipable, SwipeFlow,
+            FlowController, FlowMsg, SwipeFlow,
         },
         geometry::Direction,
     },
@@ -20,7 +19,7 @@ use super::{
         component::{Frame, PromptScreen, SwipeContent, VerticalMenu, VerticalMenuChoiceMsg},
         theme,
     },
-    util::ShowInfoParams,
+    util::{dummy_page, ShowInfoParams},
 };
 
 const MENU_ITEM_CANCEL: usize = 0;
@@ -45,13 +44,8 @@ impl FlowController for ConfirmSummary {
 
     fn handle_swipe(&'static self, direction: Direction) -> Decision {
         match (self, direction) {
-            (Self::Summary | Self::Hold, Direction::Left) => Self::Menu.swipe(direction),
             (Self::Summary, Direction::Up) => Self::Hold.swipe(direction),
             (Self::Hold, Direction::Down) => Self::Summary.swipe(direction),
-            (Self::Menu, Direction::Right) => Self::Summary.swipe(direction),
-            (Self::ExtraInfo | Self::AccountInfo | Self::CancelTap, Direction::Right) => {
-                Self::Menu.swipe(direction)
-            }
             _ => self.do_nothing(),
         }
     }
@@ -69,10 +63,6 @@ impl FlowController for ConfirmSummary {
             _ => self.do_nothing(),
         }
     }
-}
-
-fn dummy_page() -> impl Component<Msg = FlowMsg> + Swipable + MaybeTrace {
-    Frame::left_aligned(TString::empty(), VerticalMenu::empty()).map(|_| Some(FlowMsg::Cancelled))
 }
 
 pub fn new_confirm_summary(
@@ -95,8 +85,7 @@ pub fn new_confirm_summary(
     )
     .with_menu_button()
     .with_footer(TR::instructions__hold_to_sign.into(), None)
-    .with_swipe(Direction::Down, SwipeSettings::default())
-    .with_swipe(Direction::Left, SwipeSettings::default())
+    .with_swipe(Direction::Down, SwipeSettings::Default)
     .map(super::util::map_to_confirm);
 
     // ExtraInfo
@@ -125,14 +114,10 @@ pub fn new_confirm_summary(
         );
         unwrap!(menu_items.push(MENU_ITEM_ACCOUNT_INFO));
     }
-    menu = menu.danger(
-        theme::ICON_CANCEL,
-        verb_cancel.unwrap_or(TR::send__cancel_sign.into()),
-    );
+    menu = menu.cancel_item(verb_cancel.unwrap_or(TR::send__cancel_sign.into()));
     unwrap!(menu_items.push(MENU_ITEM_CANCEL));
     let content_menu = Frame::left_aligned(TString::empty(), menu)
         .with_cancel_button()
-        .with_swipe(Direction::Right, SwipeSettings::immediate())
         .map(move |msg| match msg {
             VerticalMenuChoiceMsg::Selected(i) => {
                 let selected_item = menu_items[i];
@@ -147,7 +132,6 @@ pub fn new_confirm_summary(
     )
     .with_cancel_button()
     .with_footer(TR::instructions__tap_to_confirm.into(), None)
-    .with_swipe(Direction::Right, SwipeSettings::immediate())
     .map(super::util::map_to_confirm);
 
     let mut res = SwipeFlow::new(&ConfirmSummary::Summary)?;

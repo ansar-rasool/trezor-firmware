@@ -77,6 +77,7 @@ message Features {
     required uint32 major_version = 2;          // major version of the firmware/bootloader, e.g. 1
     required uint32 minor_version = 3;          // minor version of the firmware/bootloader, e.g. 0
     required uint32 patch_version = 4;          // patch version of the firmware/bootloader, e.g. 0
+    optional uint32 build_version = 61;         // build version of the firmware/bootloader, e.g. 0
     optional bool bootloader_mode = 5;          // is device in bootloader mode?
     optional string device_id = 6;              // device's unique identifier
     optional bool pin_protection = 7;           // is device protected by PIN?
@@ -89,13 +90,14 @@ message Features {
     optional bool imported = 15;                // was storage imported from an external source?
     optional bool unlocked = 16;                // is the device unlocked? called "pin_cached" previously
     optional bool _passphrase_cached = 17 [deprecated=true]; // is passphrase already cached in session?
-    optional bool firmware_present = 18;        // is valid firmware loaded?
+    optional bool firmware_present = 18;        // is firmware loaded?
     optional BackupAvailability backup_availability = 19;  // does storage need backup? is repeated backup unlocked?
     optional uint32 flags = 20;                 // device flags (equals to Storage.flags)
     optional string model = 21;                 // device hardware model
     optional uint32 fw_major = 22;              // reported firmware version if in bootloader mode
     optional uint32 fw_minor = 23;              // reported firmware version if in bootloader mode
     optional uint32 fw_patch = 24;              // reported firmware version if in bootloader mode
+    optional uint32 fw_build = 62;              // reported firmware version if in bootloader mode
     optional string fw_vendor = 25;             // reported firmware vendor if in bootloader mode
     // optional bytes fw_vendor_keys = 26;      // obsoleted, use fw_vendor
     optional bool unfinished_backup = 27;       // report unfinished backup (equals to Storage.unfinished_backup)
@@ -126,6 +128,12 @@ message Features {
     optional bool haptic_feedback = 52;         // haptic feedback is enabled
     optional RecoveryType recovery_type = 53;   // what type of recovery we are in. NB: this works in conjunction with recovery_status
     optional uint32 optiga_sec = 54;            // Optiga's security event counter.
+    optional uint32 soc = 55;                   // Battery state of charge (0 - 100%)
+    optional bool firmware_corrupted = 56;     // true if the firmware is corrupted
+    optional uint32 auto_lock_delay_battery_ms = 57;    // number of milliseconds after which the battery-powered device locks itself
+    optional bool led = 58;         // RGB LED settings
+    optional bool usb_connected = 59;           // USB connected
+    optional bool wireless_connected = 60;      // Wireless charger connected
 
     enum BackupAvailability {
         /// Device is already backed up, or a previous backup has failed.
@@ -147,7 +155,7 @@ message Features {
 
         Capability_Bitcoin = 1 [(bitcoin_only) = true];
         Capability_Bitcoin_like = 2;                    // Altcoins based on the Bitcoin source code
-        Capability_Binance = 3;
+        Capability_Binance = 3;                         // BNB Smart Chain
         Capability_Cardano = 4;
         Capability_Crypto = 5 [(bitcoin_only) = true];  // generic crypto operations for GPG, SSH, etc.
         Capability_EOS = 6;
@@ -166,6 +174,8 @@ message Features {
         Capability_Translations = 19 [(bitcoin_only) = true];
         Capability_Brightness = 20 [(bitcoin_only) = true];
         Capability_Haptic = 21 [(bitcoin_only) = true];
+        Capability_BLE = 22 [(bitcoin_only) = true];  // Bluetooth Low Energy
+        Capability_NFC = 23 [(bitcoin_only) = true];  // Near Field Communications
     }
 }
 
@@ -200,13 +210,14 @@ message EndSession {
  * Request: change some property of the device, e.g. label or homescreen
  * @start
  * @next Success
+ * @next DataChunkRequest
  * @next Failure
  */
 message ApplySettings {
     optional string language = 1 [deprecated=true];
     optional string label = 2;
     optional bool use_passphrase = 3;
-    optional bytes homescreen = 4;
+    optional bytes homescreen = 4;  // homescreen image in single array, deprecated for 14
     optional uint32 _passphrase_source = 5 [deprecated=true];   // ASK = 0; DEVICE = 1; HOST = 2;
     optional uint32 auto_lock_delay_ms = 6;
     optional DisplayRotation display_rotation = 7;  // rotation of display (in degrees from North)
@@ -215,6 +226,8 @@ message ApplySettings {
     optional bool experimental_features = 10;  // enable experimental message types
     optional bool hide_passphrase_from_host = 11;  // do not show passphrase coming from host
     optional bool haptic_feedback = 13;  // enable haptic feedback
+    optional uint32 homescreen_length = 14;  // byte length of new homescreen, device will request chunks
+    optional uint32 auto_lock_delay_battery_ms = 15; // time in ms after which device locks when on battery or wireless charger
 }
 
 /**
@@ -222,7 +235,7 @@ message ApplySettings {
  * Does not send the translation data itself, as they are too large for one message.
  * Device will request the translation data in chunks.
  * @start
- * @next TranslationDataRequest
+ * @next DataChunkRequest
  * @next Failure
  */
 message ChangeLanguage {
@@ -240,22 +253,22 @@ message ChangeLanguage {
 }
 
 /**
- * Response: Device asks for more data from transaction payload.
+ * Response: Device asks for more data from translation/homescreen image.
  * @end
- * @next TranslationDataAck
+ * @next DataChunkAck
  */
- message TranslationDataRequest {
+ message DataChunkRequest {
     required uint32 data_length = 1;    // Number of bytes being requested
     required uint32 data_offset = 2;    // Offset of the first byte being requested
 }
 
 /**
- * Request: Translation payload data.
- * @next TranslationDataRequest
+ * Request: Translation/homescreen payload data.
+ * @next DataChunkRequest
  * @next Success
  */
-message TranslationDataAck {
-    required bytes data_chunk = 1;  // Bytes from translation payload
+message DataChunkAck {
+    required bytes data_chunk = 1;  // Bytes from translation/homescreen payload
 }
 
 /**
@@ -375,8 +388,10 @@ message AuthenticateDevice {
  * @end
  */
 message AuthenticityProof {
-    repeated bytes certificates = 1;  // A certificate chain starting with the device certificate, followed by intermediate CA certificates, the last of which is signed by Trezor company's root CA.
-    required bytes signature = 2;     // A DER-encoded signature of "\0x13AuthenticateDevice:" + length-prefixed challenge that should be verified using the device certificate.
+    repeated bytes optiga_certificates = 1;  // A certificate chain starting with the Optiga device certificate, followed by intermediate CA certificates, the last of which is signed by Trezor company's root CA.
+    required bytes optiga_signature = 2;     // A DER-encoded signature of "\0x13AuthenticateDevice:" + length-prefixed challenge that should be verified using the Optiga device certificate.
+    repeated bytes tropic_certificates = 3;  // A certificate chain starting with the Tropic device certificate, followed by intermediate CA certificates, the last of which is signed by Trezor company's root CA.
+    optional bytes tropic_signature = 4;     // A DER-encoded signature of "\0x13AuthenticateDevice:" + length-prefixed challenge that should be verified using the Tropic device certificate.
 }
 
 /**
@@ -596,6 +611,7 @@ message CancelAuthorization {
  * Request: Reboot firmware to bootloader
  * @start
  * @next Success
+ * @next DataChunkRequest
  */
 message RebootToBootloader {
     // Action to be performed after rebooting to bootloader
@@ -619,7 +635,6 @@ message RebootToBootloader {
  * @next Nonce
  */
 message GetNonce {
-    option (experimental_message) = true;
 }
 
 /**
@@ -627,8 +642,6 @@ message GetNonce {
  * @end
  */
 message Nonce {
-    option (experimental_message) = true;
-
     required bytes nonce = 1; // a 32-byte random value generated by Trezor
 }
 
@@ -679,3 +692,20 @@ message UnlockBootloader {
 message SetBrightness {
     optional uint32 value = 1;  // if not specified, let the user choose
 }
+
+
+/**
+ * Request: Get unit serial number
+ * @start
+ * @next SerialNumber
+ */
+ message GetSerialNumber {
+ }
+
+ /**
+ * Response: contains unit serial number
+ * @end
+ */
+ message SerialNumber {
+    required string serial_number = 1;
+ }

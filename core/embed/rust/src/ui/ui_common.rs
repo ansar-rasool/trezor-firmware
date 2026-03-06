@@ -1,12 +1,12 @@
 use crate::ui::geometry::Rect;
 
-#[cfg(feature = "ui_debug_overlay")]
+#[cfg(any(feature = "ui_debug_overlay", feature = "ui_performance_overlay"))]
 use crate::ui::shape::Renderer;
 
 /// A structure containing information to be displayed in the debug overlay
-/// on the screen when the "ui_debug_overlay" feature is enabled.
-#[cfg(feature = "ui_debug_overlay")]
-pub struct DebugOverlay {
+/// on the screen when the "ui_performance_overlay" feature is enabled.
+#[cfg(feature = "ui_performance_overlay")]
+pub struct PerformanceOverlay {
     /// Time (in microseconds) spent by the rendering functions.
     pub render_time: u64,
 
@@ -44,8 +44,14 @@ pub trait CommonUI {
 
     fn screen_boot_stage_2(fade_in: bool);
 
-    /// Renders a partially transparent overlay over the screen content
-    /// using data from the `DebugOverlay` struct.
+    fn screen_update();
+
+    /// Renders an overlay over the screen content with debug indication
     #[cfg(feature = "ui_debug_overlay")]
-    fn render_debug_overlay<'s>(target: &mut impl Renderer<'s>, info: DebugOverlay);
+    fn render_debug_overlay<'s>(target: &mut impl Renderer<'s>);
+
+    /// Renders a partially transparent overlay over the screen content
+    /// using data from the `PerformanceOverlay` struct.
+    #[cfg(feature = "ui_performance_overlay")]
+    fn render_performance_overlay<'s>(target: &mut impl Renderer<'s>, info: PerformanceOverlay);
 }

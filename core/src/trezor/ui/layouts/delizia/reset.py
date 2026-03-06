@@ -38,12 +38,14 @@ def show_share_words(
     text_confirm = TR.reset__words_written_down_template.format(words_count)
 
     return raise_if_not_confirmed(
-        trezorui_api.show_share_words_delizia(
+        trezorui_api.show_share_words_extended(
             words=share_words,
             subtitle=subtitle,
             instructions=instructions,
+            instructions_verb=None,
             text_footer=description,
             text_confirm=text_confirm,
+            text_check=TR.reset__check_backup_instructions,
         ),
         None,
     )

@@ -8,8 +8,15 @@ CORE = HERE.parent.parent
 MODELS_DIR = CORE / "embed" / "models"
 
 
-def get_layout_for_model(model: str) -> Path:
-    return MODELS_DIR / model / f"model_{model}.h"
+def get_layout_for_model(model: str, secmon: bool) -> Path:
+    if secmon:
+        return MODELS_DIR / model / "memory_secmon.h"
+    else:
+        return MODELS_DIR / model / "memory.h"
 
-def get_linkerscript_for_model(model: str) -> Path:
-    return MODELS_DIR / model / f"memory.ld"
+
+def get_linkerscript_for_model(model: str, secmon: bool) -> Path:
+    if secmon:
+        return MODELS_DIR / model / "memory_secmon.ld"
+    else:
+        return MODELS_DIR / model / "memory.ld"

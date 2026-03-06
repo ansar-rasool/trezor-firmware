@@ -3,10 +3,7 @@ use crate::{
     strutil::TString,
     translations::TR,
     ui::{
-        component::{
-            swipe_detect::SwipeSettings,
-            text::paragraphs::{Paragraph, ParagraphSource},
-        },
+        component::text::paragraphs::{Paragraph, ParagraphSource},
         flow::{
             base::{Decision, DecisionBuilder as _},
             FlowController, FlowMsg, SwipeFlow,
@@ -35,9 +32,7 @@ impl FlowController for ShowDanger {
 
     fn handle_swipe(&'static self, direction: Direction) -> Decision {
         match (self, direction) {
-            (Self::Message, Direction::Left) => Self::Menu.swipe(direction),
             (Self::Message, Direction::Up) => Self::Cancelled.swipe(direction),
-            (Self::Menu, Direction::Right) => Self::Message.swipe(direction),
             _ => self.do_nothing(),
         }
     }
@@ -75,9 +70,8 @@ pub fn new_show_danger(
     .into_paragraphs();
     let content_message = Frame::left_aligned(title, SwipeContent::new(paragraphs))
         .with_menu_button()
-        .with_swipeup_footer(Some(verb_cancel))
+        .with_tap_footer(Some(verb_cancel))
         .with_danger()
-        .with_swipe(Direction::Left, SwipeSettings::default())
         .map_to_button_msg();
     // .one_button_request(ButtonRequestCode::Warning, br_name);
 
@@ -86,10 +80,9 @@ pub fn new_show_danger(
         "".into(),
         VerticalMenu::empty()
             .item(theme::ICON_CANCEL, verb_cancel)
-            .danger(theme::ICON_CHEVRON_RIGHT, confirm),
+            .danger_item(theme::ICON_CHEVRON_RIGHT, confirm),
     )
     .with_cancel_button()
-    .with_swipe(Direction::Right, SwipeSettings::immediate())
     .map(super::util::map_to_choice);
 
     // Cancelled

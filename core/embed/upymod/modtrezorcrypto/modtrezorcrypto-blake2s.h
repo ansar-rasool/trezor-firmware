@@ -41,10 +41,10 @@ STATIC mp_obj_t mod_trezorcrypto_Blake2s_update(mp_obj_t self, mp_obj_t data);
 
 /// def __init__(
 ///     self,
-///     data: bytes | None = None,
+///     data: AnyBytes | None = None,
 ///     outlen: int = blake2s.digest_size,
-///     key: bytes | None = None,
-///     personal: bytes | None = None,
+///     key: AnyBytes | None = None,
+///     personal: AnyBytes | None = None,
 /// ) -> None:
 ///     """
 ///     Creates a hash context object.
@@ -81,8 +81,7 @@ STATIC mp_obj_t mod_trezorcrypto_Blake2s_make_new(const mp_obj_type_t *type,
 
   if (key_len > 0 && personal_len > 0) {
     mp_raise_ValueError(
-        "Invalid Blake2s parameters: cannot use key and personal at the same "
-        "time");
+        MP_ERROR_TEXT("Cannot use Blake2s key and personal at the same time"));
   }
 
   mp_obj_Blake2s_t *o = m_new_obj_with_finaliser(mp_obj_Blake2s_t);
@@ -99,7 +98,7 @@ STATIC mp_obj_t mod_trezorcrypto_Blake2s_make_new(const mp_obj_type_t *type,
 
   if (res < 0) {
     m_del_obj(mp_obj_Blake2s_t, o);
-    mp_raise_ValueError("Invalid Blake2s parameters");
+    mp_raise_ValueError(MP_ERROR_TEXT("Invalid Blake2s parameters"));
   }
 
   // constructor called with data argument set
@@ -110,7 +109,7 @@ STATIC mp_obj_t mod_trezorcrypto_Blake2s_make_new(const mp_obj_type_t *type,
   return MP_OBJ_FROM_PTR(o);
 }
 
-/// def update(self, __data: AnyStr) -> None:
+/// def update(self, __data: StrOrBytes) -> None:
 ///     """
 ///     Update the hash context with hashed data.
 ///     """

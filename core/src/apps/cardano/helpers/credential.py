@@ -6,6 +6,8 @@ from trezor.enums import CardanoAddressType
 from .paths import SCHEMA_PAYMENT
 
 if TYPE_CHECKING:
+    from buffer_types import AnyBytes
+
     from trezor import messages
     from trezor.ui.layouts import PropertyType
 
@@ -24,8 +26,8 @@ class Credential:
     type_name: str
     address_type: CardanoAddressType
     path: list[int]
-    key_hash: bytes | None
-    script_hash: bytes | None
+    key_hash: AnyBytes | None
+    script_hash: AnyBytes | None
     pointer: messages.CardanoBlockchainPointerType | None
 
     is_reward: bool = False
@@ -39,8 +41,8 @@ class Credential:
         type_name: str,
         address_type: CardanoAddressType,
         path: list[int],
-        key_hash: bytes | None,
-        script_hash: bytes | None,
+        key_hash: AnyBytes | None,
+        script_hash: AnyBytes | None,
         pointer: messages.CardanoBlockchainPointerType | None,
     ) -> None:
         self.type_name = type_name
@@ -181,21 +183,23 @@ class Credential:
         pointer = self.pointer  # local_cache_attribute
 
         if self.path:
-            return [(None, address_n_to_str(self.path))]
+            return [(None, address_n_to_str(self.path), True)]
         elif self.key_hash:
             hrp = (
                 bech32.HRP_KEY_HASH
                 if self.type_name == CREDENTIAL_TYPE_PAYMENT
                 else bech32.HRP_STAKE_KEY_HASH
             )
-            return [(None, bech32.encode(hrp, self.key_hash))]
+            return [(None, bech32.encode(hrp, self.key_hash), True)]
         elif self.script_hash:
-            return [(None, bech32.encode(bech32.HRP_SCRIPT_HASH, self.script_hash))]
+            return [
+                (None, bech32.encode(bech32.HRP_SCRIPT_HASH, self.script_hash), True)
+            ]
         elif pointer:
             return [
-                (f"{TR.cardano__block}: {pointer.block_index}", None),
-                (f"{TR.cardano__transaction}: {pointer.tx_index}", None),
-                (f"{TR.cardano__certificate}: {pointer.certificate_index}", None),
+                (f"{TR.cardano__block}: {pointer.block_index}", None, None),
+                (f"{TR.cardano__transaction}: {pointer.tx_index}", None, None),
+                (f"{TR.cardano__certificate}: {pointer.certificate_index}", None, None),
             ]
         else:
             return []

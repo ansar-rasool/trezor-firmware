@@ -1,6 +1,6 @@
 # This file is part of the Trezor project.
 #
-# Copyright (C) 2012-2022 SatoshiLabs and contributors
+# Copyright (C) SatoshiLabs and contributors
 #
 # This library is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License version 3
@@ -85,3 +85,45 @@ class UnexpectedMessageError(TrezorException):
         self.expected = expected
         self.actual = actual
         super().__init__(f"Expected {expected.__name__} but Trezor sent {actual}")
+
+
+class FailedSessionResumption(TrezorException):
+    """Provided session_id is not valid / session cannot be resumed.
+
+    Raised when `trezorctl -s <sesssion_id>` is used or `TREZOR_SESSION_ID = <session_id>`
+    is set and resumption of session with the `session_id` fails."""
+
+    def __init__(self, received_session_id: bytes | None = None) -> None:
+        # We keep the session id that was received from Trezor for test purposes
+        self.received_session_id = received_session_id
+        super().__init__("Failed to resume session")
+
+
+class InvalidSessionError(TrezorException):
+    """Session expired and is no longer valid.
+
+    Raised when Trezor returns unexpected PassphraseRequest"""
+
+
+class ThpError(TrezorException):
+    pass
+
+
+class TransportBusy(ThpError):
+    pass
+
+
+class UnallocatedChannel(ThpError):
+    pass
+
+
+class DecryptionFailed(ThpError):
+    pass
+
+
+class DeviceLocked(ThpError):
+    pass
+
+
+class ThpUnknownError(ThpError):
+    pass

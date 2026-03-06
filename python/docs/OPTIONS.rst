@@ -38,7 +38,7 @@ on one page here.
 
   Commands:
     benchmark          Benchmark commands.
-    binance            Binance Chain commands.
+    ble                BLE commands.
     btc                Bitcoin and Bitcoin-like coins commands.
     cardano            Cardano commands.
     clear-session      Clear session (remove cached PIN, passphrase, etc.).
@@ -47,6 +47,7 @@ on one page here.
     device             Device management commands - setup, recover seed, wipe, etc.
     eos                EOS commands.
     ethereum           Ethereum commands.
+    evolu              Evolu commands.
     fido               FIDO2, U2F and WebAuthN management commands.
     firmware           Firmware commands.
     get-features       Retrieve device features and settings.
@@ -54,12 +55,14 @@ on one page here.
     list               List connected Trezor devices.
     monero             Monero commands.
     nem                NEM commands.
+    nostr              Nostr commands.
     ping               Send ping message.
     ripple             Ripple commands.
     set                Device settings.
     solana             Solana commands.
     stellar            Stellar commands.
     tezos              Tezos commands.
+    tron               Tron commands.
     usb-reset          Perform USB reset on stuck devices.
     version            Show version of trezorctl/trezorlib.
     wait-for-emulator  Wait until Trezor Emulator comes up.
@@ -84,26 +87,24 @@ Benchmark commands.
     list-names  List names of all supported benchmarks
     run         Run benchmark
 
-Binance Chain commands.
-~~~~~~~~~~~~~~~~~~~~~~~
+BLE commands.
+~~~~~~~~~~~~~
 
 .. code::
 
-  trezorctl binance --help
+  trezorctl ble --help
 
 .. code::
 
-  Usage: trezorctl binance [OPTIONS] COMMAND [ARGS]...
+  Usage: trezorctl ble [OPTIONS] COMMAND [ARGS]...
 
-    Binance Chain commands.
+    BLE commands.
 
   Options:
     --help  Show this message and exit.
 
   Commands:
-    get-address     Get Binance address for specified path.
-    get-public-key  Get Binance public key.
-    sign-tx         Sign Binance transaction.
+    unpair  Erase bond of currently connected device, or all devices (on device side)
 
 Bitcoin and Bitcoin-like coins commands.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -149,6 +150,7 @@ Cardano commands.
     get-address             Get Cardano address.
     get-native-script-hash  Get Cardano native script hash.
     get-public-key          Get Cardano public key.
+    sign-message            Sign Cardano message containing arbitrary data.
     sign-tx                 Sign Cardano transaction.
 
 Miscellaneous cryptography features.
@@ -192,7 +194,6 @@ Miscellaneous debug features.
     optiga-set-sec-max  Set Optiga's security event counter to maximum.
     prodtest-t1         Perform a prodtest on Model One.
     record              Record screen changes into a specified directory.
-    send-bytes          Send raw bytes to Trezor.
 
 Device management commands - setup, recover seed, wipe, etc.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -286,6 +287,25 @@ Ethereum commands.
     sign-typed-data-hash  Sign hash of typed data (EIP-712) with Ethereum address.
     verify-message        Verify message signed with Ethereum address.
 
+Evolu commands.
+~~~~~~~~~~~~~~~
+
+.. code::
+
+  trezorctl evolu --help
+
+.. code::
+
+  Usage: trezorctl evolu [OPTIONS] COMMAND [ARGS]...
+
+    Evolu commands. Evolu is a local first storage framework. See https://github.com/evoluhq/evolu
+
+  Options:
+    --help  Show this message and exit.
+
+  Commands:
+    get-node  Return the SLIP-21 node for Evolu.
+
 FIDO2, U2F and WebAuthN management commands.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -367,6 +387,26 @@ NEM commands.
   Commands:
     get-address  Get NEM address for specified path.
     sign-tx      Sign (and optionally broadcast) NEM transaction.
+
+Nostr commands.
+~~~~~~~~~~~~~~~
+
+.. code::
+
+  trezorctl nostr --help
+
+.. code::
+
+  Usage: trezorctl nostr [OPTIONS] COMMAND [ARGS]...
+
+    Nostr commands.
+
+  Options:
+    --help  Show this message and exit.
+
+  Commands:
+    get-pubkey  Return the pubkey derived by the given path.
+    sign-event  Sign an event using the key derived by the given path.
 
 Ripple commands.
 ~~~~~~~~~~~~~~~~

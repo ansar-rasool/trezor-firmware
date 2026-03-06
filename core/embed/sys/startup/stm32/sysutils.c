@@ -188,8 +188,11 @@ __attribute((naked, no_stack_protector)) void ensure_thread_mode(void) {
       "MRS     R0, CONTROL         \n"  // Clear SPSEL to use MSP for thread
       "BIC     R0, R0, #3          \n"  // Clear nPRIV to run in privileged mode
       "MSR     CONTROL, R0         \n"
-
+#if !defined(__ARM_FEATURE_CMSE) || (__ARM_FEATURE_CMSE == 3U)
       "LDR     LR, = 0xFFFFFFF9    \n"  // Return to Secure Thread mode, use MSP
+#else
+      "LDR     LR, = 0xFFFFFFB8    \n"  // Return to Thread mode, use MSP
+#endif
       "BX      LR                  \n");
 }
 
@@ -245,6 +248,9 @@ __attribute((naked, noreturn, no_stack_protector)) void jump_to_vectbl(
       "MOV      R10, R0            \n"  // R11 is set to r11 argument
       "MOV      R12, R0            \n"
 
+#if defined(__ARM_ARCH_8M_MAIN__) || defined(__ARM_ARCH_8M_BASE__)
+      "MSR      MSPLIM, R1         \n"  // Disable MSPLIM
+#endif
       "LDR      R0, [LR]           \n"  // Initial MSP value
       "MSR      MSP, R0            \n"  // Set MSP
 
@@ -261,6 +267,48 @@ __attribute((naked, noreturn, no_stack_protector)) void jump_to_vectbl(
       :  // no clobber
   );
 }
+
+#ifdef SECMON
+__attribute((naked, noreturn, no_stack_protector)) void jump_to_vectbl_ns(
+    uint32_t vectbl_addr) {
+  __asm__ volatile(
+      "MOV      LR, R0             \n"
+
+      "LDR      R0, =0             \n"
+      "MOV      R1, R0             \n"
+      "MOV      R2, R0             \n"
+      "MOV      R3, R0             \n"
+      "MOV      R4, R0             \n"
+      "MOV      R5, R0             \n"
+      "MOV      R6, R0             \n"
+      "MOV      R7, R0             \n"
+      "MOV      R8, R0             \n"
+      "MOV      R9, R0             \n"
+      "MOV      R10, R0            \n"
+      "MOV      R11, R0            \n"
+      "MOV      R12, R0            \n"
+
+#if defined(__ARM_ARCH_8M_MAIN__) || defined(__ARM_ARCH_8M_BASE__)
+      "MSR      MSPLIM_NS, R1      \n"  // Disable MSPLIM
+#endif
+      "LDR      R0, [LR]           \n"  // Initial MSP value
+      "MSR      MSP_NS, R0         \n"  // Set MSP
+
+      "LDR      R0, =%[_SCB_VTOR]  \n"  // Reset handler
+      "STR      LR, [R0]           \n"  // Set SCB->VTOR = vectb_addr
+
+      "LDR      LR, [LR, #4]       \n"  // Reset handler
+      "MOVS     R0, #1             \n"
+      "BICS     LR, R0             \n"  // bit0 == 0 => transition to Non-secure
+      "MOV      R0, R1             \n"  // Zero out R0
+      "BXNS     LR                 \n"  // Go to non-secure reset handler
+
+      :  // no output
+      : [_SCB_VTOR] "i"(&SCB_NS->VTOR)
+      :  // no clobber
+  );
+}
+#endif
 
 void reset_peripherals_and_interrupts(void) {
 #ifdef __HAL_RCC_DMA2D_FORCE_RESET

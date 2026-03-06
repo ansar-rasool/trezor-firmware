@@ -16,8 +16,9 @@ BOOTLOADER_BUILD_DIR  = $(BUILD_DIR)/bootloader
 BOOTLOADER_CI_BUILD_DIR   = $(BUILD_DIR)/bootloader_ci
 BOOTLOADER_EMU_BUILD_DIR  = $(BUILD_DIR)/bootloader_emu
 PRODTEST_BUILD_DIR    = $(BUILD_DIR)/prodtest
-REFLASH_BUILD_DIR     = $(BUILD_DIR)/reflash
+PRODTEST_EMU_BUILD_DIR    = $(BUILD_DIR)/prodtest_emu
 KERNEL_BUILD_DIR      = $(BUILD_DIR)/kernel
+SECMON_BUILD_DIR      = $(BUILD_DIR)/secmon
 FIRMWARE_BUILD_DIR    = $(BUILD_DIR)/firmware
 UNIX_BUILD_DIR        = $(BUILD_DIR)/unix
 RUST_BUILD_DIR        = $(BUILD_DIR)/rust
@@ -31,22 +32,22 @@ PYOPT      ?= 1
 BITCOIN_ONLY ?= 0
 BOOTLOADER_QA ?= 0
 BOOTLOADER_DEVEL ?= 0
-DISABLE_OPTIGA ?= 0
-DISABLE_TROPIC ?= 1
+UNSAFE_FW ?= 0
 TREZOR_MODEL ?= T2T1
 TREZOR_MEMPERF ?= 0
 ADDRESS_SANITIZER ?= 0
 CMAKELISTS ?= 0
 PYTEST_TIMEOUT ?= 500
 TEST_LANG ?= "en"
-THP ?= 0
+THP ?= $(if $(filter T3W1,$(TREZOR_MODEL)),1,0)
 BENCHMARK ?= 0
 LOG_STACK_USAGE ?= 0
 TREZOR_EMULATOR_DEBUGGABLE ?= 0
 QUIET_MODE ?= 0
 TREZOR_DISABLE_ANIMATION ?= $(if $(filter 0,$(PYOPT)),1,0)
 STORAGE_INSECURE_TESTING_MODE ?= 0
-UI_DEBUG_OVERLAY ?= 0
+UI_PERFORMANCE_OVERLAY ?= 0
+DBG_CONSOLE ?=
 
 # If set, VCP writes will be blocking, in order to allow reliable debug data transmission over VCP.
 # Disabled by default, to prevent debug firmware from getting stuck while writing log messages (if the host is not reading them).
@@ -123,12 +124,12 @@ SCONS_VARS = \
 	BITCOIN_ONLY="$(BITCOIN_ONLY)" \
 	BOOTLOADER_DEVEL="$(BOOTLOADER_DEVEL)" \
 	BOOTLOADER_QA="$(BOOTLOADER_QA)" \
+	UNSAFE_FW="$(UNSAFE_FW)" \
 	CFLAGS="$(CFLAGS)" \
 	CMAKELISTS="$(CMAKELISTS)" \
-	DISABLE_OPTIGA="$(DISABLE_OPTIGA)" \
-	DISABLE_TROPIC="$(DISABLE_TROPIC)" \
 	HW_REVISION="$(HW_REVISION)" \
 	LOG_STACK_USAGE="$(LOG_STACK_USAGE)" \
+	MICROPY_ENABLE_SOURCE_LINE="$(MICROPY_ENABLE_SOURCE_LINE)" \
 	PRODUCTION="$(PRODUCTION)" \
 	PYOPT="$(PYOPT)" \
 	QUIET_MODE="$(QUIET_MODE)" \
@@ -140,8 +141,17 @@ SCONS_VARS = \
 	TREZOR_EMULATOR_DEBUGGABLE=$(TREZOR_EMULATOR_DEBUGGABLE) \
 	TREZOR_MEMPERF="$(TREZOR_MEMPERF)" \
 	TREZOR_MODEL="$(TREZOR_MODEL)" \
-	UI_DEBUG_OVERLAY="$(UI_DEBUG_OVERLAY)" \
-	BLOCK_ON_VCP="$(BLOCK_ON_VCP)"
+	UI_PERFORMANCE_OVERLAY="$(UI_PERFORMANCE_OVERLAY)" \
+	BLOCK_ON_VCP="$(BLOCK_ON_VCP)" \
+	DBG_CONSOLE="$(DBG_CONSOLE)" \
+
+ifdef DISABLE_OPTIGA
+SCONS_VARS += DISABLE_OPTIGA="$(DISABLE_OPTIGA)"
+endif
+
+ifdef DISABLE_TROPIC
+SCONS_VARS += DISABLE_TROPIC="$(DISABLE_TROPIC)"
+endif
 
 SCONS_OPTS = -Q -j $(JOBS)
 ifeq ($(QUIET_MODE),1)
@@ -149,9 +159,6 @@ SCONS_OPTS += --quiet
 endif
 
 SCONS = scons $(SCONS_OPTS) $(SCONS_VARS)
-
-# LD_LIBRARY_PATH workaround: https://discourse.nixos.org/t/nixpkgs-nixos-unstable-many-package-fail-with-glibc-2-38-not-found/35078 https://github.com/NixOS/nixpkgs/issues/287764
-unexport LD_LIBRARY_PATH
 
 ## help commands:
 
@@ -179,8 +186,11 @@ test: ## run unit tests
 test_rust: ## run rs unit tests
 	export BUILD_DIR=$(abspath $(UNIX_BUILD_DIR)) ; \
 	cd embed/rust ; cargo test $(TESTOPTS) --target=$(RUST_TARGET) \
-		--no-default-features --features $(LAYOUT_FEATURE),test \
+		--no-default-features --features $(LAYOUT_FEATURE),power_manager,test \
 		-- --test-threads=1 --nocapture
+
+test_emu_sanity: ## make sure the emulator doesn't crash on startup
+	timeout -v 10 $(EMU) --disable-animation --headless --temporary-profile --command true
 
 test_emu: ## run selected device tests from python-trezor
 	$(EMU_TEST) $(PYTEST) $(TESTPATH)/device_tests $(TESTOPTS) --lang=$(TEST_LANG)
@@ -208,6 +218,11 @@ test_emu_click_ui: ## run click tests with UI testing
 	$(EMU_TEST) $(PYTEST) $(TESTPATH)/click_tests $(TESTOPTS) \
 		--ui=test --ui-check-missing --do-master-diff --lang=$(TEST_LANG)
 
+test_emu_click_ui_multicore: ## run click tests with UI testing using multiple cores
+	$(PYTEST) -n $(MULTICORE) $(TESTPATH)/click_tests $(TESTOPTS) --timeout $(PYTEST_TIMEOUT) \
+		--ui=test --ui-check-missing --do-master-diff --lang=$(TEST_LANG) \
+		--control-emulators --model=core --random-order-seed=$(RANDOM)
+
 test_emu_persistence: ## run persistence tests
 	$(PYTEST) $(TESTPATH)/persistence_tests $(TESTOPTS) --lang=$(TEST_LANG)
 
@@ -232,7 +247,7 @@ test_emu_ui_record: ## record and hash screens for ui integration tests
 
 test_emu_ui_record_multicore: ## quickly record all screens
 	make test_emu_ui_multicore || echo "All errors are recorded in fixtures.json"
-	../tests/update_fixtures.py local -r
+	../tests/update_fixtures.py local --remove-missing
 
 pylint: ## run pylint on application sources and tests
 	pylint -E $(shell find src tests -name *.py)
@@ -268,6 +283,16 @@ translations_check: ## check that translations are up to date
 	# spits out error if the stored merkle root is not up to date
 	python ./translations/cli.py merkle-root > /dev/null
 
+translations_crowdin_push: translations  ## split translations and push to crowdin
+	## prepare source files from joint `en.json` into split `en_<layout_type>.json`
+	cd translations; python crowdin.py split
+	cd translations; crowdin push sources
+
+translations_crowdin_pull: ## pull translations from crowdin
+	cd translations; crowdin pull --skip-untranslated-strings
+	# prepare joint `<lang>.json` from split `<lang>_<layout_type>.json`
+	cd translations; python crowdin.py merge
+
 ## build commands:
 
 build: build_boardloader build_bootloader build_firmware build_prodtest build_unix ## build all
@@ -292,33 +317,41 @@ build_bootloader_emu_debug: ## build the unix bootloader emulator
 build_prodtest: ## build production test firmware
 	$(SCONS) $(PRODTEST_BUILD_DIR)/prodtest.bin
 
-build_reflash: ## build reflash firmware + reflash image
-	$(SCONS) $(REFLASH_BUILD_DIR)/reflash.bin
-	dd if=build/boardloader/boardloader.bin of=$(REFLASH_BUILD_DIR)/sdimage.bin bs=1 seek=0
-	dd if=build/bootloader/bootloader.bin of=$(REFLASH_BUILD_DIR)/sdimage.bin bs=1 seek=49152
+build_prodtest_emu: ## build the unix prodtest emulator
+	$(SCONS) $(PRODTEST_EMU_BUILD_DIR)/prodtest.elf
+
+build_secmon: ## build security monitor image
+	$(SCONS) $(SECMON_BUILD_DIR)/secmon.bin
 
 build_kernel: ## build kernel image
 	$(SCONS) $(KERNEL_BUILD_DIR)/kernel.bin
 
-build_firmware: templates build_cross build_kernel ## build firmware with frozen modules
+build_firmware: MICROPY_ENABLE_SOURCE_LINE ?= 0
+build_firmware: templates build_cross $(if $(or $(filter 1,$(PRODUCTION)),$(filter 1,$(UNSAFE_FW))),,build_secmon) build_kernel ## build firmware with frozen modules
 	$(SCONS) $(FIRMWARE_BUILD_DIR)/firmware.bin
 
+build_unix: MICROPY_ENABLE_SOURCE_LINE ?= 1
 build_unix: templates ## build unix port
 	$(SCONS) PYOPT=0 $(UNIX_BUILD_DIR)/trezor-emu-core $(UNIX_PORT_OPTS)
 
+build_unix_frozen: MICROPY_ENABLE_SOURCE_LINE ?= 1
 build_unix_frozen: templates build_cross ## build unix port with frozen modules
 	$(SCONS) $(UNIX_BUILD_DIR)/trezor-emu-core $(UNIX_PORT_OPTS) TREZOR_EMULATOR_FROZEN=1
 
+build_unix_debug: MICROPY_ENABLE_SOURCE_LINE ?= 1
 build_unix_debug: templates ## build unix port
 	$(SCONS) --max-drift=1 $(UNIX_BUILD_DIR)/trezor-emu-core $(UNIX_PORT_OPTS) \
 		TREZOR_EMULATOR_ASAN=1 TREZOR_EMULATOR_DEBUGGABLE=1
 
 build_cross: ## build mpy-cross port
-	$(MAKE) -C vendor/micropython/mpy-cross $(CROSS_PORT_OPTS)
+	INC=-I$(CURDIR)/embed/upymod/mpycross_include/ \
+		$(MAKE) -C vendor/micropython/mpy-cross $(CROSS_PORT_OPTS) \
+		CFLAGS_EXTRA=-DMICROPY_ENABLE_SOURCE_LINE=$(MICROPY_ENABLE_SOURCE_LINE)
 
 ## clean commands:
 
-clean: clean_boardloader clean_bootloader clean_bootloader_emu clean_bootloader_ci clean_prodtest clean_reflash clean_firmware clean_unix clean_cross ## clean all
+clean: clean_boardloader clean_bootloader clean_bootloader_emu clean_bootloader_ci \
+	clean_prodtest clean_prodtest_emu clean_firmware clean_kernel clean_secmon clean_unix clean_cross ## clean all
 	rm -f ".sconsign.dblite"
 
 clean_boardloader: ## clean boardloader build
@@ -336,8 +369,11 @@ clean_bootloader_emu: ## clean bootloader_emu build
 clean_prodtest: ## clean prodtest build
 	rm -rf $(PRODTEST_BUILD_DIR)
 
-clean_reflash: ## clean reflash build
-	rm -rf $(REFLASH_BUILD_DIR)
+clean_prodtest_emu: ## clean prodtest_emu build
+	rm -rf $(PRODTEST_EMU_BUILD_DIR)
+
+clean_secmon: ## clean security monitor build
+	rm -rf $(SECMON_BUILD_DIR)
 
 clean_kernel: ## clean kernel build
 	rm -rf $(KERNEL_BUILD_DIR)
@@ -485,6 +521,12 @@ combine_fw: ## combine boardloader + bootloader + firmware into one combined ima
 		-b FIRMWARE $(FIRMWARE_BUILD_DIR)/firmware.bin
 endif
 
+combine_to_hex: ## convert combined image to hex format
+	arm-none-eabi-objcopy \
+		-I binary -O ihex \
+		--change-section-address .data=$(BOARDLOADER_START) \
+		$(PRODTEST_BUILD_DIR)/combined.bin $(PRODTEST_BUILD_DIR)/combined.hex
+
 upload: ## upload firmware using trezorctl
 	trezorctl firmware_update -s -f $(FIRMWARE_BUILD_DIR)/firmware.bin
 
@@ -493,6 +535,7 @@ upload_prodtest: ## upload prodtest using trezorctl
 
 coverage:  ## generate coverage report
 	./tools/coverage-report
+	./tools/coverage-annotate.py $(shell find . -name '.coverage*.json*') > htmlcov/hits.md
 
 unused:  ## find unused micropython code
 	vulture src src/_vulture_ignore.txt --exclude "messages.py,*/enums/*"

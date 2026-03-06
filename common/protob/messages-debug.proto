@@ -54,6 +54,18 @@ message DebugLinkDecision {
     optional bool wait = 6 [deprecated=true];          // wait for layout change
     optional uint32 hold_ms = 7;                       // touch hold duration
     optional DebugPhysicalButton physical_button = 8;  // physical button press
+
+    /**
+     * Explicit touch event type, used to separate TOUCH_START and TOUCH_END
+     * If not set, defaults to full click behavior (TOUCH_START + optional hold + TOUCH_END)
+     */
+    enum DebugTouchEventType {
+        TOUCH_FULL_CLICK = 0;
+        TOUCH_START = 1;
+        TOUCH_END = 2;
+    }
+
+    optional DebugTouchEventType touch_event_type = 9;
 }
 
 /**
@@ -85,7 +97,7 @@ message DebugLinkRecordScreen {
 }
 
 /**
- * Request: Computer asks for device state
+ * Request: Host asks for device state
  * @start
  * @next DebugLinkState
  */
@@ -132,6 +144,29 @@ message DebugLinkState {
     optional uint32 reset_word_pos = 11;                    // index of mnemonic word the device is expecting during ResetDevice workflow
     optional management.BackupType mnemonic_type = 12;      // current mnemonic type (BIP-39/SLIP-39)
     repeated string tokens = 13;                            // current layout represented as a list of string tokens
+}
+
+/**
+ * Request: Host asks for device pairing info
+ * @start
+ * @next DebugLinkPairingInfo
+ */
+ message DebugLinkGetPairingInfo {
+    optional bytes channel_id = 1;              // ID of the THP channel to get pairing info from
+    optional bytes handshake_hash = 2;          // handshake hash of the THP channel
+    optional bytes nfc_secret_host = 3;         // host's NFC secret (In case of NFC pairing)
+}
+
+ /**
+ * Response: Device pairing info
+ * @end
+ */
+ message DebugLinkPairingInfo {
+    optional bytes channel_id = 1;              // ID of the THP channel the pairing info is from
+    optional bytes handshake_hash = 2;          // handshake hash of the THP channel
+    optional uint32 code_entry_code = 3;        // CodeEntry pairing code
+    optional bytes code_qr_code = 4;            // QrCode pairing code
+    optional bytes nfc_secret_trezor = 5;       // NFC secret used in NFC pairing
 }
 
 /**
@@ -234,4 +269,38 @@ message DebugLinkResetDebugEvents {
  * @next Success
  */
 message DebugLinkOptigaSetSecMax {
+}
+
+
+/**
+ * Request: Get GC heap information.
+ * @start
+ * @next DebugLinkGcInfo
+ */
+message DebugLinkGetGcInfo {
+}
+
+/**
+ * Response: GC heap information details.
+ * @end
+ */
+message DebugLinkGcInfo {
+    repeated DebugLinkGcInfoItem items = 1;
+
+    /**
+    * Key-value pair.
+    */
+    message DebugLinkGcInfoItem {
+        required string name = 1;
+        required uint64 value = 2;
+    }
+}
+
+
+/**
+ * Request: Set logging filter string.
+ * @end
+ */
+message DebugLinkSetLogFilter {
+    optional string filter = 1;  // filter string
 }

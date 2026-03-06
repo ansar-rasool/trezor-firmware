@@ -24,6 +24,7 @@ trezor_message_impl! {
     BackupDevice => MessageType_BackupDevice,
     EntropyRequest => MessageType_EntropyRequest,
     EntropyAck => MessageType_EntropyAck,
+    PaymentRequest => MessageType_PaymentRequest,
     EntropyCheckReady => MessageType_EntropyCheckReady,
     EntropyCheckContinue => MessageType_EntropyCheckContinue,
     PassphraseRequest => MessageType_PassphraseRequest,
@@ -48,9 +49,11 @@ trezor_message_impl! {
     AuthenticateDevice => MessageType_AuthenticateDevice,
     AuthenticityProof => MessageType_AuthenticityProof,
     ChangeLanguage => MessageType_ChangeLanguage,
-    TranslationDataRequest => MessageType_TranslationDataRequest,
-    TranslationDataAck => MessageType_TranslationDataAck,
+    DataChunkRequest => MessageType_DataChunkRequest,
+    DataChunkAck => MessageType_DataChunkAck,
     SetBrightness => MessageType_SetBrightness,
+    GetSerialNumber => MessageType_GetSerialNumber,
+    SerialNumber => MessageType_SerialNumber,
     SetU2FCounter => MessageType_SetU2FCounter,
     GetNextU2FCounter => MessageType_GetNextU2FCounter,
     NextU2FCounter => MessageType_NextU2FCounter,
@@ -67,6 +70,7 @@ trezor_message_impl! {
     SignedIdentity => MessageType_SignedIdentity,
     GetECDHSessionKey => MessageType_GetECDHSessionKey,
     ECDHSessionKey => MessageType_ECDHSessionKey,
+    PaymentNotification => MessageType_PaymentNotification,
     DebugLinkDecision => MessageType_DebugLinkDecision,
     DebugLinkGetState => MessageType_DebugLinkGetState,
     DebugLinkState => MessageType_DebugLinkState,
@@ -83,24 +87,18 @@ trezor_message_impl! {
     DebugLinkWatchLayout => MessageType_DebugLinkWatchLayout,
     DebugLinkResetDebugEvents => MessageType_DebugLinkResetDebugEvents,
     DebugLinkOptigaSetSecMax => MessageType_DebugLinkOptigaSetSecMax,
+    DebugLinkGetGcInfo => MessageType_DebugLinkGetGcInfo,
+    DebugLinkGcInfo => MessageType_DebugLinkGcInfo,
+    DebugLinkGetPairingInfo => MessageType_DebugLinkGetPairingInfo,
+    DebugLinkPairingInfo => MessageType_DebugLinkPairingInfo,
+    DebugLinkSetLogFilter => MessageType_DebugLinkSetLogFilter,
+    ThpCreateNewSession => MessageType_ThpCreateNewSession,
+    ThpCredentialRequest => MessageType_ThpCredentialRequest,
+    ThpCredentialResponse => MessageType_ThpCredentialResponse,
     BenchmarkListNames => MessageType_BenchmarkListNames,
     BenchmarkNames => MessageType_BenchmarkNames,
     BenchmarkRun => MessageType_BenchmarkRun,
     BenchmarkResult => MessageType_BenchmarkResult,
-}
-
-#[cfg(feature = "binance")]
-trezor_message_impl! {
-    BinanceGetAddress => MessageType_BinanceGetAddress,
-    BinanceAddress => MessageType_BinanceAddress,
-    BinanceGetPublicKey => MessageType_BinanceGetPublicKey,
-    BinancePublicKey => MessageType_BinancePublicKey,
-    BinanceSignTx => MessageType_BinanceSignTx,
-    BinanceTxRequest => MessageType_BinanceTxRequest,
-    BinanceTransferMsg => MessageType_BinanceTransferMsg,
-    BinanceOrderMsg => MessageType_BinanceOrderMsg,
-    BinanceCancelMsg => MessageType_BinanceCancelMsg,
-    BinanceSignedTx => MessageType_BinanceSignedTx,
 }
 
 #[cfg(feature = "bitcoin")]
@@ -112,7 +110,6 @@ trezor_message_impl! {
     TxAck => MessageType_TxAck,
     GetAddress => MessageType_GetAddress,
     Address => MessageType_Address,
-    TxAckPaymentRequest => MessageType_TxAckPaymentRequest,
     SignMessage => MessageType_SignMessage,
     VerifyMessage => MessageType_VerifyMessage,
     MessageSignature => MessageType_MessageSignature,
@@ -154,6 +151,10 @@ trezor_message_impl! {
     CardanoTxInlineDatumChunk => MessageType_CardanoTxInlineDatumChunk,
     CardanoTxReferenceScriptChunk => MessageType_CardanoTxReferenceScriptChunk,
     CardanoTxReferenceInput => MessageType_CardanoTxReferenceInput,
+    CardanoSignMessageInit => MessageType_CardanoSignMessageInit,
+    CardanoMessageDataRequest => MessageType_CardanoMessageDataRequest,
+    CardanoMessageDataResponse => MessageType_CardanoMessageDataResponse,
+    CardanoMessageSignature => MessageType_CardanoMessageSignature,
 }
 
 #[cfg(feature = "eos")]
@@ -186,6 +187,16 @@ trezor_message_impl! {
     EthereumTypedDataValueAck => MessageType_EthereumTypedDataValueAck,
     EthereumTypedDataSignature => MessageType_EthereumTypedDataSignature,
     EthereumSignTypedHash => MessageType_EthereumSignTypedHash,
+}
+
+#[cfg(feature = "evolu")]
+trezor_message_impl! {
+    EvoluGetNode => MessageType_EvoluGetNode,
+    EvoluNode => MessageType_EvoluNode,
+    EvoluSignRegistrationRequest => MessageType_EvoluSignRegistrationRequest,
+    EvoluRegistrationRequest => MessageType_EvoluRegistrationRequest,
+    EvoluGetDelegatedIdentityKey => MessageType_EvoluGetDelegatedIdentityKey,
+    EvoluDelegatedIdentityKey => MessageType_EvoluDelegatedIdentityKey,
 }
 
 #[cfg(feature = "monero")]
@@ -295,6 +306,12 @@ trezor_message_impl! {
     TezosSignedTx => MessageType_TezosSignedTx,
     TezosGetPublicKey => MessageType_TezosGetPublicKey,
     TezosPublicKey => MessageType_TezosPublicKey,
+}
+
+#[cfg(feature = "tron")]
+trezor_message_impl! {
+    TronGetAddress => MessageType_TronGetAddress,
+    TronAddress => MessageType_TronAddress,
 }
 
 #[cfg(feature = "webauthn")]

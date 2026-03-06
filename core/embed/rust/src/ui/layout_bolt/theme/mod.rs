@@ -2,10 +2,13 @@ pub mod backlight;
 pub mod bootloader;
 
 use crate::{
-    time::Duration,
+    time::ShortDuration,
     ui::{
         component::{
-            text::{layout::Chunks, LineBreaking, PageBreaking, TextStyle},
+            text::{
+                layout::Chunks, paragraphs::PARAGRAPH_BOTTOM_SPACE, LineBreaking, PageBreaking,
+                TextStyle,
+            },
             FixedHeightBar,
         },
         display::Color,
@@ -19,7 +22,7 @@ use super::{
     fonts,
 };
 
-pub const ERASE_HOLD_DURATION: Duration = Duration::from_millis(1500);
+pub const ERASE_HOLD_DURATION: ShortDuration = ShortDuration::from_millis(1500);
 
 // Color palette.
 pub const WHITE: Color = Color::rgb(0xFF, 0xFF, 0xFF);
@@ -603,10 +606,12 @@ pub const TEXT_DEMIBOLD: TextStyle =
 pub const TEXT_BOLD: TextStyle =
     TextStyle::new(fonts::FONT_BOLD_UPPER, FG, BG, GREY_LIGHT, GREY_LIGHT);
 pub const TEXT_MONO: TextStyle = TextStyle::new(fonts::FONT_MONO, FG, BG, GREY_LIGHT, GREY_LIGHT)
-    .with_line_breaking(LineBreaking::BreakWordsNoHyphen)
+    .with_line_breaking(LineBreaking::BreakAtWhitespace)
     .with_page_breaking(PageBreaking::CutAndInsertEllipsisBoth)
     .with_ellipsis_icon(ICON_PAGE_NEXT, 0)
     .with_prev_page_icon(ICON_PAGE_PREV, 0);
+pub const TEXT_MONO_DATA: TextStyle =
+    TEXT_MONO.with_line_breaking(LineBreaking::BreakWordsNoHyphen);
 pub const TEXT_MONO_WITH_CLASSIC_ELLIPSIS: TextStyle =
     TextStyle::new(fonts::FONT_MONO, FG, BG, GREY_LIGHT, GREY_LIGHT)
         .with_line_breaking(LineBreaking::BreakWordsNoHyphen)
@@ -614,13 +619,13 @@ pub const TEXT_MONO_WITH_CLASSIC_ELLIPSIS: TextStyle =
         .with_prev_page_icon(ICON_PAGE_PREV, 0);
 /// Makes sure that the displayed text (usually address) will get divided into
 /// smaller chunks.
-pub const TEXT_MONO_ADDRESS_CHUNKS: TextStyle = TEXT_MONO
+pub const TEXT_MONO_ADDRESS_CHUNKS: TextStyle = TEXT_MONO_DATA
     .with_chunks(Chunks::new(4, 9))
     .with_line_spacing(5);
 /// Smaller horizontal chunk offset, used e.g. for long Cardano addresses.
 /// Also moving the next page ellipsis to the left (as there is a space on the
 /// left). Last but not least, maximum number of rows is 4 in this case.
-pub const TEXT_MONO_ADDRESS_CHUNKS_SMALLER_X_OFFSET: TextStyle = TEXT_MONO
+pub const TEXT_MONO_ADDRESS_CHUNKS_SMALLER_X_OFFSET: TextStyle = TEXT_MONO_DATA
     .with_chunks(Chunks::new(4, 7).with_max_rows(4))
     .with_line_spacing(5)
     .with_ellipsis_icon(ICON_PAGE_NEXT, -12);
@@ -661,6 +666,13 @@ pub const MNEMONIC_BUTTON_HEIGHT: i16 = 52;
 pub const RESULT_PADDING: i16 = 6;
 pub const RESULT_FOOTER_START: i16 = 171;
 pub const RESULT_FOOTER_HEIGHT: i16 = 62;
+
+// props settings
+pub const PROP_INNER_SPACING: i16 = PARAGRAPH_BOTTOM_SPACE;
+pub const PROPS_SPACING: i16 = PARAGRAPH_BOTTOM_SPACE;
+pub const PROPS_KEY_FONT: TextStyle = TEXT_NORMAL;
+pub const PROPS_VALUE_FONT: TextStyle = TEXT_MONO;
+pub const PROPS_VALUE_MONO_FONT: TextStyle = TEXT_MONO_DATA;
 
 // checklist settings
 pub const CHECKLIST_CHECK_WIDTH: i16 = 16;

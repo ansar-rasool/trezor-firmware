@@ -21,10 +21,11 @@ def format_amount(amount: int, decimals: int) -> str:
     return s
 
 
-def format_ordinal(number: int) -> str:
-    return str(number) + {1: "st", 2: "nd", 3: "rd"}.get(
-        4 if 10 <= number % 100 < 20 else number % 10, "th"
-    )
+def format_amount_unit(amount: str, unit: str) -> str:
+    """
+    Formats an amount and a unit.
+    """
+    return f"{amount} {unit}"
 
 
 def format_plural_english(string: str, count: int, plural: str) -> str:
@@ -119,3 +120,43 @@ def format_timestamp(timestamp: int) -> str:
     # that is used internally.
     d = utime.gmtime2000(timestamp - _SECONDS_1970_TO_2000)
     return f"{d[0]}-{d[1]:02d}-{d[2]:02d} {d[3]:02d}:{d[4]:02d}:{d[5]:02d}"
+
+
+def format_autolock_duration(auto_lock_ms: int) -> str:
+    """
+    Determine appropriate unit and count for auto-lock delay.
+    """
+    from . import TR
+
+    MS = 1000
+    MIN = MS * 60
+    HOUR = MIN * 60
+    DAY = HOUR * 24
+
+    if auto_lock_ms >= DAY:
+        auto_lock_num = auto_lock_ms // DAY
+        auto_lock_label = TR.plurals__lock_after_x_days
+    elif auto_lock_ms >= HOUR:
+        auto_lock_num = auto_lock_ms // HOUR
+        auto_lock_label = TR.plurals__lock_after_x_hours
+    elif auto_lock_ms >= MIN:
+        auto_lock_num = auto_lock_ms // MIN
+        auto_lock_label = TR.plurals__lock_after_x_minutes
+    else:
+        auto_lock_num = auto_lock_ms // MS
+        auto_lock_label = TR.plurals__lock_after_x_seconds
+
+    return format_plural("{count} {plural}", auto_lock_num, auto_lock_label)
+
+
+def trim_str(s: str, max_bytes: int) -> str:
+    """
+    Trim a string, so the result's byte size will be less or equal to `max_bytes`.
+    """
+    assert max_bytes >= 0
+    for i, char in enumerate(s):
+        char_size = len(char.encode())
+        if max_bytes < char_size:
+            return s[:i]
+        max_bytes -= char_size
+    return s

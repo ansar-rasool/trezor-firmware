@@ -22,11 +22,13 @@
 #include <trezor_bsp.h>
 #include <trezor_rtl.h>
 
+#include <sys/applet.h>
 #include <sys/bootutils.h>
 #include <sys/irq.h>
 #include <sys/linker_utils.h>
 #include <sys/mpu.h>
 #include <sys/syscall.h>
+#include <sys/syscall_ipc.h>
 #include <sys/sysevent_source.h>
 #include <sys/systask.h>
 #include <sys/system.h>
@@ -56,6 +58,7 @@ typedef struct {
   systask_t* waiting_task;
   // Bitmap of used task IDs
   uint32_t task_id_map;
+
 } systask_scheduler_t;
 
 // Global task manager state
@@ -68,6 +71,8 @@ static systask_scheduler_t g_systask_scheduler = {
     .kernel_task = {
         .sp_lim = (uint32_t)&_stack_section_start,
         .id = 0,  // Kernel task ID == 0
+        .stack_base = (uint32_t)&_stack_section_start,
+        .stack_end = (uint32_t)&_stack_section_end,
     }};
 
 void systask_scheduler_init(systask_error_handler_t error_handler) {
@@ -81,6 +86,8 @@ void systask_scheduler_init(systask_error_handler_t error_handler) {
   scheduler->task_id_map = 0x00000001;  // Kernel task is always present
 
   scheduler->kernel_task.sp_lim = (uint32_t)&_stack_section_start;
+  scheduler->kernel_task.stack_base = (uint32_t)&_stack_section_start;
+  scheduler->kernel_task.stack_end = (uint32_t)&_stack_section_end;
 
   // SVCall priority should be the lowest since it is
   // generally a blocking operation
@@ -89,6 +96,17 @@ void systask_scheduler_init(systask_error_handler_t error_handler) {
 
   // Enable BusFault and UsageFault handlers
   SCB->SHCSR |= (SCB_SHCSR_USGFAULTENA_Msk | SCB_SHCSR_BUSFAULTENA_Msk);
+
+#if defined(__ARM_FEATURE_CMSE) && (__ARM_FEATURE_CMSE == 3U)
+  // Enable SecureFault handler
+  SCB->SHCSR |= SCB_SHCSR_SECUREFAULTENA_Msk;
+#endif
+}
+
+void systask_enable_tls(systask_t* task, mpu_area_t tls) {
+  ensure((tls.size <= sizeof(task->tls_copy)) * sectrue, "TLS area too large");
+  task->tls_addr = (void*)tls.start;
+  task->tls_size = tls.size;
 }
 
 systask_t* systask_active(void) {
@@ -130,29 +148,38 @@ void systask_yield_to(systask_t* task) {
 }
 
 static systask_id_t systask_get_unused_id(void) {
+  systask_scheduler_t* scheduler = &g_systask_scheduler;
   systask_id_t id = 0;
   while (++id < SYSTASK_MAX_TASKS) {
-    if ((g_systask_scheduler.task_id_map & (1 << id)) == 0) {
+    if ((scheduler->task_id_map & (1 << id)) == 0) {
+      scheduler->task_id_map |= (1 << id);
       break;
     }
   }
   return id;
 }
 
-bool systask_init(systask_t* task, uint32_t stack_ptr, uint32_t stack_size,
-                  void* applet) {
+bool systask_init(systask_t* task, uint32_t stack_base, uint32_t stack_size,
+                  uint32_t sb_addr, void* applet) {
   systask_id_t id = systask_get_unused_id();
   if (id >= SYSTASK_MAX_TASKS) {
     return false;
   }
 
   memset(task, 0, sizeof(systask_t));
-  task->sp = stack_ptr + stack_size;
-  task->sp_lim = stack_ptr + 256;
-  task->exc_return = 0xFFFFFFED;  // Thread mode, use PSP, pop FP context
+  task->sp = stack_base + stack_size;
+  task->sp_lim = stack_size > 1024 ? stack_base + 256 : stack_base;
+#if !defined(__ARM_FEATURE_CMSE) || (__ARM_FEATURE_CMSE == 3U)
+  task->exc_return = 0xFFFFFFED;  // Secure Thread mode, use PSP, pop FP context
+#else
+  task->exc_return = 0xFFFFFFAC;  // Thread mode, use PSP, pop FP context
+#endif
   task->id = id;
   task->mpu_mode = MPU_MODE_APP;
+  task->stack_base = stack_base;
+  task->stack_end = stack_base + stack_size;
   task->applet = applet;
+  task->sb_addr = sb_addr;
 
   // Notify all event sources about the task creation
   sysevents_notify_task_created(task);
@@ -190,6 +217,13 @@ void systask_pop_data(systask_t* task, size_t size) { task->sp += size; }
 
 bool systask_push_call(systask_t* task, void* entrypoint, uint32_t arg1,
                        uint32_t arg2, uint32_t arg3) {
+#ifdef KERNEL
+  if (task->applet != NULL) {
+    applet_t* applet = (applet_t*)task->applet;
+    mpu_set_active_applet(&applet->layout);
+  }
+#endif
+
   uint32_t original_sp = task->sp;
 
   // Align stack pointer to 8 bytes
@@ -207,16 +241,23 @@ bool systask_push_call(systask_t* task, void* entrypoint, uint32_t arg1,
   }
 
   // Registers r4-r11
-  if (systask_push_data(task, NULL, 0x20) == NULL) {
+  uint32_t regs[8] = {0};
+  regs[9 - 4] = task->sb_addr;  // r9 = Static base address
+  if (systask_push_data(task, regs, 0x20) == NULL) {
     goto cleanup;
   }
+
   // Registers s16-s31
   if (systask_push_data(task, NULL, 0x40) == NULL) {
     goto cleanup;
   }
 
   // Return to thread mode, use PSP, pop FP context
+#if !defined(__ARM_FEATURE_CMSE) || (__ARM_FEATURE_CMSE == 3U)
   task->exc_return = 0xFFFFFFED;
+#else
+  task->exc_return = 0xFFFFFFAC;
+#endif
 
   stk_frame[STK_FRAME_R0] = arg1;
   stk_frame[STK_FRAME_R1] = arg2;
@@ -229,6 +270,69 @@ bool systask_push_call(systask_t* task, void* entrypoint, uint32_t arg1,
 cleanup:
   task->sp = original_sp;
   return false;
+}
+
+uint32_t systask_invoke_callback(systask_t* task, uint32_t arg1, uint32_t arg2,
+                                 uint32_t arg3, void* callback) {
+  uint32_t original_sp = task->sp;
+  if (!systask_push_call(task, callback, arg1, arg2, arg3)) {
+    // There is not enough space on the unprivileged stack
+    error_shutdown("Callback stack low");
+  }
+
+  // This flag signals that the task is currently executing a callback.
+  // Is reset by proper return from the callback via
+  // return_from_unprivileged_callback() function.
+  task->in_callback = true;
+
+  systask_yield_to(task);
+
+  if (task->killed) {
+    // Task was killed while executing the callback
+    error_shutdown("Callback crashed");
+  }
+
+  if (task->in_callback) {
+    // Unprivileged stack pointer contains unexpected value.
+    // This is likely a sign of a unexpected task switch during the
+    // callback execution (e.g. by a system call).
+    error_shutdown("Callback invalid op");
+  }
+
+  uint32_t retval = systask_get_r0(task);
+
+  task->sp = original_sp;
+  return retval;
+}
+
+void systask_set_r0r1(systask_t* task, uint32_t r0, uint32_t r1) {
+  uint32_t* stack = (uint32_t*)task->sp;
+
+  if ((task->exc_return & 0x10) == 0) {
+    stack += 16;  // Skip the FP context S16-S32
+    stack += 8;   // Skip R4-R11
+  }
+
+#ifdef KERNEL
+  if (task->applet != NULL) {
+    applet_t* applet = (applet_t*)task->applet;
+    mpu_set_active_applet(&applet->layout);
+  }
+#endif
+
+  stack[STK_FRAME_R0] = r0;
+  stack[STK_FRAME_R1] = r1;
+}
+
+uint32_t systask_get_r0(systask_t* task) {
+  uint32_t* stack = (uint32_t*)task->sp;
+
+  if ((task->exc_return & 0x10) == 0) {
+    stack += 16;  // Skip the FP context S16-S32
+    stack += 8;   // Skip R4-R11
+  }
+
+  return stack[STK_FRAME_R0];
 }
 
 static void systask_kill(systask_t* task) {
@@ -340,10 +444,67 @@ void systask_exit_fatal(systask_t* task, const char* message,
   systask_kill(task);
 }
 
+static uint32_t get_return_addr(bool secure, bool privileged, uint32_t sp) {
+  // Ensure the stack pointer is aligned to 8 bytes (required for a
+  // valid exception frame). If it isn’t aligned, we can’t reliably index
+  // into the stacked registers.
+  if (!IS_ALIGNED(sp, 8)) {
+    return 0;
+  }
+
+  // Get the pointer to thte return address in the stack frame.
+  uint32_t* ret_addr = &((uint32_t*)sp)[STK_FRAME_RET_ADDR];
+
+  // Verify that ret_addr is in a readable region for
+  // the context that caused the exception.
+#ifdef SECMON
+  // In Secure-Monitor mode, use CMSE intrinsics to check:
+  // - CMSE_MPU_READ indicates we only need read access
+  // - CMSE_MPU_UNPRIV if the fault originated from an unprivileged context
+  // - CMSE_NONSECURE if the fault originated from Non-Secure state
+  uint32_t flags = CMSE_MPU_READ;
+  if (!privileged) {
+    flags |= CMSE_MPU_UNPRIV;
+  }
+  if (!secure) {
+    flags |= CMSE_NONSECURE;
+  }
+  if (!cmse_check_address_range(ret_addr, sizeof(uint32_t), flags)) {
+    return 0;
+  }
+#else
+  systask_scheduler_t* sched = &g_systask_scheduler;
+  systask_t* task = privileged ? &sched->kernel_task : sched->active_task;
+
+  // Check if the pointer is inside the current task’s stack boundaries.
+  if (ret_addr < (uint32_t*)task->stack_base ||
+      ret_addr >= (uint32_t*)(task->stack_end)) {
+    return 0;
+  }
+#endif
+
+  return *ret_addr;
+}
+
 // Terminate active task from fault/exception handler
-__attribute((used)) static void systask_exit_fault(bool privileged,
-                                                   uint32_t sp) {
+__attribute((used)) static void systask_exit_fault(uint32_t msp,
+                                                   uint32_t exc_return) {
   mpu_mode_t mpu_mode = mpu_reconfig(MPU_MODE_DEFAULT);
+
+  bool privileged = (exc_return & 0x4) == 0;
+  uint32_t sp = privileged ? msp : __get_PSP();
+
+#if defined(__ARM_FEATURE_CMSE) && (__ARM_FEATURE_CMSE == 3U)
+  bool secure = (exc_return & 0x40) != 0;
+  if (!secure) {
+    bool handler_mode = (exc_return & 0x8) == 0;
+    bool msp_used = (__TZ_get_CONTROL_NS() & CONTROL_SPSEL_Msk) == 0;
+    privileged = handler_mode || msp_used;
+    sp = privileged ? __TZ_get_MSP_NS() : __TZ_get_PSP_NS();
+  }
+#else
+  bool secure = false;
+#endif
 
   systask_scheduler_t* scheduler = &g_systask_scheduler;
 
@@ -358,6 +519,7 @@ __attribute((used)) static void systask_exit_fault(bool privileged,
   if (pminfo->reason != TASK_TERM_REASON_FAULT) {
     pminfo->reason = TASK_TERM_REASON_FAULT;
     pminfo->privileged = privileged;
+    pminfo->fault.pc = get_return_addr(secure, privileged, sp);
     pminfo->fault.sp = sp;
 #if !(defined(__ARM_ARCH_8M_MAIN__) || defined(__ARM_ARCH_8M_BASE__))
     pminfo->fault.sp_lim = task->sp_lim;
@@ -367,6 +529,15 @@ __attribute((used)) static void systask_exit_fault(bool privileged,
     pminfo->fault.mmfar = SCB->MMFAR;
     pminfo->fault.bfar = SCB->BFAR;
     pminfo->fault.hfsr = SCB->HFSR;
+#if defined(__ARM_FEATURE_CMSE)
+#if (__ARM_FEATURE_CMSE == 3U)
+    pminfo->fault.sfsr = SAU->SFSR;
+    pminfo->fault.sfar = SAU->SFAR;
+#else
+    pminfo->fault.sfsr = 0;
+    pminfo->fault.sfar = 0;
+#endif
+#endif
   }
 
   systask_kill(task);
@@ -397,6 +568,18 @@ __attribute((no_stack_protector, used)) static uint32_t scheduler_pendsv(
   prev_task->exc_return = exc_return;
   prev_task->mpu_mode = mpu_get_mode();
 
+  if (prev_task->tls_size != 0) {
+#ifdef KERNEL
+    if (prev_task->applet != NULL) {
+      applet_t* applet = (applet_t*)prev_task->applet;
+      mpu_set_active_applet(&applet->layout);
+    }
+#endif
+
+    // Save the TLS of the previous task
+    memcpy(prev_task->tls_copy, prev_task->tls_addr, prev_task->tls_size);
+  }
+
   // Switch to the next task
   scheduler->active_task = scheduler->waiting_task;
 
@@ -414,6 +597,18 @@ __attribute((no_stack_protector, used)) static uint32_t scheduler_pendsv(
 
   // Setup the MPU for the new task
   mpu_reconfig(next_task->mpu_mode);
+
+#ifdef KERNEL
+  if (next_task->applet != NULL) {
+    applet_t* applet = (applet_t*)next_task->applet;
+    mpu_set_active_applet(&applet->layout);
+  }
+
+  if (next_task->tls_size != 0) {
+    // Restore the TLS of the next task
+    memcpy(next_task->tls_addr, next_task->tls_copy, next_task->tls_size);
+  }
+#endif
 
   IRQ_LOG_EXIT();
 
@@ -516,10 +711,6 @@ __attribute__((no_stack_protector, used)) static uint32_t svc_handler(
 
   uint8_t svc_number = ((uint8_t*)stack[6])[-2];
 
-#ifdef SYSCALL_DISPATCH
-  uint32_t args[6] = {stack[0], stack[1], stack[2], stack[3], r4, r5};
-#endif
-
   mpu_mode_t mpu_mode = mpu_reconfig(MPU_MODE_DEFAULT);
 
   switch (svc_number) {
@@ -527,17 +718,16 @@ __attribute__((no_stack_protector, used)) static uint32_t svc_handler(
       // Yield to the waiting task
       systask_yield();
       break;
-#ifdef SYSCALL_DISPATCH
+#ifdef KERNEL
     case SVC_SYSCALL:
-      syscall_handler(args, r6);
-      stack[0] = args[0];
-      stack[1] = args[1];
-      break;
-    case SVC_CALLBACK_RETURN:
-      // g_return_value = args[0]
-      // exc_return = return_from_callback;
-      mpu_restore(mpu_mode);
-      return_from_app_callback(args[0], msp);
+      uint32_t args[6] = {stack[0], stack[1], stack[2], stack[3], r4, r5};
+      if ((r6 & SYSCALL_THREAD_MODE) != 0) {
+        syscall_ipc_enqueue(args, r6);
+      } else {
+        syscall_handler(args, r6, systask_active()->applet);
+        stack[0] = args[0];
+        stack[1] = args[1];
+      }
       break;
 #endif
     default:
@@ -576,29 +766,25 @@ __attribute__((naked, no_stack_protector)) void HardFault_Handler(void) {
   // we set the stack pointer to the end of the stack.
 
   __asm__ volatile(
-      "MRS      R1, MSP               \n"  // R1 = MSP
-      "LDR      R0, =%[estack]        \n"  // Reset main stack
-      "MSR      MSP, R0               \n"  //
-      "MOV      R0, #1                \n"  // R0 = 1 (Privileged)
+      "MRS      R0, MSP               \n"  // R0 = MSP
+      "LDR      R1, =%[estack]        \n"  // Reset main stack
+      "MSR      MSP, R1               \n"  //
+      "MOV      R1, LR                \n"  // R1 = EXC_RETURN code
       "B        systask_exit_fault    \n"  // Exit task with fault
       :
       : [estack] "i"(&_stack_section_end)
-      : "memory");
+      :);
 }
 
 __attribute__((naked, no_stack_protector)) void MemManage_Handler(void) {
   __asm__ volatile(
-      "TST      LR, #0x4              \n"  // Return stack (1=>PSP, 0=>MSP)
-      "ITTEE    EQ                    \n"
-      "MOVEQ    R0, #1                \n"  // R0 = 1 (Privileged)
-      "MRSEQ    R1, MSP               \n"  // R1 = MSP
-      "MOVNE    R0, #0                \n"  // R0 = 0 (Unprivileged)
-      "MRSNE    R1, PSP               \n"  // R1 = PSP
+      "MRS      R0, MSP               \n"  // R0 = MSP
+      "MOV      R1, LR                \n"  // R1 = EXC_RETURN code
 #if !(defined(__ARM_ARCH_8M_MAIN__) || defined(__ARM_ARCH_8M_BASE__))
-      "CMP      R0, #0                \n"
+      "TST      LR, #0x4              \n"  // Return stack (1=>PSP, 0=>MSP)
       "BEQ      1f                    \n"  // Skip stack ptr checking for PSP
       "LDR      R2, =%[sstack]        \n"
-      "CMP      R1, R2                \n"  // Check if PSP is below the stack
+      "CMP      R0, R2                \n"  // Check if PSP is below the stack
       "ITT      LO                    \n"  // base
       "LDRLO    R2, =%[estack]        \n"
       "MSRLO    MSP, R2               \n"  // Reset MSP
@@ -609,73 +795,108 @@ __attribute__((naked, no_stack_protector)) void MemManage_Handler(void) {
       : [estack] "i"(&_stack_section_end), [sstack] "i"(
                                                (uint32_t)&_stack_section_start +
                                                256)
-      : "memory");
+      :);
 }
 
 __attribute__((naked, no_stack_protector)) void BusFault_Handler(void) {
   __asm__ volatile(
-      "TST      LR, #0x4              \n"  // Return stack (1=>PSP, 0=>MSP)
-      "ITTEE    EQ                    \n"
-      "MOVEQ    R0, #1                \n"  // R0 = 1 (Privileged)
-      "MRSEQ    R1, MSP               \n"  // R1 = MSP
-      "MOVNE    R0, #0                \n"  // R0 = 0 (Unprivileged)
-      "MRSNE    R1, PSP               \n"  // R1 = PSP
+      "MRS      R0, MSP               \n"  // R0 = MSP
+      "MOV      R1, LR                \n"  // R1 = EXC_RETURN code
       "B        systask_exit_fault    \n"  // Exit task with fault
   );
 }
 
 __attribute__((naked, no_stack_protector)) void UsageFault_Handler(void) {
   __asm__ volatile(
+      "MRS      R0, MSP               \n"  // R0 = MSP
+      "MOV      R1, LR                \n"  // R1 = EXC_RETURN code
       "TST      LR, #0x4              \n"  // Return stack (1=>PSP, 0=>MSP)
-      "ITTT     NE                    \n"
-      "MOVNE    R0, #0                \n"  // R0 = 0 (Unprivileged)
-      "MRSNE    R1, PSP               \n"  // R1 = PSP
       "BNE      systask_exit_fault    \n"  // Exit task with fault
+
 #if defined(__ARM_ARCH_8M_MAIN__) || defined(__ARM_ARCH_8M_BASE__)
-      "MRS      R1, MSP               \n"  // R1 = MSP
-      "LDR      R0, =0xE000ED28       \n"  // SCB->CFSR
-      "LDR      R0, [R0]              \n"
-      "TST      R0, #0x100000         \n"  // STKOF bit set?
+      "LDR      R2, =0xE000ED28       \n"  // SCB->CFSR
+      "LDR      R2, [R2]              \n"
+      "TST      R2, #0x100000         \n"  // STKOF bit set?
       "ITT      NE                    \n"
-      "LDRNE    R0, =%[estack]        \n"  // Reset main stack in case of stack
-      "MSRNE    MSP, R0               \n"  // overflow
+      "LDRNE    R2, =%[estack]        \n"  // Reset main stack in case of stack
+      "MSRNE    MSP, R2               \n"  // overflow
 #endif
-      "MOV      R0, #1                \n"  // R0 = 1 (Privileged)
       "B        systask_exit_fault    \n"  // Exit task with fault
       :
       : [estack] "i"(&_stack_section_end)
-      : "memory");
+      :);
 }
 
 #if defined(__ARM_ARCH_8M_MAIN__) || defined(__ARM_ARCH_8M_BASE__)
 __attribute__((naked, no_stack_protector)) void SecureFault_Handler(void) {
   __asm__ volatile(
-      "TST      LR, #0x4              \n"  // Return stack (1=>PSP, 0=>MSP)
-      "ITTEE    EQ                    \n"
-      "MOVEQ    R0, #1                \n"  // R0 = 1 (Privileged)
-      "MRSEQ    R1, MSP               \n"  // R1 = MSP
-      "MOVNE    R0, #0                \n"  // R0 = 0 (Unprivileged)
-      "MRSNE    R1, PSP               \n"  // R1 = PSP
+      "MRS      R0, MSP               \n"  // R0 = MSP
+      "MOV      R1, LR                \n"  // R1 = EXC_RETURN code
       "B        systask_exit_fault    \n"  // Exit task with fault
   );
 }
 #endif
 
 #ifdef STM32U5
-void GTZC_IRQHandler(void) { systask_exit_fault(true, __get_MSP()); }
+__attribute__((naked, no_stack_protector)) void GTZC_IRQHandler(void) {
+  __asm__ volatile(
+      "MRS      R0, MSP               \n"  // R0 = MSP
+      "MOV      R1, LR                \n"  // R1 = EXC_RETURN code
+      "B        systask_exit_fault    \n"  // Exit task with fault
+  );
+}
 #endif
 
-void NMI_Handler(void) {
+__attribute__((no_stack_protector, used)) static void nmi_handler(void) {
   mpu_mode_t mpu_mode = mpu_reconfig(MPU_MODE_DEFAULT);
 #ifdef STM32U5
   if ((RCC->CIFR & RCC_CIFR_CSSF) != 0) {
+    RCC->CICR = RCC_CICR_CSSC;
 #else
   if ((RCC->CIR & RCC_CIR_CSSF) != 0) {
+    RCC->CIR = RCC_CIR_CSSC;
 #endif
     // Clock Security System triggered NMI
     systask_exit_fault(true, __get_MSP());
   }
+#ifdef STM32U5
+  else if (FLASH->ECCR & FLASH_ECCR_ECCD_Msk) {
+    // FLASH ECC double error
+    uint32_t addr = FLASH->ECCR & FLASH_ECCR_ADDR_ECC_Msk;
+    uint32_t bankid =
+        (FLASH->ECCR & FLASH_ECCR_BK_ECC_Msk) >> FLASH_ECCR_BK_ECC_Pos;
+#if defined(BOARDLOADER)
+    // In boardloader, this is a fatal error only if the address
+    // is in the bootloader code region.
+    if (bankid == 0 && addr >= BOARDLOADER_START &&
+        addr < BOARDLOADER_START + BOARDLOADER_MAXSIZE) {
+      systask_exit_fault(false, __get_MSP());
+    }
+#elif defined(BOOTLOADER)
+    // In bootloader, this is a fatal error only if the address
+    // is in the bootloader code region.
+    if (bankid == 0 && addr >= BOOTLOADER_START &&
+        addr < BOOTLOADER_START + BOOTLOADER_MAXSIZE) {
+      systask_exit_fault(false, __get_MSP());
+    }
+#else
+    (void)addr;
+    (void)bankid;
+    // In application/prodtest this is a fatal error
+    systask_exit_fault(false, __get_MSP());
+#endif
+  }
+#endif  // STM32U5
+
   mpu_restore(mpu_mode);
+}
+
+__attribute__((no_stack_protector)) void NMI_Handler(void) {
+  __asm__ volatile(
+      "MRS      R0, MSP               \n"  // R0 = MSP
+      "MOV      R1, LR                \n"  // R1 = EXC_RETURN code
+      "B        nmi_handler           \n"  // nmi_handler in C
+  );
 }
 
 void Default_IRQHandler(void) { error_shutdown("Unhandled IRQ"); }

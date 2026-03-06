@@ -17,11 +17,12 @@ from typing import TYPE_CHECKING
 
 from storage import cache
 from storage.cache_common import SESSIONLESS_FLAG
-from trezor import loop, protobuf
+from trezor import loop, protobuf, utils
 
 from .protocol_common import Context, Message
 
 if TYPE_CHECKING:
+    from buffer_types import AnyBytes
     from typing import Any, Callable, Coroutine, Generator, TypeVar, overload
 
     from storage.cache_common import DataCache
@@ -40,11 +41,17 @@ class UnexpectedMessageException(Exception):
 
     Utility exception to inform the session handler that the current workflow
     should be aborted and a new one started as if `msg` was the first message.
+
+    If `msg` is `None`, the event loop should be restarted.
     """
 
-    def __init__(self, msg: Message) -> None:
+    def __init__(self, msg: Message | None) -> None:
         super().__init__()
         self.msg = msg
+
+
+class NoWireContext(RuntimeError):
+    pass
 
 
 CURRENT_CONTEXT: Context | None = None
@@ -58,7 +65,7 @@ async def call(
 
     Raises if there is no context for this workflow."""
     if CURRENT_CONTEXT is None:
-        raise RuntimeError("No wire context")
+        raise NoWireContext
 
     return await CURRENT_CONTEXT.call(msg, expected_type)
 
@@ -72,7 +79,7 @@ async def call_any(
 
     Raises if there is no context for this workflow."""
     if CURRENT_CONTEXT is None:
-        raise RuntimeError("No wire context")
+        raise NoWireContext
 
     await CURRENT_CONTEXT.write(msg)
     del msg
@@ -101,9 +108,11 @@ def get_context() -> Context:
 
     Result of this function should not be stored -- the context is technically allowed
     to change inbetween any `await` statements.
+
+    Raises KeyError if there is currently no context.
     """
     if CURRENT_CONTEXT is None:
-        raise RuntimeError("No wire context")
+        raise NoWireContext
     return CURRENT_CONTEXT
 
 
@@ -136,6 +145,20 @@ def with_context(ctx: Context, workflow: loop.Task) -> Generator:
             send_exc = e
         else:
             send_exc = None
+
+
+def try_get_ctx_ids() -> tuple[AnyBytes, AnyBytes] | None:
+    ids = None
+    if utils.USE_THP:
+        from trezor.wire.thp.session_context import GenericSessionContext
+
+        try:
+            ctx = get_context()
+        except NoWireContext:
+            return None
+        if isinstance(ctx, GenericSessionContext):
+            ids = (ctx.channel_id, ctx.session_id.to_bytes(1, "big"))
+    return ids
 
 
 # ACCESS TO CACHE
@@ -176,7 +199,7 @@ def cache_is_set(key: int) -> bool:
     return cache.is_set(key)
 
 
-def cache_set(key: int, value: bytes) -> None:
+def cache_set(key: int, value: AnyBytes) -> None:
     cache = _get_cache_for_key(key)
     cache.set(key, value)
 
@@ -199,6 +222,6 @@ def cache_delete(key: int) -> None:
 def _get_cache_for_key(key: int) -> DataCache:
     if key & SESSIONLESS_FLAG:
         return cache.get_sessionless_cache()
-    if CURRENT_CONTEXT:
-        return CURRENT_CONTEXT.cache
-    raise Exception("No wire context")
+    if CURRENT_CONTEXT is None:
+        raise NoWireContext
+    return CURRENT_CONTEXT.cache

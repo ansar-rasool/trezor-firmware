@@ -44,6 +44,14 @@ typedef struct {
   uint32_t mmfar;
   // Address associated with the BusFault
   uint32_t bfar;
+#if defined(__ARM_FEATURE_CMSE)
+  // Secure Fault Status Register
+  uint32_t sfsr;
+  // Address associated with the SecureFault
+  uint32_t sfar;
+#endif
+  // PC (return address) at the time of the fault
+  uint32_t pc;
   // Stack pointer at the time of the fault
   // (MSP or PSP depending on the privilege level)
   uint32_t sp;
@@ -72,7 +80,7 @@ typedef struct {
 
     // Arguments passed to `systask_exit_fatal()`
     struct {
-      uint32_t line;
+      int32_t line;
       char file[64];
       char expr[64];
     } fatal;
@@ -97,6 +105,8 @@ typedef void (*systask_error_handler_t)(const systask_postmortem_t* pminfo);
 #ifdef KERNEL_MODE
 
 // Maximum number of tasks that can be created
+// 1. kernel
+// 2. coreapp
 #define SYSTASK_MAX_TASKS 2
 
 // Zero-based task ID (up SYSTASK_MAX_TASKS - 1)
@@ -125,6 +135,25 @@ typedef struct {
   // Applet bound to the task
   void* applet;
 
+  // Original stack base
+  uint32_t stack_base;
+  // Original stack end
+  uint32_t stack_end;
+
+  // Static base (SB) address of RW segment
+  // used with dynamically linked apps, otherwise set to 0.
+  uint32_t sb_addr;
+
+  // Address of the global TLS area
+  void* tls_addr;
+  // Number of bytes used in the TLS area
+  size_t tls_size;
+  // TLS copy if the task is inactive
+  uint32_t tls_copy[20];
+
+  // Set if the task is processing the kernel callback
+  bool in_callback;
+
 } systask_t;
 
 // Initializes the scheduler for tasks
@@ -138,14 +167,20 @@ systask_t* systask_active(void);
 // Returns the kernel task
 systask_t* systask_kernel(void);
 
+// Enables automatics restoring of TLS area
+//
+// When task is deactivated, the tls area is automatically stored in the
+// `task->tls_copy` array and restored when the task is activated again.
+void systask_enable_tls(systask_t* task, mpu_area_t tls);
+
 // Makes the given task the currently running task.
 void systask_yield_to(systask_t* task);
 
 // Initializes a task with the given stack pointer, stack size
 //
 // The task must be not be running when the function is called
-bool systask_init(systask_t* task, uint32_t stack_ptr, uint32_t stack_size,
-                  void* context);
+bool systask_init(systask_t* task, uint32_t stack_base, uint32_t stack_size,
+                  uint32_t sb_addr, void* context);
 
 // Returns true if the task is alive (not terminated, killed or crashed)
 bool systask_is_alive(const systask_t* task);
@@ -166,6 +201,17 @@ void systask_pop_data(systask_t* task, size_t size);
 // Return `true` in case of success, `false` otherwise
 bool systask_push_call(systask_t* task, void* fn, uint32_t arg1, uint32_t arg2,
                        uint32_t arg3);
+
+// Invokes the callback function in the context of the given task
+//   uint32_t callback(uint32_t arg1, uint32_t arg2, uint32_t arg3);
+uint32_t systask_invoke_callback(systask_t* task, uint32_t arg1, uint32_t arg2,
+                                 uint32_t arg3, void* callback);
+
+// Sets R0 and R1 registers of the suspended task
+void systask_set_r0r1(systask_t* task, uint32_t r0, uint32_t r1);
+
+// Gets R0 register value of the suspended task
+uint32_t systask_get_r0(systask_t* task);
 
 // Gets the ID (zero-based index up SYSTASK_MAX_TASKS - 1) of the given task.
 systask_id_t systask_id(const systask_t* task);

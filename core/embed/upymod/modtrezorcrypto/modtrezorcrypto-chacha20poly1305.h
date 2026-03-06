@@ -34,7 +34,7 @@ typedef struct _mp_obj_ChaCha20Poly1305_t {
   int64_t alen, plen;
 } mp_obj_ChaCha20Poly1305_t;
 
-/// def __init__(self, key: bytes, nonce: bytes) -> None:
+/// def __init__(self, key: AnyBytes, nonce: AnyBytes) -> None:
 ///     """
 ///     Initialize the ChaCha20 + Poly1305 context for encryption or decryption
 ///     using a 32 byte key and 12 byte nonce as in the RFC 7539 style.
@@ -47,10 +47,10 @@ STATIC mp_obj_t mod_trezorcrypto_ChaCha20Poly1305_make_new(
   mp_get_buffer_raise(args[0], &key, MP_BUFFER_READ);
   mp_get_buffer_raise(args[1], &nonce, MP_BUFFER_READ);
   if (key.len != 32) {
-    mp_raise_ValueError("Invalid length of key");
+    mp_raise_ValueError(MP_ERROR_TEXT("Invalid length of key"));
   }
   if (nonce.len != 12) {
-    mp_raise_ValueError("Invalid length of nonce");
+    mp_raise_ValueError(MP_ERROR_TEXT("Invalid length of nonce"));
   }
   mp_obj_ChaCha20Poly1305_t *o =
       m_new_obj_with_finaliser(mp_obj_ChaCha20Poly1305_t);
@@ -61,7 +61,7 @@ STATIC mp_obj_t mod_trezorcrypto_ChaCha20Poly1305_make_new(
   return MP_OBJ_FROM_PTR(o);
 }
 
-/// def encrypt(self, data: bytes) -> bytes:
+/// def encrypt(self, data: AnyBytes) -> bytes:
 ///     """
 ///     Encrypt data (length of data must be divisible by 64 except for the
 ///     final value).
@@ -80,7 +80,7 @@ STATIC mp_obj_t mod_trezorcrypto_ChaCha20Poly1305_encrypt(mp_obj_t self,
 STATIC MP_DEFINE_CONST_FUN_OBJ_2(mod_trezorcrypto_ChaCha20Poly1305_encrypt_obj,
                                  mod_trezorcrypto_ChaCha20Poly1305_encrypt);
 
-/// def decrypt(self, data: bytes) -> bytes:
+/// def decrypt(self, data: AnyBytes) -> bytes:
 ///     """
 ///     Decrypt data (length of data must be divisible by 64 except for the
 ///     final value).
@@ -99,7 +99,7 @@ STATIC mp_obj_t mod_trezorcrypto_ChaCha20Poly1305_decrypt(mp_obj_t self,
 STATIC MP_DEFINE_CONST_FUN_OBJ_2(mod_trezorcrypto_ChaCha20Poly1305_decrypt_obj,
                                  mod_trezorcrypto_ChaCha20Poly1305_decrypt);
 
-/// def auth(self, data: bytes) -> None:
+/// def auth(self, data: AnyBytes) -> None:
 ///     """
 ///     Include authenticated data in the Poly1305 MAC using the RFC 7539
 ///     style with 16 byte padding. This must only be called once and prior

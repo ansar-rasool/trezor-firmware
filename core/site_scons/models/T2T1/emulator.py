@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .. import get_hw_model_as_number
+from ..unix_common import unix_common_files
 
 
 def configure(
@@ -16,6 +17,10 @@ def configure(
     hw_model = get_hw_model_as_number("T2T1")
     hw_revision = 0
     mcu = "STM32F427xx"
+
+    features_available += unix_common_files(
+        env, features_wanted, defines, sources, paths
+    )
 
     features_available.append("display_rgb565")
     defines += [
@@ -52,7 +57,7 @@ def configure(
 
     if "input" in features_wanted:
         sources += ["embed/io/touch/unix/touch.c"]
-        sources += ["embed/io/touch/touch_fsm.c"]
+        sources += ["embed/io/touch/touch_poll.c"]
         paths += ["embed/io/touch/inc"]
         features_available.append("touch")
         defines += [("USE_TOUCH", "1")]

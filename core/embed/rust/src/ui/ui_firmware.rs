@@ -1,7 +1,7 @@
 use crate::{
     error::Error,
     io::BinaryData,
-    micropython::{gc::Gc, list::List, obj::Obj},
+    micropython::{buffer::StrBuffer, gc::Gc, list::List, obj::Obj},
     strutil::TString,
 };
 use heapless::Vec;
@@ -14,8 +14,9 @@ use super::layout::{
 pub const MAX_CHECKLIST_ITEMS: usize = 3;
 pub const MAX_WORD_QUIZ_ITEMS: usize = 3;
 pub const MAX_GROUP_SHARE_LINES: usize = 4;
+pub const MAX_MENU_ITEMS: usize = 5;
 
-pub const ERROR_NOT_IMPLEMENTED: Error = Error::ValueError(c"not implemented");
+pub const MAX_PAIRED_DEVICES: usize = 8; // Maximum number of paired devices in the device menu
 
 pub trait FirmwareUI {
     #[allow(clippy::too_many_arguments)]
@@ -31,6 +32,7 @@ pub trait FirmwareUI {
         reverse: bool,
         prompt_screen: bool,
         prompt_title: Option<TString<'static>>,
+        external_menu: bool, // TODO: will eventually replace the internal menu
     ) -> Result<impl LayoutMaybeTrace, Error>;
 
     fn confirm_address(
@@ -41,6 +43,14 @@ pub trait FirmwareUI {
         info_button: bool,
         chunkify: bool,
     ) -> Result<Gc<LayoutObj>, Error>; // TODO: return LayoutMaybeTrace
+
+    fn confirm_trade(
+        title: TString<'static>,
+        subtitle: TString<'static>,
+        sell_amount: Option<TString<'static>>,
+        buy_amount: TString<'static>,
+        back_button: bool,
+    ) -> Result<impl LayoutMaybeTrace, Error>;
 
     #[allow(clippy::too_many_arguments)]
     fn confirm_value(
@@ -58,6 +68,8 @@ pub trait FirmwareUI {
         page_counter: bool,
         prompt_screen: bool,
         cancel: bool,
+        warning_footer: Option<TString<'static>>,
+        external_menu: bool,
     ) -> Result<Gc<LayoutObj>, Error>; // TODO: return LayoutMaybeTrace
 
     fn confirm_value_intro(
@@ -122,31 +134,39 @@ pub trait FirmwareUI {
 
     fn confirm_properties(
         title: TString<'static>,
+        subtitle: Option<TString<'static>>,
         items: Obj, // TODO: replace Obj`
         hold: bool,
+        verb: Option<TString<'static>>,
+        external_menu: bool,
     ) -> Result<impl LayoutMaybeTrace, Error>;
 
     fn confirm_reset_device(recovery: bool) -> Result<impl LayoutMaybeTrace, Error>;
 
     #[allow(clippy::too_many_arguments)]
     fn confirm_summary(
-        amount: TString<'static>,
-        amount_label: TString<'static>,
+        amount: Option<TString<'static>>,
+        amount_label: Option<TString<'static>>,
         fee: TString<'static>,
         fee_label: TString<'static>,
         title: Option<TString<'static>>,
         account_items: Option<Obj>, // TODO: replace Obj
-        extra_items: Option<Obj>,   // TODO: replace Obj
+        account_title: Option<TString<'static>>,
+        extra_items: Option<Obj>, // TODO: replace Obj
         extra_title: Option<TString<'static>>,
         verb_cancel: Option<TString<'static>>,
+        back_button: bool,
+        external_menu: bool, // TODO: will eventually replace the internal menu
     ) -> Result<impl LayoutMaybeTrace, Error>;
 
     fn confirm_with_info(
         title: TString<'static>,
+        subtitle: Option<TString<'static>>,
         items: Obj, // TODO: replace Obj
         verb: TString<'static>,
         verb_info: TString<'static>,
         verb_cancel: Option<TString<'static>>,
+        external_menu: bool,
     ) -> Result<impl LayoutMaybeTrace, Error>;
 
     fn continue_recovery_homepage(
@@ -166,8 +186,8 @@ pub trait FirmwareUI {
         subtitle: Option<TString<'static>>,
         description: Option<TString<'static>>,
         extra: Option<TString<'static>>,
-        message: Obj,        // TODO: replace Obj
-        amount: Option<Obj>, // TODO: replace Obj
+        message: TString<'static>,
+        amount: Option<TString<'static>>,
         chunkify: bool,
         text_mono: bool,
         account_title: TString<'static>,
@@ -175,8 +195,8 @@ pub trait FirmwareUI {
         account_path: Option<TString<'static>>,
         br_code: u16,
         br_name: TString<'static>,
-        address_item: Option<(TString<'static>, Obj)>,
-        extra_item: Option<(TString<'static>, Obj)>,
+        address_item: Option<Obj>,
+        extra_item: Option<Obj>,
         summary_items: Option<Obj>, // TODO: replace Obj
         fee_items: Option<Obj>,     // TODO: replace Obj
         summary_title: Option<TString<'static>>,
@@ -185,29 +205,39 @@ pub trait FirmwareUI {
         cancel_text: Option<TString<'static>>,
     ) -> Result<impl LayoutMaybeTrace, Error>;
 
-    fn flow_confirm_set_new_pin(
-        title: TString<'static>,
-        description: TString<'static>,
-    ) -> Result<impl LayoutMaybeTrace, Error>;
+    fn flow_confirm_set_new_code(is_wipe_code: bool) -> Result<impl LayoutMaybeTrace, Error>;
 
     #[allow(clippy::too_many_arguments)]
     fn flow_get_address(
-        address: Obj, // TODO: replace Obj
+        address: TString<'static>,
         title: TString<'static>,
+        subtitle: Option<TString<'static>>,
         description: Option<TString<'static>>,
-        extra: Option<TString<'static>>,
+        hint: Option<TString<'static>>,
         chunkify: bool,
         address_qr: TString<'static>,
         case_sensitive: bool,
         account: Option<TString<'static>>,
         path: Option<TString<'static>>,
         xpubs: Obj, // TODO: replace Obj
-        title_success: TString<'static>,
         br_code: u16,
         br_name: TString<'static>,
     ) -> Result<impl LayoutMaybeTrace, Error>;
 
-    // TODO: this is TR specific and used only in confirm_set_new_pin
+    #[allow(clippy::too_many_arguments)]
+    fn flow_get_pubkey(
+        pubkey: TString<'static>,
+        title: TString<'static>,
+        subtitle: Option<TString<'static>>,
+        hint: Option<TString<'static>>,
+        pubkey_qr: TString<'static>,
+        account: Option<TString<'static>>,
+        path: Option<TString<'static>>,
+        br_code: u16,
+        br_name: TString<'static>,
+    ) -> Result<impl LayoutMaybeTrace, Error>;
+
+    // TODO: this is TR specific and used only in confirm_set_new_code
     fn multiple_pages_texts(
         title: TString<'static>,
         verb: TString<'static>,
@@ -237,16 +267,39 @@ pub trait FirmwareUI {
         more_info_callback: Option<impl Fn(u32) -> TString<'static> + 'static>,
     ) -> Result<impl LayoutMaybeTrace, Error>;
 
+    fn request_duration(
+        title: TString<'static>,
+        duration_ms: u32,
+        min_ms: u32,
+        max_ms: u32,
+        description: Option<TString<'static>>,
+    ) -> Result<impl LayoutMaybeTrace, Error>;
+
     fn request_pin(
         prompt: TString<'static>,
         subprompt: TString<'static>,
         allow_cancel: bool,
         warning: bool,
+        last_attempt: bool,
     ) -> Result<impl LayoutMaybeTrace, Error>;
 
     fn request_passphrase(
         prompt: TString<'static>,
-        max_len: u32,
+        prompt_empty: TString<'static>,
+        max_len: usize,
+    ) -> Result<impl LayoutMaybeTrace, Error>;
+
+    fn request_string(
+        prompt: TString<'static>,
+        max_len: usize,
+        allow_empty: bool,
+        prefill: Option<TString<'static>>,
+    ) -> Result<impl LayoutMaybeTrace, Error>;
+
+    fn select_menu(
+        items: heapless::Vec<TString<'static>, MAX_MENU_ITEMS>,
+        current: usize,
+        cancel: Option<TString<'static>>,
     ) -> Result<impl LayoutMaybeTrace, Error>;
 
     fn select_word(
@@ -280,6 +333,7 @@ pub trait FirmwareUI {
         title: TString<'static>,
         description: TString<'static>,
         value: TString<'static>,
+        menu_title: Option<TString<'static>>,
         verb_cancel: Option<TString<'static>>,
     ) -> Result<impl LayoutMaybeTrace, Error>;
 
@@ -297,9 +351,58 @@ pub trait FirmwareUI {
 
     fn show_homescreen(
         label: TString<'static>,
-        hold: bool,
         notification: Option<TString<'static>>,
         notification_level: u8,
+        lockable: bool,
+    ) -> Result<impl LayoutMaybeTrace, Error>;
+
+    #[allow(clippy::too_many_arguments)]
+    fn show_device_menu(
+        init_submenu_idx: Option<u8>,
+        backup_failed: bool,
+        backup_needed: bool,
+        ble_enabled: bool,
+        paired_devices: heapless::Vec<
+            (TString<'static>, Option<[TString<'static>; 2]>),
+            MAX_PAIRED_DEVICES,
+        >,
+        connected_idx: Option<u8>,
+        pin_enabled: Option<bool>,
+        auto_lock: Option<[TString<'static>; 2]>,
+        wipe_code_enabled: Option<bool>,
+        backup_check_allowed: bool,
+        device_name: Option<TString<'static>>,
+        brightness: Option<TString<'static>>,
+        haptics_enabled: Option<bool>,
+        led_enabled: Option<bool>,
+        about_items: Obj,
+        production_year: Option<TString<'static>>,
+    ) -> Result<impl LayoutMaybeTrace, Error>;
+
+    fn show_pairing_device_name(
+        description: StrBuffer,
+        device_name: TString<'static>,
+    ) -> Result<impl LayoutMaybeTrace, Error>;
+
+    #[cfg(feature = "ble")]
+    fn show_ble_pairing_code(
+        title: TString<'static>,
+        description: TString<'static>,
+        code: TString<'static>,
+    ) -> Result<impl LayoutMaybeTrace, Error>;
+
+    #[cfg(feature = "ble")]
+    fn wait_ble_host_confirmation() -> Result<impl LayoutMaybeTrace, Error>;
+
+    fn show_thp_pairing_code(
+        title: TString<'static>,
+        description: TString<'static>,
+        code: TString<'static>,
+    ) -> Result<impl LayoutMaybeTrace, Error>;
+
+    fn confirm_thp_pairing(
+        title: TString<'static>,
+        description: (StrBuffer, Obj),
     ) -> Result<impl LayoutMaybeTrace, Error>;
 
     fn show_info(
@@ -328,6 +431,7 @@ pub trait FirmwareUI {
         description: TString<'static>,
         indeterminate: bool,
         title: Option<TString<'static>>,
+        danger: bool,
     ) -> Result<impl LayoutMaybeTrace, Error>;
 
     fn show_progress_coinjoin(
@@ -336,6 +440,11 @@ pub trait FirmwareUI {
         time_ms: u32,
         skip_first_paint: bool,
     ) -> Result<Gc<LayoutObj>, Error>; // TODO: return LayoutMaybeTrace
+
+    fn show_properties(
+        _title: TString<'static>,
+        _value: Obj,
+    ) -> Result<impl LayoutMaybeTrace, Error>;
 
     fn show_remaining_shares(
         pages_iterable: Obj, // TODO: replace Obj
@@ -347,13 +456,15 @@ pub trait FirmwareUI {
     ) -> Result<impl LayoutMaybeTrace, Error>;
 
     // TODO: merge with `show_share_words` instead of having specific version for
-    // Delizia UI
-    fn show_share_words_delizia(
+    // Delizia/Eckhart UI
+    fn show_share_words_extended(
         words: Vec<TString<'static>, 33>,
         subtitle: Option<TString<'static>>,
-        instructions: Obj,                     // TODO: replace Obj
+        instructions: Obj, // TODO: replace Obj
+        instructions_verb: Option<TString<'static>>,
         text_footer: Option<TString<'static>>, // footer description at instruction screen
         text_confirm: TString<'static>,
+        text_check: TString<'static>,
     ) -> Result<impl LayoutMaybeTrace, Error>;
 
     fn show_simple(

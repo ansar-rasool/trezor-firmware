@@ -2,7 +2,7 @@
 use crate::trezorhal::haptic::{play, HapticEffect};
 use crate::{
     strutil::TString,
-    time::Duration,
+    time::ShortDuration,
     ui::{
         component::{Component, Event, EventCtx, Timer},
         display::{toif::Icon, Color, Font},
@@ -24,15 +24,17 @@ pub enum ButtonMsg {
 
 pub struct Button {
     area: Rect,
-    touch_expand: Option<Insets>,
+    touch_expand: Insets,
     content: ButtonContent,
     styles: ButtonStyleSheet,
     text_align: Alignment,
     radius: Option<u8>,
     state: State,
-    long_press: Option<Duration>,
+    long_press: ShortDuration, // long press requires non-zero duration
     long_timer: Timer,
     haptic: bool,
+    #[cfg(feature = "ui_debug")]
+    is_cancel: bool, // used by debuglink
 }
 
 impl Button {
@@ -45,14 +47,16 @@ impl Button {
         Self {
             content,
             area: Rect::zero(),
-            touch_expand: None,
+            touch_expand: Insets::zero(),
             styles: theme::button_default(),
             text_align: Alignment::Start,
             radius: None,
             state: State::Initial,
-            long_press: None,
+            long_press: ShortDuration::ZERO,
             long_timer: Timer::new(),
             haptic: true,
+            #[cfg(feature = "ui_debug")]
+            is_cancel: false,
         }
     }
 
@@ -83,12 +87,13 @@ impl Button {
     }
 
     pub const fn with_expanded_touch_area(mut self, expand: Insets) -> Self {
-        self.touch_expand = Some(expand);
+        self.touch_expand = expand;
         self
     }
 
-    pub fn with_long_press(mut self, duration: Duration) -> Self {
-        self.long_press = Some(duration);
+    pub fn with_long_press(mut self, duration: ShortDuration) -> Self {
+        debug_assert_ne!(duration, ShortDuration::ZERO);
+        self.long_press = duration;
         self
     }
 
@@ -99,6 +104,17 @@ impl Button {
 
     pub fn without_haptics(mut self) -> Self {
         self.haptic = false;
+        self
+    }
+
+    #[cfg(feature = "ui_debug")]
+    pub fn set_is_cancel(mut self) -> Self {
+        self.is_cancel = true;
+        self
+    }
+
+    #[cfg(not(feature = "ui_debug"))]
+    pub fn set_is_cancel(self) -> Self {
         self
     }
 
@@ -255,11 +271,7 @@ impl Component for Button {
     }
 
     fn event(&mut self, ctx: &mut EventCtx, event: Event) -> Option<Self::Msg> {
-        let touch_area = if let Some(expand) = self.touch_expand {
-            self.area.outset(expand)
-        } else {
-            self.area
-        };
+        let touch_area = self.area.outset(self.touch_expand);
 
         match event {
             Event::Touch(TouchEvent::TouchStart(pos)) => {
@@ -275,8 +287,8 @@ impl Component for Button {
                                 play(HapticEffect::ButtonPress);
                             }
                             self.set(ctx, State::Pressed);
-                            if let Some(duration) = self.long_press {
-                                self.long_timer.start(ctx, duration);
+                            if self.long_press != ShortDuration::ZERO {
+                                self.long_timer.start(ctx, self.long_press.into());
                             }
                             return Some(ButtonMsg::Pressed);
                         }
@@ -364,6 +376,7 @@ impl Component for Button {
 impl crate::trace::Trace for Button {
     fn trace(&self, t: &mut dyn crate::trace::Tracer) {
         t.component("Button");
+        t.bool("is_cancel", self.is_cancel);
         match &self.content {
             ButtonContent::Empty => {}
             ButtonContent::Text(text) => t.string("text", *text),

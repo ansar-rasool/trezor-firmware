@@ -290,7 +290,7 @@ class PathSchema:
                     # Which in practice it is, the only non-Collection is Interval.
                     # But we're not going to introduce an additional type requirement
                     # for the sake of __repr__ that doesn't exist in production anyway
-                    collection: Collection[int] = component  # type: ignore [Expression of type "Container[int]" is incompatible with declared type "Collection[int]"]
+                    collection: Collection[int] = component  # type: ignore [Type "Container[int]" is not assignable to declared type "Collection[int]"]
                     component_str = ",".join(str(unharden(i)) for i in collection)
                     if len(collection) > 1:
                         component_str = "[" + component_str + "]"
@@ -374,10 +374,12 @@ def unharden(item: int) -> int:
 def get_account_name(
     coin: str, address_n: Bip32Path, pattern: str | Sequence[str], slip44_id: int
 ) -> str | None:
+    from trezor.strings import format_amount_unit
+
     account_num = _get_account_num(address_n, pattern, slip44_id)
     if account_num is None:
         return None
-    return f"{coin} #{account_num}"
+    return format_amount_unit(coin, f"#{account_num}")
 
 
 def _get_account_num(

@@ -21,9 +21,13 @@
 
 #include <stdlib.h>
 
+#include <rtl/logging.h>
 #include <sys/bootargs.h>
 #include <sys/bootutils.h>
 #include <sys/systick.h>
+#include <util/rsod_special.h>
+
+LOG_DECLARE(bootutils)
 
 // Holds the 'command' for the next reboot.
 static boot_command_t g_boot_command;
@@ -56,13 +60,42 @@ void bootargs_get_args(boot_args_t* dest) {
 }
 
 __attribute__((noreturn)) void reboot_device(void) {
-  printf("reboot (normal)\n");
+  LOG_WARN("reboot (normal)");
+
+  exit(3);
+}
+
+__attribute__((noreturn)) void reboot_to_bootloader(void) {
+  LOG_WARN("reboot (to bootloader)");
+
+  exit(3);
+}
+
+__attribute__((noreturn)) void reboot_and_upgrade(const uint8_t hash[32]) {
+  LOG_WARN("reboot (upgrade)");
+
+  exit(3);
+}
+
+__attribute__((noreturn)) void reboot_to_off(void) {
+  LOG_WARN("reboot (power off)");
+
+  exit(3);
+}
+
+__attribute__((noreturn)) void reboot_and_wipe(
+    const bootutils_wipe_info_t* info) {
+  show_wipe_info(info);
+
+  LOG_WARN("reboot (wipe)");
+
+  systick_delay_ms(3000);
 
   exit(3);
 }
 
 __attribute__((noreturn)) void reboot_or_halt_after_rsod(void) {
-  printf("reboot (with timeout)\n");
+  LOG_WARN("reboot (with timeout)");
 
   // Wait some time to let the user see the displayed
   // message before shutting down

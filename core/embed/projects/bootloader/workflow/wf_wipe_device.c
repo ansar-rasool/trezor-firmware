@@ -20,40 +20,126 @@
 #include <trezor_model.h>
 #include <trezor_rtl.h>
 
+#include <sys/notify.h>
 #include <util/flash_utils.h>
+
+#ifdef USE_BLE
+#include <io/ble.h>
+#endif
+
+#ifdef USE_BACKUP_RAM
+#include <sys/backup_ram.h>
+#endif
+
+#ifdef USE_RGB_LED
+#include <io/rgb_led.h>
+#endif
+
+#include <sys/systick.h>
 
 #include "bootui.h"
 #include "protob.h"
-#include "rust_ui.h"
+#include "rust_ui_bootloader.h"
 #include "workflow.h"
 
-workflow_result_t workflow_wipe_device(protob_io_t *iface) {
+static void send_error_conditionally(protob_io_t* iface, char* msg) {
+  if (iface != NULL) {
+    send_msg_failure(iface, FailureType_Failure_ProcessError,
+                     "Could not read BLE status");
+  }
+}
+
+#ifdef USE_BLE
+bool wipe_bonds(protob_io_t* iface) {
+  ble_state_t state = {0};
+  ble_get_state(&state);
+
+  if (!state.state_known) {
+    send_error_conditionally(iface, "Could not read BLE status");
+    screen_wipe_fail();
+    return false;
+  }
+
+  if (!ble_erase_bonds()) {
+    send_error_conditionally(iface, "Could not issue BLE command");
+    screen_wipe_fail();
+    return false;
+  }
+
+  uint32_t deadline = ticks_timeout(300);
+
+  while (true) {
+    ble_get_state(&state);
+    if (state.peer_count == 0) {
+      break;
+    }
+    if (ticks_expired(deadline)) {
+      send_error_conditionally(iface, "Could not erase bonds");
+      screen_wipe_fail();
+      return false;
+    }
+  }
+
+  return true;
+}
+#endif
+
+workflow_result_t workflow_wipe_device(protob_io_t* iface) {
   WipeDevice msg_recv;
   if (iface != NULL) {
     recv_msg_wipe_device(iface, &msg_recv);
   }
-  ui_result_t response = ui_screen_wipe_confirm();
-  if (UI_RESULT_CONFIRM != response) {
+
+#ifdef USE_RGB_LED
+  rgb_led_set_color(RGBLED_RED);
+#endif
+
+  confirm_result_t response = ui_screen_wipe_confirm();
+
+#ifdef USE_RGB_LED
+  rgb_led_set_color(RGBLED_OFF);
+#endif
+
+  if (CONFIRM != response) {
     if (iface != NULL) {
       send_user_abort(iface, "Wipe cancelled");
     }
     return WF_CANCELLED;
   }
   ui_screen_wipe();
+
+  notify_send(NOTIFY_WIPE);
+
   secbool wipe_result = erase_device(ui_screen_wipe_progress);
 
   if (sectrue != wipe_result) {
-    if (iface != NULL) {
-      send_msg_failure(iface, FailureType_Failure_ProcessError,
-                       "Could not erase flash");
-    }
+    send_error_conditionally(iface, "Could not erase flash");
+  }
+
+#ifdef USE_BACKUP_RAM
+  if (!backup_ram_erase_protected()) {
+    return WF_ERROR;
+  }
+#endif
+
+  // sending success earlier to notify host before bonds deletion causes
+  // disconnect
+  if (iface != NULL) {
+    send_msg_success(iface, NULL);
+    systick_delay_ms(100);
+  }
+
+#ifdef USE_BLE
+  if (!wipe_bonds(iface)) {
+    return WF_ERROR;
+  }
+#endif
+
+  if (sectrue != wipe_result) {
     screen_wipe_fail();
     return WF_ERROR;
   }
 
-  if (iface != NULL) {
-    send_msg_success(iface, NULL);
-  }
   screen_wipe_success();
   return WF_OK_DEVICE_WIPED;
 }

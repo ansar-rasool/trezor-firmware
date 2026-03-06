@@ -3,8 +3,8 @@
 > :bulb: **Hint**:
 Using emulator as described here is useful during firmware development. If you intend to use the emulator without modifying the firmware, you might be looking for [Trezor User Env](https://github.com/trezor/trezor-user-env/tree/master).
 
-First clone, initialize submodules, install Poetry and enter the Poetry shell as
-defined [here](index.md). **Do not forget you need to be in a `poetry shell`
+First clone, initialize submodules, install `uv` and enter the `uv` shell as
+defined [here](index.md). **Do not forget you need to be in a `uv` shell
 environment!**
 
 ## Dependencies
@@ -61,7 +61,7 @@ The protocol buffer compiler `protoc` is needed to (unsurprisingly) compile prot
 
 ## Rust
 
-You will require Rust and Cargo. The currently supported version is 1.64 nightly. The
+You will require Rust and Cargo. The currently supported version is 1.88 nightly. The
 recommended way to install both is with [`rustup`](https://rustup.rs/). Make sure you
 are up to date:
 

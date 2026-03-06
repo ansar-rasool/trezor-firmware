@@ -65,6 +65,7 @@
 #define MICROPY_OPT_MATH_FACTORIAL  (0)
 #define MICROPY_OPT_LOAD_ATTR_FAST_PATH (1)
 #define MICROPY_OPT_MAP_LOOKUP_CACHE (1)
+#define MICROPY_ROM_TEXT_COMPRESSION (1)
 
 #define MICROPY_CONFIG_ROM_LEVEL (MICROPY_CONFIG_ROM_LEVEL_CORE_FEATURES)
 
@@ -82,7 +83,9 @@
 #define MICROPY_REPL_EMACS_KEYS     (1)
 #define MICROPY_REPL_AUTO_INDENT    (1)
 #define MICROPY_LONGINT_IMPL        (MICROPY_LONGINT_IMPL_MPZ)
+#ifndef MICROPY_ENABLE_SOURCE_LINE
 #define MICROPY_ENABLE_SOURCE_LINE  (1)
+#endif
 #define MICROPY_FLOAT_IMPL          (MICROPY_FLOAT_IMPL_FLOAT)
 #define MICROPY_STREAMS_NON_BLOCK   (1)
 #define MICROPY_MODULE_WEAK_LINKS   (1)
@@ -171,6 +174,9 @@
 #define MICROPY_PY_FRAMEBUF         (0)
 #define MICROPY_PY_USOCKET          (0)
 #define MICROPY_PY_NETWORK          (0)
+
+// allocate traceback data only on debug builds
+#define MICROPY_PY_SYS_TRACEBACK_DISABLE (PYOPT)
 
 // Debugging and interactive functionality.
 #define MICROPY_DEBUG_PRINTERS      (1)

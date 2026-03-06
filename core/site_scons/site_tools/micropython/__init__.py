@@ -35,6 +35,14 @@ def generate(env):
         # " | $PYTHON $MODULECOL > $TARGET"
     )
 
+    env["BUILDERS"]["CollectCompressed"] = SCons.Builder.Builder(
+        action="cat $SOURCES | sed -nr 's/.*MP_COMPRESSED_ROM_TEXT\\(\\\"(.*)\\\"\\).*/\\1/p' > $TARGET"
+    )
+
+    env["BUILDERS"]["GenerateCompressed"] = SCons.Builder.Builder(
+        action="$MAKECOMPRESSEDDATA $SOURCE > $TARGET",
+    )
+
     def generate_frozen_module(source, target, env, for_signature):
         target = str(target[0])
         source = str(source[0])
@@ -51,7 +59,9 @@ def generate(env):
         layout_bolt = env["ui_layout"] == "UI_LAYOUT_BOLT"
         layout_caesar = env["ui_layout"] == "UI_LAYOUT_CAESAR"
         layout_delizia = env["ui_layout"] == "UI_LAYOUT_DELIZIA"
+        layout_eckhart = env["ui_layout"] == "UI_LAYOUT_ECKHART"
         thp = env["thp"]
+        power_manager = env["power_manager"]
         interim = f"{target[:-4]}.i"  # replace .mpy with .i
         sed_scripts = [
             rf"-e 's/utils\.BITCOIN_ONLY/{btc_only}/g'",
@@ -61,10 +71,12 @@ def generate(env):
             rf"-e 's/utils\.UI_LAYOUT == \"BOLT\"/{layout_bolt}/g'",
             rf"-e 's/utils\.UI_LAYOUT == \"CAESAR\"/{layout_caesar}/g'",
             rf"-e 's/utils\.UI_LAYOUT == \"DELIZIA\"/{layout_delizia}/g'",
+            rf"-e 's/utils\.UI_LAYOUT == \"ECKHART\"/{layout_eckhart}/g'",
             rf"-e 's/utils\.USE_BLE/{ble}/g'",
             rf"-e 's/utils\.USE_BUTTON/{button}/g'",
             rf"-e 's/utils\.USE_TOUCH/{touch}/g'",
             rf"-e 's/utils\.USE_THP/{thp}/g'",
+            rf"-e 's/utils\.USE_POWER_MANAGER/{power_manager}/g'",
             r"-e 's/if TYPE_CHECKING/if False/'",
             r"-e 's/import typing/# \0/'",
             r"-e '/from typing import (/,/^\s*)/ {s/^/# /; }'",

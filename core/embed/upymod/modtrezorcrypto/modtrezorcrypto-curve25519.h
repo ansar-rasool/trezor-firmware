@@ -17,11 +17,11 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <sec/rng.h>
+
 #include "py/objstr.h"
 
 #include "ed25519-donna/ed25519.h"
-
-#include "rand.h"
 
 /// package: trezorcrypto.curve25519
 
@@ -32,7 +32,7 @@
 STATIC mp_obj_t mod_trezorcrypto_curve25519_generate_secret() {
   vstr_t sk = {0};
   vstr_init_len(&sk, 32);
-  random_buffer((uint8_t *)sk.buf, sk.len);
+  rng_fill_buffer((uint8_t *)sk.buf, sk.len);
   // taken from https://cr.yp.to/ecdh.html
   sk.buf[0] &= 248;
   sk.buf[31] &= 127;
@@ -43,7 +43,7 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_0(
     mod_trezorcrypto_curve25519_generate_secret_obj,
     mod_trezorcrypto_curve25519_generate_secret);
 
-/// def publickey(secret_key: bytes) -> bytes:
+/// def publickey(secret_key: AnyBytes) -> bytes:
 ///     """
 ///     Computes public key from secret key.
 ///     """
@@ -51,7 +51,7 @@ STATIC mp_obj_t mod_trezorcrypto_curve25519_publickey(mp_obj_t secret_key) {
   mp_buffer_info_t sk = {0};
   mp_get_buffer_raise(secret_key, &sk, MP_BUFFER_READ);
   if (sk.len != 32) {
-    mp_raise_ValueError("Invalid length of secret key");
+    mp_raise_ValueError(MP_ERROR_TEXT("Invalid length of secret key"));
   }
   vstr_t pk = {0};
   vstr_init_len(&pk, 32);
@@ -61,7 +61,7 @@ STATIC mp_obj_t mod_trezorcrypto_curve25519_publickey(mp_obj_t secret_key) {
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(mod_trezorcrypto_curve25519_publickey_obj,
                                  mod_trezorcrypto_curve25519_publickey);
 
-/// def multiply(secret_key: bytes, public_key: bytes) -> bytes:
+/// def multiply(secret_key: AnyBytes, public_key: AnyBytes) -> bytes:
 ///     """
 ///     Multiplies point defined by public_key with scalar defined by
 ///     secret_key. Useful for ECDH.
@@ -72,10 +72,10 @@ STATIC mp_obj_t mod_trezorcrypto_curve25519_multiply(mp_obj_t secret_key,
   mp_get_buffer_raise(secret_key, &sk, MP_BUFFER_READ);
   mp_get_buffer_raise(public_key, &pk, MP_BUFFER_READ);
   if (sk.len != 32) {
-    mp_raise_ValueError("Invalid length of secret key");
+    mp_raise_ValueError(MP_ERROR_TEXT("Invalid length of secret key"));
   }
   if (pk.len != 32) {
-    mp_raise_ValueError("Invalid length of public key");
+    mp_raise_ValueError(MP_ERROR_TEXT("Invalid length of public key"));
   }
   vstr_t out = {0};
   vstr_init_len(&out, 32);

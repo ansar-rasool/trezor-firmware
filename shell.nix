@@ -4,17 +4,17 @@
  }:
 
 let
-  # the last commit from master as of 2024-11-21
+  # the last commit from master as of 2025-05-19
   rustOverlay = import (builtins.fetchTarball {
-    url = "https://github.com/oxalica/rust-overlay/archive/2d484c7a0db32f2700e253160bcd2aaa6cdca3ba.tar.gz";
-    sha256 = "17b32lz7kc12l8fwg8kc7ma83b51105z0xp2j0lfnsjr9qqc5r2y";
+    url = "https://github.com/oxalica/rust-overlay/archive/bd030fd9983f7fddf87be1c64aa3064c8afa24c4.tar.gz";
+    sha256 = "1j3kjh0zlanj31c14hk18nzj9j9aw6ib8lg2pjmywlicd0hmhisv";
   });
   # define this variable and devTools if you want nrf{util,connect}
   acceptJlink = builtins.getEnv "TREZOR_FIRMWARE_ACCEPT_JLINK_LICENSE" == "yes";
-  # the last successful build of nixpkgs-unstable as of 2024-11-21
+  # the last successful build of nixpkgs-unstable as of 2025-06-25
   nixpkgs = import (builtins.fetchTarball {
-    url = "https://github.com/NixOS/nixpkgs/archive/5083ec887760adfe12af64830a66807423a859a7.tar.gz";
-    sha256 = "0sr45csfh2ff8w7jpnkkgl22aa89sza4jlhs6wq0368dpmklsl8g";
+    url = "https://github.com/NixOS/nixpkgs/archive/992f916556fcfaa94451ebc7fc6e396134bbf5b1.tar.gz";
+    sha256 = "0wbqb6sy58q3mnrmx67ffdx8rq10jg4cvh4jx3rrbr1pqzpzsgxc";
   }) {
     config = {
       allowUnfree = acceptJlink;
@@ -51,7 +51,7 @@ let
       done
     '';
   # NOTE: don't forget to update Minimum Supported Rust Version in docs/core/build/emulator.md
-  rustProfiles = nixpkgs.rust-bin.nightly."2024-01-21";
+  rustProfiles = nixpkgs.rust-bin.nightly."2025-04-15";
   rustNightly = rustProfiles.minimal.override {
     targets = [
       "thumbv7em-none-eabihf" # TT
@@ -80,23 +80,18 @@ stdenvNoCC.mkDerivation ({
   name = "trezor-firmware-env";
   buildInputs = lib.optionals fullDeps [
     bitcoind
-    # install other python versions for tox testing
-    # NOTE: running e.g. "python3" in the shell runs the first version in the following list,
-    #       and poetry uses the default version (currently 3.10)
-    python311
-    python310
-    python39
-    oldNixpkgs.python38
   ] ++ [
-    SDL2
-    SDL2_image
+    # Current nixpkgs aliases SDL2 to sdl2-compat which on Ubuntu 25.04 makes the emulator
+    # crash with SDL_CreateRenderer error.
+    oldNixpkgs.SDL2
+    oldNixpkgs.SDL2_image
     bash
     bloaty  # for binsize
     check
     crowdin-cli  # for translations
     curl  # for connect tests
     editorconfig-checker
-    gcc-arm-embedded
+    gcc-arm-embedded-13
     gcc14
     git
     gitAndTools.git-subrepo
@@ -113,7 +108,9 @@ stdenvNoCC.mkDerivation ({
     ps
     oldNixpkgs.protobuf3_19
     pyright
+    python3
     (mkBinOnlyWrapper rustNightly)
+    uv
     wget
     zlib
     moreutils
@@ -135,19 +132,21 @@ stdenvNoCC.mkDerivation ({
     libiconv
   ] ++ lib.optionals hardwareTest [
     uhubctl
-    tio
+    socat
     ffmpeg_7-headless
     dejavu_fonts
   ] ++ lib.optionals devTools [
+    cmake
+    ninja
+    tio
     shellcheck
     openocd-stm
   ] ++ lib.optionals (devTools && !stdenv.isDarwin) [
     gdb
-    kcachegrind
+    kdePackages.kcachegrind
   ] ++ lib.optionals (devTools && acceptJlink) [
     nrfutil
     nrfconnect
-    nrf-command-line-tools
   ];
   LD_LIBRARY_PATH = "${libffi}/lib:${libjpeg.out}/lib:${libusb1}/lib:${libressl.out}/lib";
   DYLD_LIBRARY_PATH = "${libffi}/lib:${libjpeg.out}/lib:${libusb1}/lib:${libressl.out}/lib";

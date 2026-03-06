@@ -1,13 +1,11 @@
 use heapless::String;
 
-use crate::{
-    trezorhal::secbool::secbool,
-    ui::{
-        component::{connect::Connect, Label},
-        display::{self, Color, Icon},
-        geometry::{Alignment, Offset, Point, Rect},
-        layout::simplified::{run, show},
-    },
+use crate::ui::{
+    component::Label,
+    display::{self, Color, Icon},
+    geometry::{Alignment, Offset, Point, Rect},
+    layout::simplified::{run, show},
+    ui_bootloader::BootloaderLayoutType,
 };
 
 use super::{
@@ -43,12 +41,20 @@ use crate::ui::{
 use ufmt::uwrite;
 
 use super::theme::bootloader::BLD_WARN_COLOR;
+use crate::{
+    time::Duration,
+    trezorhal::time,
+    ui::{component::Event, layout::simplified::process_frame_event},
+};
+use connect::Connect;
 use intro::Intro;
 use menu::Menu;
 
 pub mod intro;
 pub mod menu;
 pub mod welcome;
+
+pub mod connect;
 
 pub type BootloaderString = String<128>;
 
@@ -122,11 +128,60 @@ impl UIDelizia {
     }
 }
 
-impl BootloaderUI for UIDelizia {
-    fn screen_welcome() {
-        let mut frame = Welcome::new();
-        show(&mut frame, true);
+#[allow(clippy::large_enum_variant)]
+pub enum BootloaderLayout {
+    Welcome(Welcome),
+    Menu(Menu),
+    Connect(Connect),
+}
+
+impl BootloaderLayoutType for BootloaderLayout {
+    fn event(&mut self, event: Option<Event>) -> u32 {
+        match self {
+            BootloaderLayout::Welcome(f) => process_frame_event::<Welcome>(f, event),
+            BootloaderLayout::Menu(f) => process_frame_event::<Menu>(f, event),
+            BootloaderLayout::Connect(f) => process_frame_event::<Connect>(f, event),
+        }
     }
+
+    fn show(&mut self) -> u32 {
+        match self {
+            BootloaderLayout::Welcome(f) => show(f, true),
+            BootloaderLayout::Menu(f) => show(f, true),
+            BootloaderLayout::Connect(f) => show(f, true),
+        }
+    }
+    fn init_welcome() -> Self {
+        // let the previous screen on for some time
+        time::sleep(Duration::from_millis(1500));
+        Self::Welcome(Welcome::new())
+    }
+
+    fn init_menu(_initial_setup: bool) -> Self {
+        Self::Menu(Menu::new())
+    }
+
+    fn init_connect(_initial_setup: bool, _auto_update: bool) -> Self {
+        Self::Connect(Connect::new(
+            "Waiting for host...",
+            fonts::FONT_DEMIBOLD,
+            BLD_TITLE_COLOR,
+            BLD_BG,
+        ))
+    }
+
+    #[cfg(feature = "ble")]
+    fn init_pairing_mode(_initial_setup: bool, _name: &'static str) -> Self {
+        unimplemented!()
+    }
+
+    #[cfg(feature = "ble")]
+    fn init_wireless_setup(_name: &'static str) -> Self {
+        unimplemented!()
+    }
+}
+impl BootloaderUI for UIDelizia {
+    type CLayoutType = BootloaderLayout;
 
     fn screen_install_success(restart_seconds: u8, initial_setup: bool, complete_draw: bool) {
         let mut reboot_msg = BootloaderString::new();
@@ -264,7 +319,10 @@ impl BootloaderUI for UIDelizia {
     fn screen_unlock_bootloader_confirm() -> u32 {
         let title =
             Label::left_aligned("UNLOCK BOOTLOADER".into(), TEXT_BOLD).vertically_centered();
-        let msg = Label::centered("This action cannot be undone!".into(), TEXT_NORMAL);
+        let msg = Label::centered(
+            "Your seed will be erased. Unlocking bootloader is irreversible.".into(),
+            TEXT_NORMAL,
+        );
 
         let right = Button::with_text("UNLOCK".into())
             .styled(button_confirm())
@@ -287,11 +345,7 @@ impl BootloaderUI for UIDelizia {
                 .vertically_centered(),
             true,
         );
-        show(&mut frame, true);
-    }
-
-    fn screen_menu(firmware_present: secbool) -> u32 {
-        run(&mut Menu::new(firmware_present))
+        run(&mut frame);
     }
 
     fn screen_intro(bld_version: &str, vendor: &str, version: &str, fw_ok: bool) -> u32 {
@@ -341,7 +395,12 @@ impl BootloaderUI for UIDelizia {
         )
     }
 
-    fn screen_install_progress(progress: u16, initialize: bool, initial_setup: bool) {
+    fn screen_install_progress(
+        progress: u16,
+        initialize: bool,
+        initial_setup: bool,
+        _wireless: bool,
+    ) {
         let bg_color = if initial_setup { WELCOME_COLOR } else { BLD_BG };
         let fg_color = if initial_setup { GREEN_LIGHT } else { BLD_FG };
         let icon_color = BLD_FG;
@@ -357,17 +416,6 @@ impl BootloaderUI for UIDelizia {
         )
     }
 
-    fn screen_connect(initial_setup: bool) {
-        let bg = if initial_setup { WELCOME_COLOR } else { BLD_BG };
-        let mut frame = Connect::new(
-            "Waiting for host...",
-            fonts::FONT_DEMIBOLD,
-            BLD_TITLE_COLOR,
-            bg,
-        );
-        show(&mut frame, true);
-    }
-
     fn screen_wipe_success() {
         let mut frame = ResultScreen::new(
             &RESULT_WIPE,
@@ -377,7 +425,7 @@ impl BootloaderUI for UIDelizia {
                 .vertically_centered(),
             true,
         );
-        show(&mut frame, true);
+        run(&mut frame);
     }
 
     fn screen_wipe_fail() {
@@ -474,5 +522,15 @@ impl BootloaderUI for UIDelizia {
         });
 
         display::refresh();
+    }
+
+    #[cfg(feature = "ble")]
+    fn screen_confirm_pairing(_code: u32, _initial_setup: bool) -> u32 {
+        unimplemented!()
+    }
+
+    #[cfg(feature = "ble")]
+    fn screen_pairing_mode_finalizing(_initial_setup: bool) -> u32 {
+        unimplemented!()
     }
 }

@@ -58,7 +58,7 @@ where
     }
 
     fn render(&'s self, target: &mut R) {
-        <Self as Component>::render(self, target)
+        <Self as Component>::render(self, target);
     }
 
     #[cfg(feature = "ui_debug")]
@@ -106,8 +106,6 @@ pub struct SwipeFlow {
     /// If triggering swipe by event, make this decision instead of default
     /// after the swipe.
     pending_decision: Option<Decision>,
-    /// Layout lifecycle state.
-    lifecycle_state: LayoutState,
     /// Returned value from latest transition, stored as Obj.
     returned_value: Option<Result<Obj, Error>>,
 }
@@ -120,7 +118,6 @@ impl SwipeFlow {
             store: Vec::new(),
             allow_swipe: true,
             pending_decision: None,
-            lifecycle_state: LayoutState::Initial,
             returned_value: None,
         })
     }
@@ -167,10 +164,6 @@ impl SwipeFlow {
         ctx.request_paint();
     }
 
-    fn render_state<'s>(&'s self, state: usize, target: &mut RendererImpl<'_, 's, '_>) {
-        self.store[state].render(target);
-    }
-
     fn handle_swipe_child(&mut self, _ctx: &mut EventCtx, direction: Direction) -> Decision {
         self.state.handle_swipe(direction)
     }
@@ -201,7 +194,7 @@ impl SwipeFlow {
 
         let mut attach = false;
 
-        let event = if self.allow_swipe {
+        let mut event = if self.allow_swipe {
             let page = self.current_page();
             let pager = page.get_pager();
             let config = page.get_swipe_config().with_pager(pager);
@@ -239,8 +232,8 @@ impl SwipeFlow {
                 // swipe end.
                 if attach {
                     if let Event::Swipe(SwipeEvent::End(dir)) = event {
-                        self.current_page_mut()
-                            .event(ctx, Event::Attach(AttachType::Swipe(dir)));
+                        event = Event::Attach(AttachType::Swipe(dir));
+                        self.current_page_mut().event(ctx, event);
                     }
                 }
 
@@ -276,7 +269,7 @@ impl SwipeFlow {
         match decision {
             Decision::Transition(new_state, attach) => {
                 self.goto(ctx, new_state, attach);
-                Some(LayoutState::Attached(ctx.button_request().take()))
+                Some(LayoutState::Attached(ctx.button_request()))
             }
             Decision::Return(msg) => {
                 ctx.set_transition_out(return_transition);
@@ -286,7 +279,7 @@ impl SwipeFlow {
                 Some(LayoutState::Done)
             }
             Decision::Nothing if matches!(event, Event::Attach(_)) => {
-                Some(LayoutState::Attached(ctx.button_request().take()))
+                Some(LayoutState::Attached(ctx.button_request()))
             }
             _ => None,
         }
@@ -313,10 +306,28 @@ impl Layout<Result<Obj, Error>> for SwipeFlow {
         self.returned_value.as_ref()
     }
 
-    fn paint(&mut self) {
+    fn paint(&mut self) -> Result<(), Error> {
+        #[cfg(feature = "ui_debug")]
+        let mut overflow: bool = false;
+        #[cfg(not(feature = "ui_debug"))]
+        let overflow: bool = false;
         render_on_display(None, Some(Color::black()), |target| {
-            self.render_state(self.state.index(), target);
+            self.current_page().render(target);
+
+            #[cfg(feature = "rgb_led")]
+            target.led_state().set();
+
+            #[cfg(feature = "ui_debug")]
+            if target.should_raise_overflow_exception() {
+                overflow = true;
+            }
         });
+
+        if overflow {
+            Err(Error::OutOfRange)
+        } else {
+            Ok(())
+        }
     }
 }
 

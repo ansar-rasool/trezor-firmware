@@ -2,26 +2,25 @@ use heapless::Vec;
 
 use crate::{
     error::Error,
-    micropython::buffer::StrBuffer,
+    micropython::{buffer::StrBuffer, gc::GcBox},
     strutil::TString,
     translations::TR,
     ui::{
         component::{
-            swipe_detect::{SwipeConfig, SwipeSettings},
+            swipe_detect::SwipeConfig,
             text::paragraphs::{Paragraph, ParagraphSource, ParagraphVecShort, Paragraphs, VecExt},
-            Component, Event, EventCtx, PaginateFull,
+            Component, Event, EventCtx, Paginate,
         },
         event::SwipeEvent,
         flow::Swipable,
         geometry::{Direction, Rect},
+        layout::util::MAX_XPUBS,
         shape::Renderer,
         util::Pager,
     },
 };
 
 use super::{theme, Frame, FrameMsg};
-
-const MAX_XPUBS: usize = 16;
 
 pub struct AddressDetails {
     details: Frame<Paragraphs<ParagraphVecShort<'static>>>,
@@ -36,7 +35,7 @@ impl AddressDetails {
         details_title: TString<'static>,
         account: Option<TString<'static>>,
         path: Option<TString<'static>>,
-    ) -> Result<Self, Error> {
+    ) -> Result<GcBox<Self>, Error> {
         let mut para = ParagraphVecShort::new();
         if let Some(a) = account {
             para.add(Paragraph::new::<TString>(
@@ -61,7 +60,6 @@ impl AddressDetails {
         let result = Self {
             details: Frame::left_aligned(details_title, para.into_paragraphs())
                 .with_cancel_button()
-                .with_swipe(Direction::Right, SwipeSettings::immediate())
                 .with_horizontal_pages(),
             xpub_view: Frame::left_aligned(
                 " \n ".into(),
@@ -73,7 +71,7 @@ impl AddressDetails {
             xpub_page_count: Vec::new(),
             current_page: 0,
         };
-        Ok(result)
+        GcBox::new(result)
     }
 
     pub fn add_xpub(&mut self, title: StrBuffer, xpub: StrBuffer) -> Result<(), Error> {
@@ -112,7 +110,7 @@ impl AddressDetails {
     }
 }
 
-impl PaginateFull for AddressDetails {
+impl Paginate for AddressDetails {
     fn pager(&self) -> Pager {
         let total_xpub_pages: u8 = self.xpub_page_count.iter().copied().sum();
         Pager::new(total_xpub_pages as u16 + 1).with_current(self.current_page)
@@ -128,7 +126,7 @@ impl PaginateFull for AddressDetails {
     }
 }
 
-impl Component for AddressDetails {
+impl Component for GcBox<AddressDetails> {
     type Msg = ();
 
     fn place(&mut self, bounds: Rect) -> Rect {
@@ -145,7 +143,7 @@ impl Component for AddressDetails {
     }
 
     fn event(&mut self, ctx: &mut EventCtx, event: Event) -> Option<Self::Msg> {
-        ctx.set_page_count(self.pager().total() as usize);
+        ctx.set_page_count(self.pager().total());
         match event {
             Event::Swipe(SwipeEvent::End(Direction::Right)) => {
                 let to_page = self.pager().prev();
@@ -176,7 +174,7 @@ impl Component for AddressDetails {
     }
 }
 
-impl Swipable for AddressDetails {
+impl Swipable for GcBox<AddressDetails> {
     fn get_swipe_config(&self) -> SwipeConfig {
         match self.current_page {
             0 => self.details.get_swipe_config(),
@@ -190,7 +188,7 @@ impl Swipable for AddressDetails {
 }
 
 #[cfg(feature = "ui_debug")]
-impl crate::trace::Trace for AddressDetails {
+impl crate::trace::Trace for GcBox<AddressDetails> {
     fn trace(&self, t: &mut dyn crate::trace::Tracer) {
         t.component("AddressDetails");
         match self.current_page {

@@ -30,7 +30,12 @@ typedef struct {
   uint8_t advertising_whitelist;
 
   uint8_t peer_count;
-  uint8_t reserved[2];
+  uint8_t busy_flag;
+  struct {
+    bool bonded_connection : 1;
+    bool high_speed : 1;
+    uint8_t reserved : 6;
+  } flags;
   uint8_t sd_version_number;
 
   uint16_t sd_company_id;
@@ -39,6 +44,10 @@ typedef struct {
   uint32_t app_version;
   uint32_t bld_version;
 
+  uint8_t connected_addr[6];  // MAC address of the connected device
+  uint8_t connected_addr_type;
+
+  int8_t power_level;
 } event_status_msg_t;
 
 typedef enum {
@@ -48,6 +57,8 @@ typedef enum {
   INTERNAL_EVENT_PAIRING_REQUEST = 0x04,
   INTERNAL_EVENT_PAIRING_CANCELLED = 0x05,
   INTERNAL_EVENT_MAC = 0x06,
+  INTERNAL_EVENT_PAIRING_COMPLETED = 0x07,
+  INTERNAL_EVENT_BOND_LIST = 0x08,
 } internal_event_t;
 
 typedef enum {
@@ -61,14 +72,25 @@ typedef enum {
   INTERNAL_CMD_REJECT_PAIRING = 0x07,
   INTERNAL_CMD_UNPAIR = 0x08,
   INTERNAL_CMD_GET_MAC = 0x09,
+  INTERNAL_CMD_SET_BUSY = 0x0A,
+  INTERNAL_CMD_GET_BOND_LIST = 0x0B,
+  INTERNAL_CMD_SET_SPEED_HIGH = 0x0C,
+  INTERNAL_CMD_SET_SPEED_LOW = 0x0D,
+  INTERNAL_CMD_NOTIFY = 0x0E,
+  INTERNAL_CMD_BATTERY_UPDATE = 0x0F,
+  INTERNAL_CMD_SET_TX_POWER = 0x10,
 } internal_cmd_t;
 
 typedef struct {
   uint8_t cmd_id;
-  uint8_t whitelist;
+  struct {
+    uint8_t whitelist : 1;
+    uint8_t user_disconnect : 1;
+    uint8_t reserved : 6;
+  } flags;
   uint8_t color;
   uint8_t static_addr;
-  uint32_t device_code;
+  uint8_t device_code;
   uint8_t name[BLE_ADV_NAME_LEN];
 } cmd_advertising_on_t;
 
@@ -76,3 +98,8 @@ typedef struct {
   uint8_t cmd_id;
   uint8_t code[BLE_PAIRING_CODE_LEN];
 } cmd_allow_pairing_t;
+
+typedef struct {
+  uint8_t cmd_id;
+  uint8_t flag;
+} cmd_set_busy_t;

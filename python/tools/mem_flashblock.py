@@ -2,7 +2,7 @@
 
 # This file is part of the Trezor project.
 #
-# Copyright (C) 2012-2022 SatoshiLabs and contributors
+# Copyright (C) SatoshiLabs and contributors
 #
 # This library is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License version 3
@@ -61,6 +61,8 @@ def main() -> None:
         debug.memory_write(
             sectoraddrs[sector] + offset, content[offset : offset + step], flash=True
         )
+
+    debug.close()
 
 
 if __name__ == "__main__":

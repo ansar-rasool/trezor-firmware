@@ -17,8 +17,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __TREZORHAL_IMAGE_H__
-#define __TREZORHAL_IMAGE_H__
+#pragma once
 
 #include <trezor_model.h>
 #include <trezor_types.h>
@@ -30,6 +29,7 @@
 
 #define VENDOR_HEADER_MAX_SIZE (64 * 1024)
 #define IMAGE_HEADER_SIZE 0x400  // size of the bootloader or firmware header
+#define SECMON_HEADER_SIZE 0x200
 #define IMAGE_SIG_SIZE 65
 #define IMAGE_INIT_CHUNK_SIZE (16 * 1024)
 
@@ -37,8 +37,7 @@
 
 #define FIRMWARE_IMAGE_MAGIC 0x465A5254  // TRZF
 
-#define IMAGE_CODE_ALIGN(addr) \
-  ((((uint32_t)(uintptr_t)addr) + (CODE_ALIGNMENT - 1)) & ~(CODE_ALIGNMENT - 1))
+#define SECMON_IMAGE_MAGIC 0x43455354  // TSEC
 
 #define COREAPP_CODE_ALIGN(addr)                             \
   ((((uint32_t)(uintptr_t)addr) + (COREAPP_ALIGNMENT - 1)) & \
@@ -86,6 +85,25 @@ typedef struct {
 #define VTRUST_NO_WARNING \
   (VTRUST_WAIT_MASK | VTRUST_NO_RED | VTRUST_NO_CLICK | VTRUST_NO_STRING)
 
+#define VTRUST_ALLOW_PROVISIONING 0x200
+#define VTRUST_ALLOW_UNLIMITED_RUN 0x400
+
+// Globally defined values for the `vendor_header.fw_type` field.
+// !!! Do not modify existing values. Only add new ones if needed.
+//
+typedef enum {
+  // Reserved value (may appear in legacy vendor headers)
+  VENDOR_FW_TYPE_RESERVED = 0,
+  // Custom (unsafe) firmware
+  VENDOR_FW_TYPE_CUSTOM = 1,
+  // Trezor Universal firmware
+  VENDOR_FW_TYPE_UNIVERSAL = 2,
+  // Trezor Bitcoin-only firmware
+  VENDOR_FW_TYPE_BTC_ONLY = 3,
+  // Factory tester firmware
+  VENDOR_FW_TYPE_PRODTEST = 4,
+} vendor_fw_type_t;
+
 typedef struct {
   uint32_t magic;
   uint32_t hdrlen;
@@ -95,6 +113,7 @@ typedef struct {
   uint8_t vsig_n;
   uint16_t vtrust;
   uint32_t hw_model;
+  uint8_t fw_type;
   // uint8_t reserved[10];
   const uint8_t *vpub[MAX_VENDOR_PUBLIC_KEYS];
   uint8_t vstr_len;
@@ -120,6 +139,20 @@ typedef struct {
   // hash of vendor and image header
   uint8_t hash[IMAGE_HASH_DIGEST_LENGTH];
 } firmware_header_info_t;
+
+typedef struct {
+  uint32_t magic;
+  uint32_t hdrlen;
+  uint32_t codelen;
+  uint32_t version;
+  uint32_t hw_model;
+  uint8_t hw_revision;
+  uint8_t reserved_0[3];
+  uint8_t hash[32];
+  uint8_t reserved_1[391];
+  uint8_t sigmask;
+  uint8_t sig[64];
+} secmon_header_t;
 
 const image_header *read_image_header(const uint8_t *const data,
                                       const uint32_t magic,
@@ -147,13 +180,30 @@ void vendor_header_hash(const vendor_header *const vhdr, uint8_t *hash);
 secbool __wur check_single_hash(const uint8_t *const hash,
                                 const uint8_t *const data, int len);
 
+#ifdef KERNEL_MODE
 secbool __wur check_image_contents(const image_header *const hdr,
                                    uint32_t firstskip,
                                    const flash_area_t *area);
+#endif
 
 void get_image_fingerprint(const image_header *const hdr, uint8_t *const out);
 
 secbool check_firmware_header(const uint8_t *header, size_t header_size,
                               firmware_header_info_t *info);
 
+secbool __wur check_bootloader_header_sig(const image_header *const hdr);
+
+#ifdef USE_SECMON_VERIFICATION
+const secmon_header_t *read_secmon_header(const uint8_t *const data,
+                                          const uint32_t maxsize);
+
+secbool __wur check_secmon_model(const secmon_header_t *const hdr);
+
+secbool __wur check_secmon_header_sig(const secmon_header_t *const hdr);
+
+#ifdef SECURE_MODE
+secbool __wur check_secmon_contents(const secmon_header_t *const hdr,
+                                    size_t code_offset,
+                                    const flash_area_t *area);
+#endif
 #endif

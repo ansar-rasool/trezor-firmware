@@ -17,7 +17,7 @@ CORE_DIR = HERE.parent.parent
 if len(sys.argv) > 1:
     BIN_TO_ANALYZE = sys.argv[1]
 else:
-    BIN_TO_ANALYZE = CORE_DIR / "build/firmware/firmware.elf"  # type: ignore
+    BIN_TO_ANALYZE = CORE_DIR / "build/firmware/firmware.elf"
 FILE_TO_SAVE = HERE / "size_binary_firmware_elf_results.txt"
 
 
@@ -72,9 +72,9 @@ def _categories_func(row: DataRow) -> str | None:
                     "src/apps/stellar/",
                     "src/apps/eos/",
                     "src/apps/tezos/",
+                    "src/apps/tron/",
                     "src/apps/ripple/",
                     "src/apps/zcash/",
-                    "src/apps/binance/",
                 )
             )
         ),

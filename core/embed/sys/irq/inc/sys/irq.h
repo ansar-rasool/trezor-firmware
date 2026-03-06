@@ -17,17 +17,15 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef TREZORHAL_IRQ_H
-#define TREZORHAL_IRQ_H
+#pragma once
 
-#include <trezor_bsp.h>
 #include <trezor_types.h>
 
-#ifdef SYSTEM_VIEW
+#ifdef USE_SYSTEM_VIEW
 #include <sys/systemview.h>
 #endif
 
-#ifdef SYSTEM_VIEW
+#ifdef USE_SYSTEM_VIEW
 #define IRQ_LOG_ENTER() SEGGER_SYSVIEW_RecordEnterISR();
 #define IRQ_LOG_EXIT() SEGGER_SYSVIEW_RecordExitISR();
 #else
@@ -36,6 +34,10 @@
 #endif
 
 typedef uint32_t irq_key_t;
+
+#ifndef TREZOR_EMULATOR
+
+#include <trezor_bsp.h>
 
 // Checks if interrupts are enabled
 #define IS_IRQ_ENABLED(key) (((key) & 1) == 0)
@@ -99,4 +101,8 @@ static inline void irq_unlock(irq_key_t key) {
 // Lowest priority in the system used by SVC and PENDSV exception handlers
 #define IRQ_PRI_LOWEST NVIC_EncodePriority(NVIC_PRIORITYGROUP_4, 15, 0)
 
-#endif  // TREZORHAL_IRQ_H
+#endif
+
+// functions for rust exposure, same behavior as the macros above
+irq_key_t irq_lock_fn(void);
+void irq_unlock_fn(irq_key_t key);

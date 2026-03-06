@@ -99,27 +99,27 @@ uint16_t buttonRead(void) {
 	return ~state;
 }
 
-uint32_t random32(void) {
-	static uint32_t last = 0;
-	uint32_t new = 0;
+void random_buffer(uint8_t *buf, size_t len) {
+    static uint8_t last_byte = 0;
+    uint8_t new_byte = 0;
 
-	if (random_fd == -1)
-	{
-		random_fd = open(RANDOM_DEV_FILE, O_RDONLY);
-		if (random_fd < 0) {
-			fprintf(stderr, "Failed to open " RANDOM_DEV_FILE);
-			exit(1);
-		}
-	}
+    if (random_fd == -1) {
+        random_fd = open(RANDOM_DEV_FILE, O_RDONLY);
+        if (random_fd < 0) {
+            perror("Failed to open " RANDOM_DEV_FILE);
+            exit(1);
+        }
+    }
+    for (size_t i = 0; i < len; i++) {
+        do {
+            if (read(random_fd, &new_byte, 1) != 1) {
+                fprintf(stderr, "Failed to read " RANDOM_DEV_FILE "\n");
+                exit(1);
+            }
+        } while (new_byte == last_byte);
 
-	do {
-		ssize_t n = read(random_fd, &new, sizeof(new));
-		if (n < (int) sizeof(new)) {
-			fprintf(stderr, "Failed to read " RANDOM_DEV_FILE);
-			exit(1);
-		}
-	} while (last == new);
-
-	last = new;
-	return new;
+        buf[i] = new_byte;
+        last_byte = new_byte;
+    }
 }
+

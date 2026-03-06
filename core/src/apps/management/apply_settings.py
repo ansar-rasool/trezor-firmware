@@ -5,17 +5,38 @@ import trezorui_api
 from trezor import TR, utils
 from trezor.enums import ButtonRequestType, DisplayRotation
 from trezor.ui.layouts import confirm_action
-from trezor.wire import DataError
+from trezor.wire import DataError, high_speed
 
 if TYPE_CHECKING:
+    from buffer_types import AnyBytes
+
     from trezor.enums import SafetyCheckLevel
     from trezor.messages import ApplySettings, Success
-
 
 BRT_PROTECT_CALL = ButtonRequestType.ProtectCall  # CACHE
 
 
-def _validate_homescreen(homescreen: bytes) -> None:
+async def _load_homescreen(length: int) -> bytearray:
+    from trezor import utils
+    from trezor.ui.layouts.progress import progress
+
+    from apps.common import chunked
+
+    if length <= 0:
+        return bytearray()
+    elif length > utils.HOMESCREEN_MAXSIZE:
+        raise DataError(
+            f"Homescreen is too large, maximum size is {utils.HOMESCREEN_MAXSIZE} bytes"
+        )
+
+    loader = progress()
+
+    buf = utils.empty_bytearray(length)
+    await chunked.get_all_chunks(buf, length, report=loader.report)
+    return buf
+
+
+def _validate_homescreen(homescreen: AnyBytes) -> None:
     if homescreen == b"":
         return
 
@@ -31,15 +52,17 @@ async def apply_settings(msg: ApplySettings) -> Success:
     from trezor.messages import Success
     from trezor.wire import NotInitialized, ProcessError
 
-    from apps.base import reload_settings_from_storage
     from apps.common import safety_checks
+    from apps.common.lock_manager import reload_settings_from_storage
 
     if not storage_device.is_initialized():
         raise NotInitialized("Device is not initialized")
 
     homescreen = msg.homescreen  # local_cache_attribute
+    homescreen_length = msg.homescreen_length  # local_cache_attribute
     label = msg.label  # local_cache_attribute
     auto_lock_delay_ms = msg.auto_lock_delay_ms  # local_cache_attribute
+    auto_lock_delay_battery_ms = msg.auto_lock_delay_battery_ms
     use_passphrase = msg.use_passphrase  # local_cache_attribute
     passphrase_always_on_device = (
         msg.passphrase_always_on_device
@@ -52,17 +75,25 @@ async def apply_settings(msg: ApplySettings) -> Success:
 
     if (
         homescreen is None
+        and homescreen_length is None
         and label is None
         and use_passphrase is None
         and passphrase_always_on_device is None
         and display_rotation is None
         and auto_lock_delay_ms is None
+        and auto_lock_delay_battery_ms is None
         and msg_safety_checks is None
         and experimental_features is None
         and hide_passphrase_from_host is None
         and (haptic_feedback is None or not utils.USE_HAPTIC)
     ):
         raise ProcessError("No setting provided")
+
+    if homescreen_length is not None:
+        if homescreen is not None:
+            raise ProcessError("Mutually exclusive settings")
+        with high_speed:
+            homescreen = await _load_homescreen(homescreen_length)
 
     if homescreen is not None:
         _validate_homescreen(homescreen)
@@ -89,12 +120,20 @@ async def apply_settings(msg: ApplySettings) -> Success:
         storage_device.set_passphrase_always_on_device(passphrase_always_on_device)
 
     if auto_lock_delay_ms is not None:
-        if auto_lock_delay_ms < storage_device.AUTOLOCK_DELAY_MINIMUM:
+        if auto_lock_delay_ms < storage_device.AUTOLOCK_DELAY_USB_MIN_MS:
             raise ProcessError("Auto-lock delay too short")
-        if auto_lock_delay_ms > storage_device.AUTOLOCK_DELAY_MAXIMUM:
+        if auto_lock_delay_ms > storage_device.AUTOLOCK_DELAY_USB_MAX_MS:
             raise ProcessError("Auto-lock delay too long")
         await _require_confirm_change_autolock_delay(auto_lock_delay_ms)
         storage_device.set_autolock_delay_ms(auto_lock_delay_ms)
+
+    if auto_lock_delay_battery_ms is not None and utils.USE_POWER_MANAGER:
+        if auto_lock_delay_battery_ms < storage_device.AUTOLOCK_DELAY_BATT_MIN_MS:
+            raise ProcessError("Auto-lock delay too short")
+        if auto_lock_delay_battery_ms > storage_device.AUTOLOCK_DELAY_BATT_MAX_MS:
+            raise ProcessError("Auto-lock delay too long")
+        await _require_confirm_change_autolock_delay(auto_lock_delay_battery_ms)
+        storage_device.set_autolock_delay_battery_ms(auto_lock_delay_battery_ms)
 
     if msg_safety_checks is not None:
         await _require_confirm_safety_checks(msg_safety_checks)
@@ -123,24 +162,22 @@ async def apply_settings(msg: ApplySettings) -> Success:
 
     reload_settings_from_storage()
 
+    utils.notify_send(utils.NOTIFY_SETTING_CHANGE)
+
     return Success(message="Settings applied")
 
 
-async def _require_confirm_change_homescreen(homescreen: bytes) -> None:
+async def _require_confirm_change_homescreen(homescreen: AnyBytes) -> None:
     from trezor.ui.layouts import confirm_homescreen
 
     await confirm_homescreen(homescreen)
 
 
 async def _require_confirm_change_label(label: str) -> None:
-    from trezor.ui.layouts import confirm_single
+    from trezor.ui.layouts import confirm_change_label
 
-    await confirm_single(
-        "set_label",
-        TR.device_name__title,
-        description=TR.device_name__change_template,
-        description_param=label,
-        verb=TR.buttons__change,
+    await confirm_change_label(
+        "set_label", TR.device_name__title, TR.device_name__change_template, label
     )
 
 

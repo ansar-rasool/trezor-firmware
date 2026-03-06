@@ -2,7 +2,7 @@
 
 # This file is part of the Trezor project.
 #
-# Copyright (C) 2012-2022 SatoshiLabs and contributors
+# Copyright (C) SatoshiLabs and contributors
 #
 # This library is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License version 3
@@ -39,6 +39,7 @@ def find_debug() -> DebugLink:
 def main() -> None:
     debug = find_debug()
     debug.memory_write(int(sys.argv[1], 16), bytes.fromhex(sys.argv[2]), flash=True)
+    debug.close()
 
 
 if __name__ == "__main__":

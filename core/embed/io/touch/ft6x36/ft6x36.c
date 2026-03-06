@@ -24,7 +24,7 @@
 
 #include <io/i2c_bus.h>
 #include <io/touch.h>
-#include <sys/sysevent_source.h>
+#include <rtl/logging.h>
 #include <sys/systick.h>
 #include "ft6x36.h"
 
@@ -32,14 +32,13 @@
 #include "panels/lx154a2422cpt23.h"
 #elif defined TOUCH_PANEL_LHS200KB_IF21
 #include "panels/lhs200kb-if21.h"
-#elif defined TOUCH_PANEL_LX250A2410A
-#include "panels/lx250a2410a.h"
 #endif
 
-#include "../touch_fsm.h"
+#include "../touch_poll.h"
+
+LOG_DECLARE(touch_driver)
 
 // #define TOUCH_TRACE_REGS
-// #define TOUCH_TRACE_EVENT
 
 typedef struct {
   // Set if the driver is initialized
@@ -55,8 +54,6 @@ typedef struct {
   uint32_t read_ticks;
   // Last reported touch state
   uint32_t state;
-  // Touch state machine for each task
-  touch_fsm_t tls[SYSTASK_MAX_TASKS];
 
 } touch_driver_t;
 
@@ -64,9 +61,6 @@ typedef struct {
 static touch_driver_t g_touch_driver = {
     .initialized = secfalse,
 };
-
-// Forward declarations
-static const syshandle_vmt_t g_touch_handle_vmt;
 
 // Reads a subsequent registers from the FT6X36.
 //
@@ -130,27 +124,6 @@ static secbool ft6x36_write_reg(i2c_bus_t* bus, uint8_t reg, uint8_t value) {
   }
 
   return sectrue;
-}
-
-// Wake up the touch controller from monitor mode.
-//
-// The FT3168 touch controller switches from active mode to monitor mode
-// after a period of inactivity (the default setting is ~12s).
-// This feature cannot be disabled (at least in the current controller
-// firmware). When in this mode, it fails to respond to the first I2C command —
-// writes are not ACKed, and reads return 0x00 or garbage data.
-// To avoid this issue, we need to wake up the controller before
-// sending any commands to it.
-static void ft6x36_wake_up(i2c_bus_t* bus) {
-#ifdef TOUCH_WAKEUP_WORKAROUND
-  uint8_t temp;
-  // Wake up the touch controller by reading one of its registers
-  // (the specific register does not matter)
-  ft6x36_read_regs(bus, 0x00, &temp, 1);
-  // Wait for the touch controller to wake up
-  // (not sure if this is necessary, but it's safer to include it)
-  systick_delay_ms(1);
-#endif
 }
 
 // Powers down the touch controller and puts all
@@ -284,8 +257,6 @@ static void ft6x36_panel_correction(uint16_t x, uint16_t y, uint16_t* x_new,
   lx154a2422cpt23_touch_correction(x, y, x_new, y_new);
 #elif defined TOUCH_PANEL_LHS200KB_IF21
   lhs200kb_if21_touch_correction(x, y, x_new, y_new);
-#elif defined TOUCH_PANEL_LX250A2410A
-  lx250a2410a_touch_correction(x, y, x_new, y_new);
 #else
   *x_new = x;
   *y_new = y;
@@ -314,14 +285,12 @@ secbool touch_init(void) {
     goto cleanup;
   }
 
-  ft6x36_wake_up(driver->i2c_bus);
-
   // Configure the touch controller
   if (sectrue != ft6x36_configure(driver->i2c_bus)) {
     goto cleanup;
   }
 
-  if (!syshandle_register(SYSHANDLE_TOUCH, &g_touch_handle_vmt, driver)) {
+  if (!touch_poll_init()) {
     goto cleanup;
   }
 
@@ -338,7 +307,7 @@ cleanup:
 
 void touch_deinit(void) {
   touch_driver_t* driver = &g_touch_driver;
-  syshandle_unregister(SYSHANDLE_TOUCH);
+  touch_poll_deinit();
   i2c_bus_close(driver->i2c_bus);
   if (sectrue == driver->initialized) {
     ft6x36_power_down();
@@ -373,7 +342,6 @@ secbool touch_set_sensitivity(uint8_t value) {
   touch_driver_t* driver = &g_touch_driver;
 
   if (sectrue == driver->initialized) {
-    ft6x36_wake_up(driver->i2c_bus);
     return ft6x36_write_reg(driver->i2c_bus, FT6X36_REG_TH_GROUP, value);
   } else {
     return secfalse;
@@ -394,8 +362,6 @@ uint8_t touch_get_version(void) {
   while (sectrue != touch_ready()) {
     systick_delay_ms(1);
   }
-
-  ft6x36_wake_up(driver->i2c_bus);
 
   uint8_t fw_version = 0;
 
@@ -450,33 +416,20 @@ void trace_regs(uint8_t* regs) {
 
   uint32_t time = systicks_ms() % 10000;
 
-  printf("%04ld [gesture=%02X, nb_touches=%d, flags=%c, x=%3d, y=%3d]\r\n",
-         time, gesture, nb_touches, event, x, y);
-}
-#endif
-
-#ifdef TOUCH_TRACE_EVENT
-void trace_event(uint32_t event) {
-  char event_type = (event & TOUCH_START)  ? 'D'
-                    : (event & TOUCH_MOVE) ? 'M'
-                    : (event & TOUCH_END)  ? 'U'
-                                           : '-';
-
-  uint16_t x = touch_unpack_x(event);
-  uint16_t y = touch_unpack_y(event);
-
-  uint32_t time = hal_ticks_ms() % 10000;
-
-  systask_id_t task_id = systask_id(systask_active());
-
-  printf("%04ld [task=%d, event=%c, x=%3d, y=%3d]\r\n", time, task_id,
-         event_type, x, y);
+  LOG_DBG("%04ld [gesture=%02X, nb_touches=%d, flags=%c, x=%3d, y=%3d]\r\n",
+          time, gesture, nb_touches, event, x, y);
 }
 #endif
 
 // Reads touch registers and returns the last touch event
 // (state of touch registers) the controller is reporting.
-static uint32_t touch_get_state(touch_driver_t* driver) {
+uint32_t touch_get_state(void) {
+  touch_driver_t* driver = &g_touch_driver;
+
+  if (sectrue != driver->initialized) {
+    return 0;
+  }
+
   // Content of registers 0x00 - 0x06 read from the touch controller
   uint8_t regs[7];
 
@@ -552,60 +505,5 @@ static uint32_t touch_get_state(touch_driver_t* driver) {
 
   return driver->state;
 }
-
-uint32_t touch_get_event(void) {
-  touch_driver_t* driver = &g_touch_driver;
-
-  if (sectrue != driver->initialized) {
-    return 0;
-  }
-
-  touch_fsm_t* fsm = &driver->tls[systask_id(systask_active())];
-
-  uint32_t touch_state = touch_get_state(driver);
-
-  uint32_t event = touch_fsm_get_event(fsm, touch_state);
-
-#ifdef TOUCH_TRACE_EVENT
-  trace_event(event);
-#endif
-
-  return event;
-}
-
-static void on_task_created(void* context, systask_id_t task_id) {
-  touch_driver_t* driver = (touch_driver_t*)context;
-  touch_fsm_t* fsm = &driver->tls[task_id];
-  touch_fsm_init(fsm);
-}
-
-static void on_event_poll(void* context, bool read_awaited,
-                          bool write_awaited) {
-  touch_driver_t* driver = (touch_driver_t*)context;
-  UNUSED(write_awaited);
-
-  if (read_awaited) {
-    uint32_t touch_state = touch_get_state(driver);
-    syshandle_signal_read_ready(SYSHANDLE_TOUCH, &touch_state);
-  }
-}
-
-static bool on_check_read_ready(void* context, systask_id_t task_id,
-                                void* param) {
-  touch_driver_t* driver = (touch_driver_t*)context;
-  touch_fsm_t* fsm = &driver->tls[task_id];
-
-  uint32_t touch_state = *(uint32_t*)param;
-
-  return touch_fsm_event_ready(fsm, touch_state);
-}
-
-static const syshandle_vmt_t g_touch_handle_vmt = {
-    .task_created = on_task_created,
-    .task_killed = NULL,
-    .check_read_ready = on_check_read_ready,
-    .check_write_ready = NULL,
-    .poll = on_event_poll,
-};
 
 #endif  // KERNEL_MODE

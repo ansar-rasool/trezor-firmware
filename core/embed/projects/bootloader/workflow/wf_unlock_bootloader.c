@@ -21,19 +21,32 @@
 #include <trezor_rtl.h>
 
 #include <sec/secret.h>
+#include <util/flash_utils.h>
+
+#ifdef USE_BACKUP_RAM
+#include <sys/backup_ram.h>
+#endif
 
 #include "bootui.h"
 #include "protob.h"
-#include "rust_ui.h"
+#include "rust_ui_bootloader.h"
 #include "workflow.h"
 
 workflow_result_t workflow_unlock_bootloader(protob_io_t *iface) {
-  ui_result_t response = ui_screen_unlock_bootloader_confirm();
-  if (UI_RESULT_CONFIRM != response) {
+  confirm_result_t response = ui_screen_unlock_bootloader_confirm();
+  if (CONFIRM != response) {
     send_user_abort(iface, "Bootloader unlock cancelled");
     return WF_CANCELLED;
   }
-  secret_optiga_erase();
+#ifdef USE_STORAGE_HWKEY
+  secret_bhk_regenerate();
+#endif
+  ensure(erase_storage(NULL), NULL);
+#ifdef USE_BACKUP_RAM
+  ensure(backup_ram_erase_protected() * sectrue, NULL);
+#endif
+
+  secret_unlock_bootloader();
   send_msg_success(iface, NULL);
 
   screen_unlock_bootloader_success();

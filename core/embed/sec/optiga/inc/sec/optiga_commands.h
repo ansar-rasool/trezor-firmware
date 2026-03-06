@@ -17,8 +17,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef TREZORHAL_OPTIGA_COMMANDS_H
-#define TREZORHAL_OPTIGA_COMMANDS_H
+#pragma once
 
 #include <trezor_types.h>
 
@@ -173,6 +172,9 @@ typedef struct {
 #define OPTIGA_RANDOM_MAX_SIZE 256
 #define OPTIGA_MAX_CERT_SIZE 1728
 
+// The throttling delay when the security event counter is at its maximum.
+#define OPTIGA_T_MAX_MS 5000
+
 #define OPTIGA_ACCESS_CONDITION(ac_id, oid)           \
   (const optiga_metadata_item) {                      \
     (const uint8_t[]){ac_id, oid >> 8, oid & 0xff}, 3 \
@@ -205,17 +207,26 @@ optiga_result optiga_get_error_code(uint8_t *error_code);
 optiga_result optiga_get_data_object(uint16_t oid, bool get_metadata,
                                      uint8_t *data, size_t max_data_size,
                                      size_t *data_size);
+void optiga_get_data_object_time(bool is_metadata, uint32_t *time_ms);
 optiga_result optiga_set_data_object(uint16_t oid, bool set_metadata,
                                      const uint8_t *data, size_t data_size);
+void optiga_set_data_object_time(bool is_metadata, uint32_t *time_ms);
 optiga_result optiga_count_data_object(uint16_t oid, uint8_t count);
 optiga_result optiga_get_random(uint8_t *random, size_t random_size);
+void optiga_get_random_time(uint32_t *time_ms);
 optiga_result optiga_encrypt_sym(optiga_sym_mode mode, uint16_t oid,
                                  const uint8_t *input, size_t input_size,
                                  uint8_t *output, size_t max_output_size,
                                  size_t *output_size);
+void optiga_encrypt_sym_time(optiga_sym_mode mode, uint32_t *time_ms,
+                             uint8_t *optiga_sec,
+                             uint32_t *optiga_last_time_decreased_ms_ms);
 optiga_result optiga_set_auto_state(uint16_t nonce_oid, uint16_t key_oid,
                                     const uint8_t *key, size_t key_size);
+void optiga_set_auto_state_time(uint32_t *time_ms, uint8_t *optiga_sec,
+                                uint32_t *optiga_last_time_decreased_ms);
 optiga_result optiga_clear_auto_state(uint16_t key_oid);
+void optiga_clear_auto_state_time(uint32_t *time_ms);
 optiga_result optiga_calc_sign(uint16_t oid, const uint8_t *digest,
                                size_t digest_size, uint8_t *signature,
                                size_t max_sig_size, size_t *sig_size);
@@ -227,21 +238,22 @@ optiga_result optiga_gen_key_pair(optiga_curve curve, optiga_key_usage usage,
                                   uint16_t oid, uint8_t *public_key,
                                   size_t max_public_key_size,
                                   size_t *public_key_size);
+void optiga_gen_key_pair_time(uint32_t *time_ms);
 optiga_result optiga_gen_sym_key(optiga_aes algorithm, optiga_key_usage usage,
                                  uint16_t oid);
+void optiga_gen_sym_key_time(uint32_t *time_ms);
 optiga_result optiga_calc_ssec(optiga_curve curve, uint16_t oid,
                                const uint8_t *public_key,
                                size_t public_key_size, uint8_t *secret,
                                size_t max_secret_size, size_t *secret_size);
+void optiga_calc_ssec_time(uint32_t *time_ms, uint8_t *optiga_sec,
+                           uint32_t *optiga_last_time_decreased_ms);
 optiga_result optiga_derive_key(optiga_key_derivation deriv, uint16_t oid,
                                 const uint8_t *salt, size_t salt_size,
                                 uint8_t *info, size_t info_size, uint8_t *key,
                                 size_t key_size);
 optiga_result optiga_set_trust_anchor(void);
 optiga_result optiga_set_priv_key(uint16_t oid, const uint8_t priv_key[32]);
-
-#if !PRODUCTION
-void optiga_command_set_log_hex(optiga_log_hex_t f);
-#endif
-
-#endif
+optiga_result optiga_clear_all_auto_states(void);
+optiga_result optiga_reset_counter(uint16_t oid, uint32_t limit);
+void optiga_reset_counter_time(uint32_t *time_ms);

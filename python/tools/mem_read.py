@@ -2,7 +2,7 @@
 
 # This file is part of the Trezor project.
 #
-# Copyright (C) 2012-2022 SatoshiLabs and contributors
+# Copyright (C) SatoshiLabs and contributors
 #
 # This library is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License version 3
@@ -26,7 +26,7 @@ from trezorlib.transport import enumerate_devices
 # read initial stack pointer: ./mem_read.py 8000000 4
 # an entire bootloader can be later disassembled with:
 # arm-none-eabi-objdump -D -b binary -m arm -M force-thumb memory.dat
-# note that in order for this to work, your trezor device must
+# note that in order for this to work, your Trezor device must
 # be running a firmware that was built with debug link enabled
 
 
@@ -58,6 +58,7 @@ def main() -> None:
         f.write(mem)
 
     f.close()
+    debug.close()
 
 
 if __name__ == "__main__":

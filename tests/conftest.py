@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import logging
 import os
-import time
 import typing as t
 from enum import IntEnum
 from pathlib import Path
@@ -29,10 +28,12 @@ from _pytest.python import IdMaker
 from _pytest.reports import TestReport
 
 from trezorlib import debuglink, log, messages, models
+from trezorlib.client import Channel, ProtocolVersion
 from trezorlib.debuglink import TrezorClientDebugLink as Client
 from trezorlib.device import apply_settings
 from trezorlib.device import wipe as wipe_device
-from trezorlib.transport import Timeout, enumerate_devices, get_transport, protocol
+from trezorlib.transport import Timeout, enumerate_devices, get_transport
+from trezorlib.transport.thp.protocol_v1 import ProtocolV1Channel, UnexpectedMagicError
 
 # register rewrites before importing from local package
 # so that we see details of failed asserts from this module
@@ -50,12 +51,16 @@ if t.TYPE_CHECKING:
     from _pytest.terminal import TerminalReporter
 
     from trezorlib._internal.emulator import Emulator
+    from trezorlib.client import TrezorClient
+    from trezorlib.debuglink import SessionDebugWrapper
 
 
 HERE = Path(__file__).resolve().parent
 CORE = HERE.parent / "core"
 
 LOG = logging.getLogger(__name__)
+
+LOCK_TIME = 0.2
 
 # So that we see details of failed asserts from this module
 pytest.register_assert_rewrite("tests.common")
@@ -80,7 +85,8 @@ def core_emulator(request: pytest.FixtureRequest) -> t.Iterator[Emulator]:
     """Fixture returning default core emulator with possibility of screen recording."""
     with EmulatorWrapper("core", main_args=_emulator_wrapper_main_args()) as emu:
         # Modifying emu.client to add screen recording (when --ui=test is used)
-        with ui_tests.screen_recording(emu.client, request) as _:
+        _check_protocol(request, emu.client)
+        with ui_tests.screen_recording(emu.client, request, lambda: emu.client) as _:
             yield emu
 
 
@@ -124,12 +130,21 @@ def emulator(request: pytest.FixtureRequest) -> t.Generator["Emulator", None, No
         headless=True,
         auto_interact=not interact,
         main_args=_emulator_wrapper_main_args(),
+        launch_tropic_model=True,
     ) as emu:
         yield emu
 
 
 @pytest.fixture(scope="session")
-def _raw_client(request: pytest.FixtureRequest) -> Client:
+def _raw_client(request: pytest.FixtureRequest) -> t.Generator[Client, None, None]:
+    client = _get_raw_client(request)
+    try:
+        yield client
+    finally:
+        client.close_transport()
+
+
+def _get_raw_client(request: pytest.FixtureRequest) -> Client:
     # In case tests run in parallel, each process has its own emulator/client.
     # Requesting the emulator fixture only if relevant.
     if request.session.config.getoption("control_emulators"):
@@ -139,7 +154,7 @@ def _raw_client(request: pytest.FixtureRequest) -> Client:
         interact = os.environ.get("INTERACT") == "1"
         if not interact:
             # prevent tests from getting stuck in case there is an USB packet loss
-            protocol._DEFAULT_READ_TIMEOUT = 50.0
+            Channel._DEFAULT_READ_TIMEOUT = 50.0
 
         path = os.environ.get("TREZOR_PATH")
         if path:
@@ -155,7 +170,7 @@ def _client_from_path(
 ) -> Client:
     try:
         transport = get_transport(path)
-        return Client(transport, auto_interact=not interact)
+        return Client(transport, auto_interact=not interact, open_transport=True)
     except Exception as e:
         request.session.shouldstop = "Failed to communicate with Trezor"
         raise RuntimeError(f"Failed to open debuglink for {path}") from e
@@ -164,10 +179,7 @@ def _client_from_path(
 def _find_client(request: pytest.FixtureRequest, interact: bool) -> Client:
     devices = enumerate_devices()
     for device in devices:
-        try:
-            return Client(device, auto_interact=not interact)
-        except Exception:
-            pass
+        return Client(device, auto_interact=not interact, open_transport=True)
 
     request.session.shouldstop = "Failed to communicate with Trezor"
     raise RuntimeError("No debuggable device found")
@@ -180,10 +192,11 @@ class ModelsFilter:
         "t1": {models.T1B1},
         "t2": {models.T2T1},
         "tt": {models.T2T1},
-        "safe": {models.T2B1, models.T3T1, models.T3B1},
+        "safe": {models.T2B1, models.T3T1, models.T3B1, models.T3W1},
         "safe3": {models.T2B1, models.T3B1},
         "safe5": {models.T3T1},
         "delizia": {models.T3T1},
+        "eckhart": {models.T3W1},
     }
 
     def __init__(self, node: Node) -> None:
@@ -241,24 +254,8 @@ class ModelsFilter:
         return selected_models
 
 
-def _initialize_with_retries(
-    request: pytest.FixtureRequest, raw_client: Client
-) -> None:
-    """Stop the test session if the error reproduces a few times."""
-    for _ in range(5):
-        try:
-            raw_client.sync_responses()
-            raw_client.init_device()
-            return
-        except Exception:
-            LOG.warning("Failed to initialize client", exc_info=True)
-            time.sleep(1)
-    request.session.shouldstop = "Failed to communicate with Trezor"
-    pytest.fail("Failed to communicate with Trezor")
-
-
 @pytest.fixture(scope="function")
-def client(
+def _client_unlocked(
     request: pytest.FixtureRequest, _raw_client: Client
 ) -> t.Generator[Client, None, None]:
     """Client fixture.
@@ -294,6 +291,8 @@ def client(
     if request.node.get_closest_marker("altcoin") and is_btc_only:
         pytest.skip("Skipping altcoin test")
 
+    _check_protocol(request, _raw_client)
+
     sd_marker = request.node.get_closest_marker("sd_card")
     if sd_marker and not _raw_client.features.sd_card_present:
         raise RuntimeError(
@@ -303,73 +302,142 @@ def client(
         )
 
     test_ui = request.config.getoption("ui")
+    fail_on_gc_leak = not request.config.getoption("ignore_gc_leak")
 
     _raw_client.reset_debug_features()
-    _raw_client.open()
+    if isinstance(_raw_client.protocol, ProtocolV1Channel):
+        try:
+            _raw_client.sync_responses()
+        except Exception:
+            request.session.shouldstop = "Failed to communicate with Trezor"
+            pytest.fail("Failed to communicate with Trezor")
+
+    # Resetting all the debug events to not be influenced by previous test
+    _raw_client.debug.reset_debug_events()
+
+    if test_ui:
+        # we need to reseed before the wipe
+        _raw_client.debug.reseed(0)
+
+    # Use DebugLink to wipe (since THP channel requires unlocked device)
+    if _raw_client.model is not models.T1B1:
+        _raw_client.debug._call(messages.WipeDevice())
+    else:
+        wipe_device(_raw_client.get_seedless_session())
+
+    # Make sure there are no GC leaks from previous tests
+    # Also wait for the event loop restart after wipe
+    _raw_client.debug.check_gc_info(fail_on_gc_leak)
+
+    if sd_marker:
+        should_format = sd_marker.kwargs.get("formatted", True)
+        _raw_client.debug.erase_sd_card(format=should_format)
+
+    # Re-open client for this test
+    _raw_client = _raw_client.get_new_client()
+    _raw_client.reset_protocol()
+
+    if not _raw_client.features.bootloader_mode:
+        _raw_client.refresh_features()
+
+    # Load language again, as it got erased in wipe
+    if _raw_client.model is not models.T1B1:
+        lang = request.session.config.getoption("lang") or "en"
+        assert isinstance(lang, str)
+        translations.set_language(_raw_client.get_seedless_session(), lang)
+
+    setup_params = dict(
+        uninitialized=False,
+        mnemonic=" ".join(["all"] * 12),
+        pin=None,
+        passphrase=False,
+        needs_backup=False,
+        no_backup=False,
+    )
+
+    marker = request.node.get_closest_marker("setup_client")
+    if marker:
+        setup_params.update(marker.kwargs)
+
+    use_passphrase = setup_params["passphrase"] is True or isinstance(
+        setup_params["passphrase"], str
+    )
+    if not setup_params["uninitialized"]:
+        session = _raw_client.get_seedless_session()
+        debuglink.load_device(
+            session,
+            mnemonic=setup_params["mnemonic"],  # type: ignore
+            pin=setup_params["pin"],  # type: ignore
+            passphrase_protection=use_passphrase,
+            label="test",
+            needs_backup=setup_params["needs_backup"],  # type: ignore
+            no_backup=setup_params["no_backup"],  # type: ignore
+            _skip_init_device=False,
+        )
+        _raw_client._setup_pin = setup_params["pin"]
+
+        if request.node.get_closest_marker("experimental"):
+            apply_settings(session, experimental_features=True)
+        session.end()
+
     try:
-        _initialize_with_retries(request, _raw_client)
-
-        # Resetting all the debug events to not be influenced by previous test
-        _raw_client.debug.reset_debug_events()
-
-        if test_ui:
-            # we need to reseed before the wipe
-            _raw_client.debug.reseed(0)
-
-        if sd_marker:
-            should_format = sd_marker.kwargs.get("formatted", True)
-            _raw_client.debug.erase_sd_card(format=should_format)
-
-        wipe_device(_raw_client)
-
-        # Load language again, as it got erased in wipe
-        if _raw_client.model is not models.T1B1:
-            lang = request.session.config.getoption("lang") or "en"
-            assert isinstance(lang, str)
-            translations.set_language(_raw_client, lang)
-
-        setup_params = dict(
-            uninitialized=False,
-            mnemonic=" ".join(["all"] * 12),
-            pin=None,
-            passphrase=False,
-            needs_backup=False,
-            no_backup=False,
-        )
-
-        marker = request.node.get_closest_marker("setup_client")
-        if marker:
-            setup_params.update(marker.kwargs)
-
-        use_passphrase = setup_params["passphrase"] is True or isinstance(
-            setup_params["passphrase"], str
-        )
-
-        if not setup_params["uninitialized"]:
-            debuglink.load_device(
-                _raw_client,
-                mnemonic=setup_params["mnemonic"],  # type: ignore
-                pin=setup_params["pin"],  # type: ignore
-                passphrase_protection=use_passphrase,
-                label="test",
-                needs_backup=setup_params["needs_backup"],  # type: ignore
-                no_backup=setup_params["no_backup"],  # type: ignore
-                _skip_init_device=True,
-            )
-
-            if request.node.get_closest_marker("experimental"):
-                apply_settings(_raw_client, experimental_features=True)
-
-            if use_passphrase and isinstance(setup_params["passphrase"], str):
-                _raw_client.use_passphrase(setup_params["passphrase"])
-
-            _raw_client.lock(_refresh_features=False)
-            _raw_client.init_device(new_session=True)
-
-        with ui_tests.screen_recording(_raw_client, request):
-            yield _raw_client
+        yield _raw_client
     finally:
-        _raw_client.close()
+        # Make sure there are no GC leaks from this test
+        _raw_client.debug.check_gc_info(fail_on_gc_leak)
+
+
+@pytest.fixture(scope="function")
+def client(
+    request: pytest.FixtureRequest, _client_unlocked: Client
+) -> t.Generator[Client, None, None]:
+    _client_unlocked.lock()
+    if bool(request.node.get_closest_marker("invalidate_client")):
+        with ui_tests.screen_recording(_client_unlocked, request):
+            try:
+                yield _client_unlocked
+            finally:
+                _client_unlocked.invalidate()
+    else:
+        with ui_tests.screen_recording(_client_unlocked, request):
+            yield _client_unlocked
+
+
+@pytest.fixture(scope="function")
+def session(
+    request: pytest.FixtureRequest, _client_unlocked: Client
+) -> t.Generator[SessionDebugWrapper, None, None]:
+    if bool(request.node.get_closest_marker("uninitialized_session")):
+        session = _client_unlocked.get_seedless_session()
+    else:
+        derive_cardano = bool(request.node.get_closest_marker("cardano"))
+        passphrase = ""
+        marker = request.node.get_closest_marker("setup_client")
+        if marker and isinstance(marker.kwargs.get("passphrase"), str):
+            passphrase = marker.kwargs["passphrase"]
+        if _client_unlocked._setup_pin is not None:
+            _client_unlocked.use_pin_sequence([_client_unlocked._setup_pin])
+        session = _client_unlocked.get_session(
+            derive_cardano=derive_cardano, passphrase=passphrase
+        )
+
+    if _client_unlocked._setup_pin is not None:
+        session.lock()
+    with ui_tests.screen_recording(_client_unlocked, request):
+        yield session
+    # Calling session.end() is not needed since the device gets wiped later anyway.
+
+
+def _check_protocol(request: pytest.FixtureRequest, client: TrezorClient) -> None:
+    protocol_marker: Mark | None = request.node.get_closest_marker("protocol")
+    if not protocol_marker:
+        return
+
+    protocol_version = ProtocolVersion(client.protocol_version)
+    expected_marker = f"protocol_{protocol_version.name.lower()}"
+
+    if expected_marker not in protocol_marker.args:
+        pytest.skip(f"Test does not support Protocol{protocol_version.name}.")
 
 
 def _is_main_runner(session_or_request: pytest.Session | pytest.FixtureRequest) -> bool:
@@ -468,6 +536,12 @@ def pytest_addoption(parser: "Parser") -> None:
         default=None,
         help="File path for verbose logging",
     )
+    parser.addoption(
+        "--ignore-gc-leak",
+        action="store_true",
+        default=False,
+        help="Issue a warning when GC leak detected (otherwise, fail the test)",
+    )
 
 
 def pytest_configure(config: "Config") -> None:
@@ -486,6 +560,14 @@ def pytest_configure(config: "Config") -> None:
     config.addinivalue_line(
         "markers",
         'setup_client(mnemonic="all all all...", pin=None, passphrase=False, uninitialized=False): configure the client instance',
+    )
+    config.addinivalue_line(
+        "markers",
+        "uninitialized_session: use uninitialized session instance",
+    )
+    config.addinivalue_line(
+        "markers",
+        "invalidate_client: invalidate client after test",
     )
     with open(os.path.join(os.path.dirname(__file__), "REGISTERED_MARKERS")) as f:
         for line in f:
@@ -522,7 +604,7 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
 
 
 def pytest_set_filtered_exceptions():
-    return (Timeout, protocol.UnexpectedMagic)
+    return (Timeout, UnexpectedMagicError)
 
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)

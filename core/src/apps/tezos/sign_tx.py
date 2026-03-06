@@ -16,6 +16,8 @@ from .helpers import (  # symbols used more than once
 )
 
 if TYPE_CHECKING:
+    from buffer_types import AnyBytes
+
     from trezor.messages import (
         TezosContractID,
         TezosDelegationOp,
@@ -32,10 +34,12 @@ if TYPE_CHECKING:
 
 @with_slip44_keychain(*PATTERNS, slip44_id=SLIP44_ID, curve=CURVE)
 async def sign_tx(msg: TezosSignTx, keychain: Keychain) -> TezosSignedTx:
+    from trezor import TR
     from trezor.crypto import hashlib
     from trezor.crypto.curve import ed25519
     from trezor.enums import TezosBallotType
     from trezor.messages import TezosSignedTx
+    from trezor.ui.layouts import show_continue_in_app
 
     from apps.common.paths import validate_path
 
@@ -155,12 +159,13 @@ async def sign_tx(msg: TezosSignTx, keychain: Keychain) -> TezosSignedTx:
 
     sig_prefixed = base58_encode_check(signature, helpers.TEZOS_SIGNATURE_PREFIX)
 
+    show_continue_in_app(TR.send__transaction_signed)
     return TezosSignedTx(
         signature=sig_prefixed, sig_op_contents=sig_op_contents, operation_hash=ophash
     )
 
 
-def _get_address_by_tag(address_hash: bytes) -> str:
+def _get_address_by_tag(address_hash: AnyBytes) -> str:
     prefixes = ["tz1", "tz2", "tz3"]
     tag = int(address_hash[0])
 
@@ -340,7 +345,7 @@ def _encode_common(
 
 
 def _encode_data_with_bool_prefix(
-    w: Writer, data: bytes | None, expected_length: int
+    w: Writer, data: AnyBytes | None, expected_length: int
 ) -> None:
     if data:
         helpers.write_bool(w, True)

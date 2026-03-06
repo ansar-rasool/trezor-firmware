@@ -3,36 +3,38 @@ from typing import TYPE_CHECKING
 import trezorui_api
 from trezor import ui, workflow
 from trezor.enums import ButtonRequestType
-from trezor.messages import ButtonAck, ButtonRequest
-from trezor.wire import ActionCancelled, context
-
-if __debug__:
-    from trezor import log
+from trezor.wire import ActionCancelled
 
 if TYPE_CHECKING:
-    from typing import Any, Awaitable, Callable, TypeVar
+    from typing import Any, Awaitable, Callable, Coroutine, Literal, TypeVar, overload
 
-    PropertyType = tuple[str | None, str | bytes | None]
+    from trezorui_api import PropertyType  # noqa: F401
+
     ExceptionType = BaseException | type[BaseException]
 
     InfoFunc = Callable[[], Awaitable[None]]
 
     T = TypeVar("T")
 
+    @overload
+    async def interact(
+        layout_obj: ui.LayoutObj[Any],
+        br_name: str | None,
+        br_code: ButtonRequestType = ButtonRequestType.Other,
+        raise_on_cancel: ExceptionType | None = ActionCancelled,
+        *,
+        confirm_only: Literal[True],
+    ) -> None: ...
 
-async def _button_request(
-    br_name: str,
-    code: ButtonRequestType = ButtonRequestType.Other,
-    pages: int = 0,
-) -> None:
-    workflow.close_others()
-    if __debug__:
-        log.info(__name__, "ButtonRequest sent: %s", br_name)
-    await context.maybe_call(
-        ButtonRequest(code=code, pages=pages or None, name=br_name), ButtonAck
-    )
-    if __debug__:
-        log.info(__name__, "ButtonRequest acked: %s", br_name)
+    @overload
+    async def interact(
+        layout_obj: ui.LayoutObj[T],
+        br_name: str | None,
+        br_code: ButtonRequestType = ButtonRequestType.Other,
+        raise_on_cancel: ExceptionType | None = ActionCancelled,
+        *,
+        confirm_only: bool = False,
+    ) -> T: ...
 
 
 async def interact(
@@ -40,20 +42,45 @@ async def interact(
     br_name: str | None,
     br_code: ButtonRequestType = ButtonRequestType.Other,
     raise_on_cancel: ExceptionType | None = ActionCancelled,
-) -> T:
+    *,
+    confirm_only: bool = False,
+) -> T | None:
+    """Return the result of user interaction with the layout.
+
+    If the result is CANCELLED, raise the specified exception (`ActionCancelled`
+    by default), unless `raise_on_cancel` is explicitly set to None.
+
+    Specify `confirm_only=True` to invoke "raise if not confirmed" behavior,
+    that is:
+    * if the result is CONFIRMED, return None
+    * if the result is CANCELLED, raise the `raise_on_cancel` exception
+    * on any other result (indicating a bug in the caller), raise a RuntimeError
+    Setting `raise_on_cancel=None` together with `confirm_only=True` invalid,
+    and a RuntimeError will be raised in the cancel case.
+    """
     # shut down other workflows to prevent them from interfering with the current one
     workflow.close_others()
     # start the layout
     layout = ui.Layout(layout_obj)
     layout.start()
-    # send the button request
     if br_name is not None:
-        await _button_request(br_name, br_code, layout_obj.page_count())
+        # store the first button request to be sent
+        layout.button_request_box.put((br_code, br_name))
     # wait for the layout result
     result = await layout.get_result()
+
     # raise an exception if the user cancelled the action
     if raise_on_cancel is not None and result is trezorui_api.CANCELLED:
         raise raise_on_cancel
+
+    if confirm_only:
+        # raise_if_not_confirmed behavior: return None if the user confirmed the action
+        if result is trezorui_api.CONFIRMED:
+            return None
+        # if the result was CANCELLED, the earlier branch should have raised
+        # ...raise otherwise
+        raise RuntimeError  # unexpected result
+
     return result
 
 
@@ -62,9 +89,8 @@ def raise_if_not_confirmed(
     br_name: str | None,
     br_code: ButtonRequestType = ButtonRequestType.Other,
     exc: ExceptionType = ActionCancelled,
-) -> Awaitable[None]:
-    action = interact(layout_obj, br_name, br_code, exc)
-    return action  # type: ignore ["UiResult" is incompatible with "None"]
+) -> Coroutine[Any, Any, None]:
+    return interact(layout_obj, br_name, br_code, exc, confirm_only=True)
 
 
 async def with_info(

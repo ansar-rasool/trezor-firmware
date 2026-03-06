@@ -8,7 +8,7 @@ mod loader;
 mod result;
 mod welcome_screen;
 
-use super::{common_messages, constant, theme};
+use super::{common_messages, constant, fonts, theme};
 pub use button::{
     Button, ButtonAction, ButtonActions, ButtonContent, ButtonDetails, ButtonLayout, ButtonPos,
     ButtonStyle, ButtonStyleSheet,
@@ -52,7 +52,7 @@ pub use changing_text::ChangingTextLine;
 pub use coinjoin_progress::CoinJoinProgress;
 pub use flow::Flow;
 pub use flow_pages::{FlowPages, Page};
-pub use frame::{Frame, ScrollableContent, ScrollableFrame};
+pub use frame::{Frame, ScrollableFrame};
 #[cfg(feature = "micropython")]
 pub use homescreen::{check_homescreen_format, ConfirmHomescreen, Homescreen, Lockscreen};
 #[cfg(feature = "translations")]

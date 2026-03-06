@@ -9,13 +9,13 @@ from trezor.wire.message_handler import wrap_protobuf_load
 from trezor.wire.protocol_common import Context, Message
 
 if __debug__:
-    from .. import wire_log as log
+    from trezor import log
 
 
 if TYPE_CHECKING:
     from typing import TypeVar
 
-    from .. import BufferProvider, WireInterface
+    from .. import Provider, WireInterface
 
     LoadedMessageType = TypeVar("LoadedMessageType", bound=protobuf.MessageType)
 
@@ -26,7 +26,7 @@ class CodecContext(Context):
     def __init__(
         self,
         iface: WireInterface,
-        buffer_provider: BufferProvider,
+        buffer_provider: Provider[bytearray],
     ) -> None:
         self.buffer_provider = buffer_provider
         self._buffer = None
@@ -49,9 +49,9 @@ class CodecContext(Context):
         if __debug__:
             log.debug(
                 __name__,
-                self.iface,
                 "expect: %s",
                 expected_type.MESSAGE_NAME if expected_type else expected_types,
+                iface=self.iface,
             )
 
         # Load the full message into a buffer, parse out type and data payload
@@ -63,14 +63,16 @@ class CodecContext(Context):
             raise UnexpectedMessageException(msg)
 
         if expected_type is None:
-            expected_type = protobuf.type_for_wire(msg.type)
+            expected_type = protobuf.type_for_wire(
+                self.message_type_enum_name, msg.type
+            )
 
         if __debug__:
             log.debug(
                 __name__,
-                self.iface,
                 "read: %s",
                 expected_type.MESSAGE_NAME,
+                iface=self.iface,
             )
 
         # look up the protobuf class and parse the message
@@ -80,9 +82,9 @@ class CodecContext(Context):
         if __debug__:
             log.debug(
                 __name__,
-                self.iface,
                 "write: %s",
                 msg.MESSAGE_NAME,
+                iface=self.iface,
             )
 
         # cannot write message without wire type

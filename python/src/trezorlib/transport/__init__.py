@@ -1,6 +1,6 @@
 # This file is part of the Trezor project.
 #
-# Copyright (C) 2012-2022 SatoshiLabs and contributors
+# Copyright (C) SatoshiLabs and contributors
 #
 # This library is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License version 3
@@ -17,14 +17,16 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Iterable, Sequence, Tuple, TypeVar
+import os
+import typing as t
 
 from ..exceptions import TrezorException
 
-if TYPE_CHECKING:
+if t.TYPE_CHECKING:
     from ..models import TrezorModel
 
-    T = TypeVar("T", bound="Transport")
+    T = t.TypeVar("T", bound="Transport")
+
 
 LOG = logging.getLogger(__name__)
 
@@ -34,7 +36,7 @@ https://github.com/trezor/trezor-common/blob/master/udev/51-trezor.rules
 """.strip()
 
 
-MessagePayload = Tuple[int, bytes]
+MessagePayload = t.Tuple[int, bytes]
 
 
 class TransportException(TrezorException):
@@ -50,85 +52,76 @@ class Timeout(TransportException):
 
 
 class Transport:
-    """Raw connection to a Trezor device.
-
-    Transport subclass represents a kind of communication link: Trezor Bridge, WebUSB
-    or USB-HID connection, or UDP socket of listening emulator(s).
-    It can also enumerate devices available over this communication link, and return
-    them as instances.
-
-    Transport instance is a thing that:
-    - can be identified and requested by a string URI-like path
-    - can open and close sessions, which enclose related operations
-    - can read and write protobuf messages
-
-    You need to implement a new Transport subclass if you invent a new way to connect
-    a Trezor device to a computer.
-    """
-
     PATH_PREFIX: str
-    ENABLED = False
 
-    def __str__(self) -> str:
-        return self.get_path()
+    @classmethod
+    def enumerate(
+        cls: t.Type[T], models: t.Iterable[TrezorModel] | None = None
+    ) -> t.Iterable[T]:
+        raise NotImplementedError
+
+    @classmethod
+    def find_by_path(cls: t.Type[T], path: str, prefix_search: bool = False) -> T:
+        for device in cls.enumerate():
+
+            if device.get_path() == path:
+                return device
+
+            if prefix_search and device.get_path().startswith(path):
+                return device
+
+        raise TransportException(f"{cls.PATH_PREFIX} device not found: {path}")
 
     def get_path(self) -> str:
-        raise NotImplementedError
-
-    def begin_session(self) -> None:
-        raise NotImplementedError
-
-    def end_session(self) -> None:
-        raise NotImplementedError
-
-    def read(self, timeout: float | None = None) -> MessagePayload:
-        raise NotImplementedError
-
-    def write(self, message_type: int, message_data: bytes) -> None:
         raise NotImplementedError
 
     def find_debug(self: T) -> T:
         raise NotImplementedError
 
-    @classmethod
-    def enumerate(
-        cls: type[T], models: Iterable[TrezorModel] | None = None
-    ) -> Iterable[T]:
+    def open(self) -> None:
         raise NotImplementedError
 
-    @classmethod
-    def find_by_path(cls: type[T], path: str, prefix_search: bool = False) -> T:
-        for device in cls.enumerate():
-            if (
-                path is None
-                or device.get_path() == path
-                or (prefix_search and device.get_path().startswith(path))
-            ):
-                return device
+    def close(self) -> None:
+        raise NotImplementedError
 
-        raise TransportException(f"{cls.PATH_PREFIX} device not found: {path}")
+    def write_chunk(self, chunk: bytes) -> None:
+        raise NotImplementedError
+
+    def read_chunk(self, timeout: float | None = None) -> bytes:
+        raise NotImplementedError
+
+    def ping(self) -> bool:
+        raise NotImplementedError
+
+    CHUNK_SIZE: t.ClassVar[int | None]
 
 
-def all_transports() -> Iterable[type["Transport"]]:
+def all_transports(ble_enabled: bool | None = None) -> t.Iterable[t.Type["Transport"]]:
+    from .ble import BleTransport
     from .bridge import BridgeTransport
     from .hid import HidTransport
     from .udp import UdpTransport
     from .webusb import WebUsbTransport
 
-    transports: Tuple[type["Transport"], ...] = (
+    transports: t.Tuple[t.Type["Transport"], ...] = (
         BridgeTransport,
         HidTransport,
         UdpTransport,
         WebUsbTransport,
     )
+    if ble_enabled is None:
+        ble_enabled = os.environ.get("TREZOR_BLE") == "1"
+    if ble_enabled:
+        transports += (BleTransport,)
     return set(t for t in transports if t.ENABLED)
 
 
 def enumerate_devices(
-    models: Iterable[TrezorModel] | None = None,
-) -> Sequence[Transport]:
-    devices: list[Transport] = []
-    for transport in all_transports():
+    models: t.Iterable[TrezorModel] | None = None,
+    ble_enabled: bool | None = None,
+) -> t.Sequence[Transport]:
+    devices: t.List[Transport] = []
+    for transport in all_transports(ble_enabled=ble_enabled):
         name = transport.__name__
         try:
             found = list(transport.enumerate(models))
@@ -142,10 +135,14 @@ def enumerate_devices(
     return devices
 
 
-def get_transport(path: str | None = None, prefix_search: bool = False) -> Transport:
+def get_transport(
+    path: str | None = None,
+    prefix_search: bool = False,
+    ble_enabled: bool | None = None,
+) -> Transport:
     if path is None:
         try:
-            return next(iter(enumerate_devices()))
+            return next(iter(enumerate_devices(ble_enabled=ble_enabled)))
         except StopIteration:
             raise TransportException("No Trezor device found") from None
 
@@ -160,7 +157,11 @@ def get_transport(path: str | None = None, prefix_search: bool = False) -> Trans
             "prefix" if prefix_search else "full path", path
         )
     )
-    transports = [t for t in all_transports() if match_prefix(path, t.PATH_PREFIX)]
+    transports = [
+        t
+        for t in all_transports(ble_enabled=ble_enabled)
+        if match_prefix(path, t.PATH_PREFIX)
+    ]
     if transports:
         return transports[0].find_by_path(path, prefix_search=prefix_search)
 

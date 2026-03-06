@@ -1,12 +1,14 @@
 # pylint: disable=E0602
 
 import os
-import shlex
 import tools, models, ui
 
 TREZOR_MODEL = ARGUMENTS.get('TREZOR_MODEL', 'T2T1')
 CMAKELISTS = int(ARGUMENTS.get('CMAKELISTS', 0))
+BOOTLOADER_QA = ARGUMENTS.get('BOOTLOADER_QA', '0') == '1'
+PRODUCTION = 0 if BOOTLOADER_QA else ARGUMENTS.get('PRODUCTION', '0') == '1'
 HW_REVISION = 'emulator'
+DBG_CONSOLE = ARGUMENTS.get('DBG_CONSOLE', '')
 
 if not models.has_emulator(TREZOR_MODEL):
     # skip bootloader build
@@ -20,7 +22,21 @@ if not models.has_emulator(TREZOR_MODEL):
              )
     Return()
 
-FEATURES_WANTED = ["input", "rgb_led", "dma2d", "optiga"]
+FEATURES_WANTED = [
+    "ble",
+    "display",
+    "dma2d",
+    "input",
+    "kernel_mode",
+    "power_manager",
+    "rgb_led",
+    "secure_mode",
+    "usb",
+    "usb_iface_wire",
+    ]
+
+if DBG_CONSOLE != "":
+    FEATURES_WANTED += ["dbg_console"]
 
 CCFLAGS_MOD = ''
 CPPPATH_MOD = []
@@ -35,10 +51,8 @@ RUST_UI_FEATURES = []
 CCFLAGS_MOD += '-Wno-sequence-point '
 CPPPATH_MOD += [
     'vendor/trezor-crypto',
-    'vendor/trezor-storage',
 ]
 CPPDEFINES_MOD += [
-    'KERNEL_MODE',
     'AES_128',
     'AES_192',
     'USE_KECCAK',
@@ -59,6 +73,7 @@ SOURCE_MOD_CRYPTO += [
     'vendor/trezor-crypto/ed25519-donna/modm-donna-32bit.c',
     'vendor/trezor-crypto/memzero.c',
     'vendor/trezor-crypto/rand.c',
+    'vendor/trezor-crypto/rand_insecure.c',
     'vendor/trezor-crypto/sha2.c',
 ]
 
@@ -68,7 +83,6 @@ CPPPATH_MOD += [
 ]
 
 SOURCE_MOD += [
-    'embed/upymod/modtrezorcrypto/rand.c',
     'embed/gfx/bitblt/gfx_bitblt.c',
     'embed/gfx/bitblt/gfx_bitblt_mono8.c',
     'embed/gfx/bitblt/gfx_bitblt_rgb565.c',
@@ -81,14 +95,17 @@ SOURCE_MOD += [
     'embed/util/flash/flash_utils.c',
     'embed/util/image/image.c',
     'embed/util/rsod/rsod.c',
+    'embed/util/rsod/rsod_special.c',
     'embed/util/scm_revision/scm_revision.c',
     'embed/rtl/error_handling.c',
-    'embed/rtl/mini_printf.c',
+    'embed/rtl/strutils.c',
     'vendor/micropython/lib/uzlib/adler32.c',
     'vendor/micropython/lib/uzlib/crc32.c',
     'vendor/micropython/lib/uzlib/tinflate.c',
-    'vendor/trezor-storage/flash_area.c',
 ]
+
+if not PRODUCTION:
+    SOURCE_MOD += ['embed/rtl/printf.c']
 
 SOURCE_NANOPB = [
     'vendor/nanopb/pb_common.c',
@@ -99,8 +116,7 @@ SOURCE_NANOPB = [
 SOURCE_BOOTLOADER = [
     'embed/projects/bootloader/bootui.c',
     'embed/projects/bootloader/main.c',
-    'embed/projects/bootloader/poll.c',
-    'embed/projects/bootloader/antiglitch.c',
+    'embed/projects/bootloader/ui_helpers.c',
     'embed/projects/bootloader/workflow/wf_firmware_update.c',
     'embed/projects/bootloader/workflow/wf_wipe_device.c',
     'embed/projects/bootloader/workflow/wf_get_features.c',
@@ -110,32 +126,15 @@ SOURCE_BOOTLOADER = [
     'embed/projects/bootloader/workflow/wf_empty_device.c',
     'embed/projects/bootloader/workflow/wf_auto_update.c',
     'embed/projects/bootloader/workflow/wf_host_control.c',
+    'embed/projects/bootloader/workflow/wf_ble_pairing_request.c',
     'embed/projects/bootloader/wire/codec_v1.c',
     'embed/projects/bootloader/wire/wire_iface_usb.c',
+    'embed/projects/bootloader/wire/wire_iface_ble.c',
     'embed/projects/bootloader/protob/protob.c',
     'embed/projects/bootloader/protob/pb/messages.pb.c',
+    'embed/projects/bootloader/fw_check.c',
     'embed/projects/bootloader/version_check.c',
     'embed/projects/bootloader/emulator.c',
-]
-
-SOURCE_TREZORHAL = [
-    'embed/io/display/unix/display_driver.c',
-    'embed/io/usb/unix/usb.c',
-    'embed/sec/monoctr/unix/monoctr.c',
-    'embed/sec/random_delays/unix/random_delays.c',
-    'embed/sec/rng/unix/rng.c',
-    'embed/sec/secret/unix/secret.c',
-    'embed/sys/mpu/unix/mpu.c',
-    'embed/sys/startup/unix/bootutils.c',
-    'embed/sys/task/sysevent.c',
-    'embed/sys/task/unix/sdl_event.c',
-    'embed/sys/task/unix/system.c',
-    'embed/sys/task/unix/systask.c',
-    'embed/sys/time/unix/systick.c',
-    'embed/sys/time/unix/systimer.c',
-    'embed/util/flash/unix/flash.c',
-    'embed/util/flash/unix/flash_otp.c',
-    'embed/util/unit_properties/unix/unit_properties.c',
 ]
 
 SOURCE_UNIX = [
@@ -153,7 +152,7 @@ env = Environment(
 
 FEATURES_AVAILABLE = models.configure_board(TREZOR_MODEL, HW_REVISION, FEATURES_WANTED, env, CPPDEFINES_HAL, SOURCE_UNIX, PATH_HAL)
 
-if 'optiga' in FEATURES_AVAILABLE:
+if ('LOCKABLE_BOOTLOADER', '1') in CPPDEFINES_HAL:
     SOURCE_BOOTLOADER += [
         'embed/projects/bootloader/workflow/wf_unlock_bootloader.c',
     ]
@@ -182,25 +181,10 @@ ALLPATHS = ['embed/rust',
            'embed/projects/unix',
            'embed/upymod/modtrezorui',
            'embed/gfx/inc',
-           'embed/io/display/inc',
-           'embed/io/usb/inc',
-           'embed/sec/entropy/inc',
-           'embed/sec/monoctr/inc',
-           'embed/sec/random_delays/inc',
-           'embed/sec/rng/inc',
-           'embed/sec/secret/inc',
-           'embed/sys/bsp/inc',
-           'embed/sys/irq/inc',
-           'embed/sys/mpu/inc',
-           'embed/sys/startup/inc',
-           'embed/sys/task/inc',
-           'embed/sys/time/inc',
-           'embed/util/flash/inc',
            'embed/util/image/inc',
            'embed/util/rsod/inc',
            'embed/util/scm_revision/inc',
            'embed/util/translations/inc',
-           'embed/util/unit_properties/inc',
            'vendor/nanopb',
        ] + CPPPATH_MOD + PATH_HAL
 
@@ -238,7 +222,7 @@ except OSError:
 
 
 env.Replace(
-    ALLSOURCES=SOURCE_MOD + SOURCE_MOD_CRYPTO + SOURCE_BOOTLOADER + SOURCE_NANOPB + SOURCE_TREZORHAL + SOURCE_UNIX,
+    ALLSOURCES=SOURCE_MOD + SOURCE_MOD_CRYPTO + SOURCE_BOOTLOADER + SOURCE_NANOPB + SOURCE_UNIX,
     ALLDEFS=tools.get_defs_for_cmake(env['CPPDEFINES']))
 
 cmake_gen = env.Command(
@@ -282,7 +266,6 @@ obj_program += env.Object(source=SOURCE_MOD)
 obj_program += env.Object(source=SOURCE_MOD_CRYPTO, CCFLAGS='$CCFLAGS -ftrivial-auto-var-init=zero')
 obj_program += env.Object(source=SOURCE_BOOTLOADER)
 obj_program += env.Object(source=SOURCE_NANOPB)
-obj_program += env.Object(source=SOURCE_TREZORHAL)
 obj_program += env.Object(source=SOURCE_UNIX)
 
 program_elf = env.Command(

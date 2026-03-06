@@ -26,7 +26,7 @@
 typedef struct cli cli_t;
 
 // Maximum length of command line input (including command, arguments)
-#define CLI_LINE_BUFFER_SIZE 4096
+#define CLI_LINE_BUFFER_SIZE 8192
 // Maximum number of command arguments + 1
 #define CLI_MAX_ARGS 64
 
@@ -66,17 +66,28 @@ typedef struct {
 #define CONCAT_INDIRECT(x, y) x##y
 #define CONCAT(x, y) CONCAT_INDIRECT(x, y)
 
+#ifdef TREZOR_EMULATOR
+#define PRODTEST_CLI_CMD(...) PRODTEST_CLI_CMD_IMPL(__COUNTER__, __VA_ARGS__)
+#define PRODTEST_CLI_CMD_IMPL(cnt, ...)                                     \
+  extern void register_cli_command(const cli_command_t* cmd);               \
+  static const cli_command_t CONCAT(_cli_cmd_handler, cnt) = {__VA_ARGS__}; \
+  __attribute__((constructor)) static void CONCAT(                          \
+      __register, CONCAT(_cli_cmd_handler, cnt))(void) {                    \
+    register_cli_command(&CONCAT(_cli_cmd_handler, cnt));                   \
+  }
+#else
 // Registers a command handler by placing its registration structure
 // into a specially designated linker script section
 #define PRODTEST_CLI_CMD(...)                                              \
   __attribute__((used,                                                     \
                  section(".prodtest_cli_cmd"))) static const cli_command_t \
       CONCAT(_cli_cmd_handler, __COUNTER__) = {__VA_ARGS__};
+#endif
 
 // Callback for writing characters to console output
-typedef size_t (*cli_write_cb_t)(void* ctx, const char* buf, size_t len);
+typedef ssize_t (*cli_write_cb_t)(void* ctx, const char* buf, size_t len);
 // Callback for reading characters from console input
-typedef size_t (*cli_read_cb_t)(void* ctx, char* buf, size_t len);
+typedef ssize_t (*cli_read_cb_t)(void* ctx, char* buf, size_t len);
 
 struct cli {
   // I/O callbacks
@@ -132,8 +143,11 @@ bool cli_init(cli_t* cli, cli_read_cb_t read, cli_write_cb_t write,
 void cli_set_commands(cli_t* cli, const cli_command_t* cmd_array,
                       size_t cmd_count);
 
-// Process the newly received characters from the console input
-void cli_process_io(cli_t* cli);
+// Process the newly received characters from the console input,
+const cli_command_t* cli_process_io(cli_t* cli);
+
+// Process CLI command
+void cli_process_command(cli_t* cli, const cli_command_t* cmd);
 
 // Returne the number of arguments in the command line
 size_t cli_arg_count(cli_t* cli);

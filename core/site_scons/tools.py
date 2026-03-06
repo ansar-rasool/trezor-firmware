@@ -52,7 +52,7 @@ def get_git_modified() -> bool:
 def get_defs_for_cmake(defs: list[str | tuple[str, str]]) -> list[str]:
     result: list[str] = []
     for d in defs:
-        if type(d) is tuple:
+        if isinstance(d, tuple):
             val = d[1].replace('"', '\\"').replace("(", "\\(").replace(")", "\\)")
             result.append(f'{d[0]}="{val}"')
         else:
@@ -68,10 +68,13 @@ def _compress(data: bytes) -> bytes:
 def get_bindgen_defines(defines: list[str | tuple[str, str]], paths: list[str]) -> str:
     rest_defs = []
     for d in defines:
-        if type(d) is tuple:
+        if isinstance(d, (tuple, list)):
+            assert len(d) == 2
             d = f"-D{d[0]}={d[1]}"
-        else:
+        elif isinstance(d, str):
             d = f"-D{d}"
+        else:
+            raise ValueError(f"Invalid define: {d} {type(d)}")
         rest_defs.append(d)
     for d in paths:
         rest_defs.append(f"-I../../{d}")
@@ -79,7 +82,7 @@ def get_bindgen_defines(defines: list[str | tuple[str, str]], paths: list[str]) 
     return ",".join(rest_defs)
 
 
-def embed_compressed_binary(obj_program, env, section, target_, file, build, symbol):
+def embed_compressed_binary(obj_program, env, section, target_, file, build):
     _in = f"embedded_{section}.bin.deflated"
 
     def redefine_sym(suffix):
@@ -89,7 +92,7 @@ def embed_compressed_binary(obj_program, env, section, target_, file, build, sym
             + "_"
             + suffix
         )
-        dest = f"_deflated_{symbol}_{suffix}"
+        dest = f"{section}_{suffix}"
         return f" --redefine-sym {src}={dest}"
 
     def compress_action(target, source, env):
@@ -118,12 +121,27 @@ def embed_compressed_binary(obj_program, env, section, target_, file, build, sym
 
 
 def embed_raw_binary(obj_program, env, section, target_, file):
+
+    def redefine_sym(suffix):
+        src = (
+            "_binary_"
+            + file.replace("/", "_").replace(".", "_").replace("-", "_")
+            + "_"
+            + suffix
+        )
+        dest = f"{section}_{suffix}"
+        return f" --redefine-sym {src}={dest}"
+
     obj_program.extend(
         env.Command(
             target=target_,
             source=file,
             action="$OBJCOPY -I binary -O elf32-littlearm -B arm"
-            f" --rename-section .data=.{section}" + " $SOURCE $TARGET",
+            f" --rename-section .data=.{section}"
+            + redefine_sym("start")
+            + redefine_sym("end")
+            + redefine_sym("size")
+            + " $SOURCE $TARGET",
         )
     )
 
@@ -144,7 +162,6 @@ def add_rust_lib(*, env, build, profile, features, all_paths, build_dir):
     def cargo_build():
         lib_features = []
         lib_features.extend(features)
-        lib_features.append("ui")
 
         cargo_opts = [
             f"--target={RUST_TARGET}",

@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import ast
 import re
 
 import click
-import ast
 
 from .common import get_layout_for_model
-
 
 # the following regular expression matches a thing looking like those examples:
 #   #define HEADER_START 0x123456
@@ -16,8 +15,8 @@ from .common import get_layout_for_model
 SEARCH_PATTERN = r"#define (\w+) (.+?)(?:\s*//.*)?$"
 
 
-def find_all_values(model: str) -> dict[str, int]:
-    layout = get_layout_for_model(model)
+def find_all_values(model: str, secmon: bool) -> dict[str, int]:
+    layout = get_layout_for_model(model, secmon)
     values = {}
     begin = False
     for line in open(layout):
@@ -37,8 +36,8 @@ def find_all_values(model: str) -> dict[str, int]:
     return values
 
 
-def find_value(model: str, name: str) -> int:
-    all_values = find_all_values(model)
+def find_value(model: str, name: str, secmon: bool) -> int:
+    all_values = find_all_values(model, secmon)
     if name not in all_values:
         raise ValueError(f"Value {name} not found in layout for model {model}")
     return all_values[name]
@@ -47,9 +46,10 @@ def find_value(model: str, name: str) -> int:
 @click.command()
 @click.argument("model")
 @click.argument("name")
-def main(model: str, name: str) -> None:
+@click.option("--secmon", is_flag=True)
+def main(model: str, name: str, secmon: bool) -> None:
     try:
-        print(find_value(model, name))
+        print(find_value(model, name, secmon))
     except ValueError as e:
         raise click.ClickException(str(e))
 

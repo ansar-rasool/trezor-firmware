@@ -1,6 +1,6 @@
 # This file is part of the Trezor project.
 #
-# Copyright (C) 2012-2022 SatoshiLabs and contributors
+# Copyright (C) SatoshiLabs and contributors
 #
 # This library is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License version 3
@@ -57,7 +57,7 @@ T1B1 = TrezorModel(
 T2T1 = TrezorModel(
     name="T",
     internal_name="T2T1",
-    minimum_version=(2, 1, 0),
+    minimum_version=(2, 3, 0),
     vendors=VENDORS,
     usb_ids=(USBID_TREZOR_CORE, USBID_TREZOR_CORE_BOOTLOADER),
     default_mapping=mapping.DEFAULT_MAPPING,
@@ -66,7 +66,7 @@ T2T1 = TrezorModel(
 T2B1 = TrezorModel(
     name="Safe 3",
     internal_name="T2B1",
-    minimum_version=(2, 1, 0),
+    minimum_version=(2, 3, 0),
     vendors=VENDORS,
     usb_ids=(USBID_TREZOR_CORE, USBID_TREZOR_CORE_BOOTLOADER),
     default_mapping=mapping.DEFAULT_MAPPING,
@@ -75,7 +75,7 @@ T2B1 = TrezorModel(
 T3T1 = TrezorModel(
     name="Safe 5",
     internal_name="T3T1",
-    minimum_version=(2, 1, 0),
+    minimum_version=(2, 3, 0),
     vendors=VENDORS,
     usb_ids=(USBID_TREZOR_CORE, USBID_TREZOR_CORE_BOOTLOADER),
     default_mapping=mapping.DEFAULT_MAPPING,
@@ -84,16 +84,16 @@ T3T1 = TrezorModel(
 T3B1 = TrezorModel(
     name="Safe 3",
     internal_name="T3B1",
-    minimum_version=(2, 1, 0),
+    minimum_version=(2, 3, 0),
     vendors=VENDORS,
     usb_ids=(USBID_TREZOR_CORE, USBID_TREZOR_CORE_BOOTLOADER),
     default_mapping=mapping.DEFAULT_MAPPING,
 )
 
 T3W1 = TrezorModel(
-    name="T3W1",
+    name="Safe 7",
     internal_name="T3W1",
-    minimum_version=(2, 1, 0),
+    minimum_version=(2, 3, 0),
     vendors=VENDORS,
     usb_ids=(USBID_TREZOR_CORE, USBID_TREZOR_CORE_BOOTLOADER),
     default_mapping=mapping.DEFAULT_MAPPING,
@@ -102,7 +102,7 @@ T3W1 = TrezorModel(
 DISC1 = TrezorModel(
     name="DISC1",
     internal_name="D001",
-    minimum_version=(2, 1, 0),
+    minimum_version=(2, 3, 0),
     vendors=VENDORS,
     usb_ids=(USBID_TREZOR_CORE, USBID_TREZOR_CORE_BOOTLOADER),
     default_mapping=mapping.DEFAULT_MAPPING,
@@ -111,7 +111,7 @@ DISC1 = TrezorModel(
 DISC2 = TrezorModel(
     name="DISC2",
     internal_name="D002",
-    minimum_version=(2, 1, 0),
+    minimum_version=(2, 3, 0),
     vendors=VENDORS,
     usb_ids=(USBID_TREZOR_CORE, USBID_TREZOR_CORE_BOOTLOADER),
     default_mapping=mapping.DEFAULT_MAPPING,

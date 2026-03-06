@@ -9,6 +9,7 @@ use crate::{
         component::{MsgMap, PageMap},
         geometry::{Offset, Rect},
         shape::Renderer,
+        util::Pager,
     },
 };
 
@@ -16,6 +17,8 @@ use crate::{
 use crate::ui::event::BLEEvent;
 #[cfg(feature = "button")]
 use crate::ui::event::ButtonEvent;
+#[cfg(feature = "power_manager")]
+use crate::ui::event::PMEvent;
 use crate::ui::event::USBEvent;
 #[cfg(feature = "touch")]
 use crate::ui::{
@@ -153,11 +156,11 @@ where
 }
 
 impl<T: Paginate> Paginate for Child<T> {
-    fn page_count(&self) -> usize {
-        self.component.page_count()
+    fn pager(&self) -> Pager {
+        self.component.pager()
     }
 
-    fn change_page(&mut self, active_page: usize) {
+    fn change_page(&mut self, active_page: u16) {
         self.component.change_page(active_page);
     }
 }
@@ -324,6 +327,8 @@ pub enum Event {
     Touch(TouchEvent),
     #[cfg(feature = "ble")]
     BLE(BLEEvent),
+    #[cfg(feature = "power_manager")]
+    PM(PMEvent),
     USB(USBEvent),
     /// Previously requested timer was triggered. This invalidates the timer
     /// token (another timer has to be requested).
@@ -420,7 +425,7 @@ impl Timer {
         self.token().0 == Timer::INVALID_TOKEN_VALUE
     }
 
-    const fn is_running(&self) -> bool {
+    pub const fn is_running(&self) -> bool {
         self.0 & Timer::IS_RUNNING_BITMASK != 0
     }
 
@@ -464,7 +469,7 @@ pub struct EventCtx {
     place_requested: bool,
     paint_requested: bool,
     anim_frame_scheduled: bool,
-    page_count: Option<usize>,
+    page_count: Option<u16>,
     button_request: Option<ButtonRequest>,
     root_repaint_requested: bool,
     swipe_disable_req: bool,
@@ -541,17 +546,17 @@ impl EventCtx {
         self.paint_requested
     }
 
-    pub fn set_page_count(&mut self, count: usize) {
+    pub fn set_page_count(&mut self, count: u16) {
         // #[cfg(feature = "ui_debug")]
         // assert!(self.page_count.unwrap_or(count) == count);
         self.page_count = Some(count);
     }
 
-    pub fn map_page_count(&mut self, func: impl Fn(usize) -> usize) {
+    pub fn map_page_count(&mut self, func: impl Fn(u16) -> u16) {
         self.page_count = Some(func(self.page_count.unwrap_or(1)));
     }
 
-    pub fn page_count(&self) -> Option<usize> {
+    pub fn page_count(&self) -> Option<u16> {
         self.page_count
     }
 
@@ -618,6 +623,7 @@ pub enum FlowMsg {
     Confirmed,
     Cancelled,
     Info,
+    Back,
     Next,
     Choice(usize),
     Text(ShortString),
@@ -632,6 +638,7 @@ impl TryFrom<FlowMsg> for crate::micropython::obj::Obj {
 
         match val {
             FlowMsg::Confirmed | FlowMsg::Next => Ok(result::CONFIRMED.as_obj()),
+            FlowMsg::Back => Ok(result::BACK.as_obj()),
             FlowMsg::Cancelled => Ok(result::CANCELLED.as_obj()),
             FlowMsg::Info => Ok(result::INFO.as_obj()),
             FlowMsg::Choice(i) => i.try_into(),

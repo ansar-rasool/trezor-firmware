@@ -1,6 +1,6 @@
 # This file is part of the Trezor project.
 #
-# Copyright (C) 2012-2022 SatoshiLabs and contributors
+# Copyright (C) SatoshiLabs and contributors
 #
 # This library is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License version 3
@@ -21,57 +21,51 @@ import logging
 import re
 import textwrap
 import time
+import typing as t
+import warnings
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime
 from enum import Enum, IntEnum, auto
 from itertools import zip_longest
 from pathlib import Path
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Callable,
-    Dict,
-    Generator,
-    Iterable,
-    Iterator,
-    Sequence,
-    Tuple,
-    Union,
-)
 
 from mnemonic import Mnemonic
 
-from . import mapping, messages, models, protobuf
-from .client import TrezorClient
-from .exceptions import TrezorFailure, UnexpectedMessageError
+from . import btc, mapping, messages, models, protobuf
+from .client import ProtocolVersion, TrezorClient
+from .exceptions import Cancelled, TrezorFailure, UnexpectedMessageError
 from .log import DUMP_BYTES
-from .messages import DebugWaitType
+from .messages import DebugTouchEventType, DebugWaitType
+from .tools import parse_path
 from .transport import Timeout
+from .transport.session import ProtocolV2Channel, Session
+from .transport.thp.protocol_v1 import ProtocolV1Channel
 
-if TYPE_CHECKING:
+if t.TYPE_CHECKING:
     from typing_extensions import Protocol
 
-    from .messages import PinMatrixRequestType
     from .transport import Transport
 
-    ExpectedMessage = Union[
-        protobuf.MessageType, type[protobuf.MessageType], "MessageFilter"
+    ExpectedMessage = t.Union[
+        protobuf.MessageType, t.Type[protobuf.MessageType], "MessageFilter"
     ]
 
-    AnyDict = Dict[str, Any]
-    Coords = Tuple[int, int]
+    AnyDict = t.Dict[str, t.Any]
+    Coords = t.Tuple[int, int]
 
     class InputFunc(Protocol):
+
         def __call__(
             self,
             hold_ms: int | None = None,
         ) -> "None": ...
 
-    InputFlowType = Generator[None, messages.ButtonRequest, None]
+    InputFlowType = t.Generator[None, messages.ButtonRequest, None]
 
 
 EXPECTED_RESPONSES_CONTEXT_LINES = 3
+PASSPHRASE_TEST_PATH = parse_path("44h/1h/0h/0/0")
 
 LOG = logging.getLogger(__name__)
 
@@ -115,11 +109,11 @@ class UnstructuredJSONReader:
         except json.JSONDecodeError:
             self.dict = {}
 
-    def top_level_value(self, key: str) -> Any:
+    def top_level_value(self, key: str) -> t.Any:
         return self.dict.get(key)
 
-    def find_objects_with_key_and_value(self, key: str, value: Any) -> list[AnyDict]:
-        def recursively_find(data: Any) -> Iterator[Any]:
+    def find_objects_with_key_and_value(self, key: str, value: t.Any) -> list[AnyDict]:
+        def recursively_find(data: t.Any) -> t.Iterator[t.Any]:
             if isinstance(data, dict):
                 if data.get(key) == value:
                     yield data
@@ -132,7 +126,7 @@ class UnstructuredJSONReader:
         return list(recursively_find(self.dict))
 
     def find_unique_object_with_key_and_value(
-        self, key: str, value: Any
+        self, key: str, value: t.Any
     ) -> AnyDict | None:
         objects = self.find_objects_with_key_and_value(key, value)
         if not objects:
@@ -140,8 +134,10 @@ class UnstructuredJSONReader:
         assert len(objects) == 1
         return objects[0]
 
-    def find_values_by_key(self, key: str, only_type: type | None = None) -> list[Any]:
-        def recursively_find(data: Any) -> Iterator[Any]:
+    def find_values_by_key(
+        self, key: str, only_type: type | None = None
+    ) -> list[t.Any]:
+        def recursively_find(data: t.Any) -> t.Iterator[t.Any]:
             if isinstance(data, dict):
                 if key in data:
                     yield data[key]
@@ -159,8 +155,8 @@ class UnstructuredJSONReader:
         return values
 
     def find_unique_value_by_key(
-        self, key: str, default: Any, only_type: type | None = None
-    ) -> Any:
+        self, key: str, default: t.Any, only_type: type | None = None
+    ) -> t.Any:
         values = self.find_values_by_key(key, only_type=only_type)
         if not values:
             return default
@@ -171,7 +167,7 @@ class UnstructuredJSONReader:
 class LayoutContent(UnstructuredJSONReader):
     """Contains helper functions to extract specific parts of the layout."""
 
-    def __init__(self, json_tokens: Sequence[str]) -> None:
+    def __init__(self, json_tokens: t.Sequence[str]) -> None:
         json_str = "".join(json_tokens)
         super().__init__(json_str)
 
@@ -231,14 +227,19 @@ class LayoutContent(UnstructuredJSONReader):
 
     def subtitle(self) -> str:
         """Getting text that is displayed as a subtitle."""
-        subtitle = self._get_str_or_dict_text("subtitle")
-        return subtitle
+        return self._get_str_or_dict_text("subtitle")
 
     def text_content(self) -> str:
         """What is on the screen, in one long string, so content can be
         asserted regardless of newlines. Also getting rid of possible ellipsis.
         """
-        content = self.screen_content().replace("\n", " ")
+        content = self.screen_content()
+
+        # Fix line-broken hyphenated words: 'Back- ups' -> 'Backups'
+        content = re.sub(r"-\s+", "", content)
+
+        # Replace remaining newlines with space
+        content = content.replace("\n", " ")
         if content.endswith("..."):
             content = content[:-3]
         if content.startswith("..."):
@@ -319,7 +320,18 @@ class LayoutContent(UnstructuredJSONReader):
 
     def button_contents(self) -> list[str]:
         """Getting list of button contents."""
-        buttons = self.find_unique_value_by_key("buttons", default={}, only_type=dict)
+
+        if self.action_bar() != "":
+            # ActionBar is used in Eckhart layout
+            buttons = self.find_unique_value_by_key(
+                "ActionBar", default={}, only_type=dict
+            )
+            button_keys = ("left_button", "", "right_button")
+        else:
+            buttons = self.find_unique_value_by_key(
+                "buttons", default={}, only_type=dict
+            )
+            button_keys = ("left_btn", "middle_btn", "right_btn")
 
         def get_button_content(btn_key: str) -> str:
             button_obj = buttons.get(btn_key, {})
@@ -336,8 +348,17 @@ class LayoutContent(UnstructuredJSONReader):
             # default value
             return "-"
 
-        button_keys = ("left_btn", "middle_btn", "right_btn")
         return [get_button_content(btn_key) for btn_key in button_keys]
+
+    def vertical_menu_content(self) -> list[str]:
+        """Get the content of the vertical menu."""
+
+        vertical_menu = self.find_unique_object_with_key_and_value(
+            "component", "VerticalMenu"
+        )
+        assert isinstance(vertical_menu, dict)
+
+        return [btn_obj["text"] for btn_obj in vertical_menu["buttons"]]
 
     def seed_words(self) -> list[str]:
         """Get all the seed words on the screen in order.
@@ -358,10 +379,36 @@ class LayoutContent(UnstructuredJSONReader):
         assert "PinKeyboard" in self.all_components()
         return self.find_unique_value_by_key("pin", default="", only_type=str)
 
+    def display_style(self) -> DisplayStyle:
+        """Get PIN/passphrase display style from the layout."""
+        assert (
+            "PinKeyboard" in self.all_components()
+            or "PassphraseKeyboard" in self.all_components()
+            or "StringKeyboard" in self.all_components()
+        )
+        style_str = self.find_unique_value_by_key(
+            "display_style", default="", only_type=str
+        )
+        try:
+            return DisplayStyle[style_str]
+        except KeyError:
+            raise ValueError(f"Unknown display style: '{style_str}'")
+
     def passphrase(self) -> str:
         """Get passphrase from the layout."""
-        assert "PassphraseKeyboard" in self.all_components()
-        return self.find_unique_value_by_key("passphrase", default="", only_type=str)
+        if "StringKeyboard" in self.all_components():
+            return self.find_unique_value_by_key("content", default="", only_type=str)
+        elif "PassphraseKeyboard" in self.all_components():
+            return self.find_unique_value_by_key(
+                "passphrase", default="", only_type=str
+            )
+        else:
+            raise ValueError("No passphrase component in layout")
+
+    def label(self) -> str:
+        """Get label from the layout."""
+        assert "StringKeyboard" in self.all_components()
+        return self.find_unique_value_by_key("content", default="", only_type=str)
 
     def page_count(self) -> int:
         """Get number of pages for the layout."""
@@ -403,6 +450,26 @@ class LayoutContent(UnstructuredJSONReader):
             return ""
         return footer.get("description", "") + " " + footer.get("instruction", "")
 
+    def action_bar(self) -> str:
+        action_bar = self.find_unique_object_with_key_and_value(
+            "component", "ActionBar"
+        )
+        if not action_bar:
+            return ""
+        right_button = action_bar.get("right_button", "")
+        left_button = action_bar.get("left_button", "")
+        if isinstance(left_button, dict):
+            left_button = left_button.get("text", "")
+        if isinstance(right_button, dict):
+            right_button = right_button.get("text", "")
+        return left_button + " " + right_button
+
+    def has_menu(self) -> bool:
+        return bool(self.find_unique_value_by_key("has_menu", False, bool))
+
+    def has_flow_menu(self) -> bool:
+        return bool(self.find_unique_value_by_key("has_flow_menu", False, bool))
+
 
 def multipage_content(layouts: list[LayoutContent]) -> str:
     """Get overall content from multiple-page layout."""
@@ -423,10 +490,11 @@ def _make_input_func(
     def input_func(
         self: "DebugLink",
         hold_ms: int | None = None,
+        wait: bool | None = None,
     ) -> None:
         __tracebackhide__ = True  # for pytest # pylint: disable=W0612
         decision.hold_ms = hold_ms
-        self._decision(decision)
+        self._decision(decision, wait)
 
     return input_func  # type: ignore [Parameter name mismatch]
 
@@ -437,6 +505,7 @@ class DebugLink:
         self.allow_interactions = auto_interact
         self.mapping = mapping.DEFAULT_MAPPING
 
+        self.protocol = ProtocolV1Channel(self.transport, self.mapping)
         # To be set by TrezorClientDebugLink (is not known during creation time)
         self.model: models.TrezorModel | None = None
         self.version: tuple[int, int, int] = (0, 0, 0)
@@ -447,10 +516,14 @@ class DebugLink:
         # For T1 screenshotting functionality in DebugUI
         self.t1_screenshot_directory: Path | None = None
         self.t1_screenshot_counter = 0
+        self.t1_take_screenshots = False
 
         self.waiting_for_layout_change = False
 
         self.input_wait_type = DebugWaitType.IMMEDIATE
+
+        # For detecting GC leaks / heap fragmentation
+        self.prev_gc_info: dict[str, int] = {}
 
     @property
     def legacy_ui(self) -> bool:
@@ -466,6 +539,11 @@ class DebugLink:
     def has_global_layout(self) -> bool:
         """Differences in waiting for Global Layout objects."""
         return self.version >= (2, 8, 6)
+
+    @property
+    def has_gc_info(self) -> bool:
+        """Supports DebugLinkGetGcInfo RPC."""
+        return self.version >= (2, 8, 11)
 
     @property
     def responds_to_debuglink_in_usb_tiny(self) -> bool:
@@ -484,13 +562,13 @@ class DebugLink:
 
     @property
     def button_actions(self) -> ButtonActions:
-        return ButtonActions(self.layout_type)
+        return ButtonActions(self)
 
     def open(self) -> None:
-        self.transport.begin_session()
+        self.transport.open()
 
     def close(self) -> None:
-        self.transport.end_session()
+        self.transport.close()
 
     def _write(self, msg: protobuf.MessageType) -> None:
         if self.waiting_for_layout_change:
@@ -498,24 +576,15 @@ class DebugLink:
                 "Debuglink is unavailable while waiting for layout change."
             )
 
-        LOG.debug(
-            f"sending message: {msg.__class__.__name__}",
-            extra={"protobuf": msg},
-        )
         msg_type, msg_bytes = self.mapping.encode(msg)
         LOG.log(
             DUMP_BYTES,
             f"encoded as type {msg_type} ({len(msg_bytes)} bytes): {msg_bytes.hex()}",
         )
-        self.transport.write(msg_type, msg_bytes)
+        self.protocol.write(msg)
 
     def _read(self, timeout: float | None = None) -> protobuf.MessageType:
-        ret_type, ret_bytes = self.transport.read(timeout=timeout)
-        LOG.log(
-            DUMP_BYTES,
-            f"received type {ret_type} ({len(ret_bytes)} bytes): {ret_bytes.hex()}",
-        )
-        msg = self.mapping.decode(ret_type, ret_bytes)
+        msg = self.protocol.read(timeout=timeout)
 
         # Collapse tokens to make log use less lines.
         msg_for_log = msg
@@ -523,15 +592,14 @@ class DebugLink:
             msg_for_log = deepcopy(msg)
             msg_for_log.tokens = ["".join(msg_for_log.tokens)]
 
-        LOG.debug(
-            f"received message: {msg_for_log.__class__.__name__}",
-            extra={"protobuf": msg_for_log},
-        )
         return msg
 
-    def _call(self, msg: protobuf.MessageType, timeout: float | None = None) -> Any:
+    def _call(self, msg: protobuf.MessageType, timeout: float | None = None) -> t.Any:
         self._write(msg)
-        return self._read(timeout=timeout)
+        result = self._read(timeout=timeout)
+        if isinstance(result, messages.Failure):
+            raise TrezorFailure(result)
+        return result
 
     def state(self, wait_type: DebugWaitType | None = None) -> messages.DebugLinkState:
         if wait_type is None:
@@ -542,6 +610,25 @@ class DebugLink:
             )
         result = self._call(messages.DebugLinkGetState(wait_layout=wait_type))
         while not isinstance(result, (messages.Failure, messages.DebugLinkState)):
+            result = self._read()
+        if isinstance(result, messages.Failure):
+            raise TrezorFailure(result)
+        return result
+
+    def pairing_info(
+        self,
+        thp_channel_id: bytes | None = None,
+        handshake_hash: bytes | None = None,
+        nfc_secret_host: bytes | None = None,
+    ) -> messages.DebugLinkPairingInfo:
+        result = self._call(
+            messages.DebugLinkGetPairingInfo(
+                channel_id=thp_channel_id,
+                handshake_hash=handshake_hash,
+                nfc_secret_host=nfc_secret_host,
+            )
+        )
+        while not isinstance(result, (messages.Failure, messages.DebugLinkPairingInfo)):
             result = self._read()
         if isinstance(result, messages.Failure):
             raise TrezorFailure(result)
@@ -563,7 +650,7 @@ class DebugLink:
 
     def wait_layout(self, wait_for_external_change: bool = False) -> LayoutContent:
         # Next layout change will be caused by external event
-        # (e.g. device being auto-locked or as a result of device_handler.run(xxx))
+        # (e.g. device being auto-locked or as a result of device_handler.run_with_session(xxx))
         # and not by our debug actions/decisions.
         # Resetting the debug state so we wait for the next layout change
         # (and do not return the current state).
@@ -573,12 +660,10 @@ class DebugLink:
         obj = self._call(
             messages.DebugLinkGetState(wait_layout=DebugWaitType.NEXT_LAYOUT)
         )
-        if isinstance(obj, messages.Failure):
-            raise TrezorFailure(obj)
         return LayoutContent(obj.tokens)
 
     @contextmanager
-    def wait_for_layout_change(self) -> Iterator[None]:
+    def wait_for_layout_change(self) -> t.Iterator[None]:
         # make sure some current layout is up by issuing a dummy GetState
         self.state()
 
@@ -596,17 +681,44 @@ class DebugLink:
         resp = self._read()
         assert isinstance(resp, messages.DebugLinkState)
 
+    @contextmanager
+    def hold_touch(self, pos: tuple[int, int]) -> t.Iterator[None]:
+        x, y = pos
+        self._decision(
+            messages.DebugLinkDecision(
+                x=x,
+                y=y,
+                touch_event_type=DebugTouchEventType.TOUCH_START,
+            ),
+            wait=False,
+        )
+        try:
+            yield
+        finally:
+            self._decision(
+                messages.DebugLinkDecision(
+                    x=x,
+                    y=y,
+                    touch_event_type=messages.DebugTouchEventType.TOUCH_END,
+                ),
+                wait=False,
+            )
+
     def reset_debug_events(self) -> None:
         # Only supported on TT and above certain version
         if (self.model is not models.T1B1) and not self.legacy_debug:
             return self._call(messages.DebugLinkResetDebugEvents())
         return None
 
-    def synchronize_at(self, layout_text: str, timeout: float = 5) -> LayoutContent:
+    def synchronize_at(
+        self, layout_text: str | list[str], timeout: float = 5
+    ) -> LayoutContent:
+        if not isinstance(layout_text, list):
+            layout_text = [layout_text]
         now = time.monotonic()
         while True:
             layout = self.read_layout()
-            if layout_text in layout.json_str:
+            if any(t in layout.json_str for t in layout_text):
                 return layout
             if time.monotonic() - now > timeout:
                 raise RuntimeError("Timeout waiting for layout")
@@ -631,7 +743,7 @@ class DebugLink:
 
         return "".join([str(matrix.index(p) + 1) for p in pin])
 
-    def read_recovery_word(self) -> Tuple[str | None, int | None]:
+    def read_recovery_word(self) -> t.Tuple[str | None, int | None]:
         state = self.state()
         return (state.recovery_fake_word, state.recovery_word_pos)
 
@@ -639,11 +751,28 @@ class DebugLink:
         state = self._call(messages.DebugLinkGetState(wait_word_list=True))
         return state.reset_word
 
-    def _decision(self, decision: messages.DebugLinkDecision) -> None:
+    def _decision(
+        self, decision: messages.DebugLinkDecision, wait: bool | None = None
+    ) -> None:
         """Send a debuglink decision.
 
         If hold_ms is set, an additional 200ms is added to account for processing
         delays. (This is needed for hold-to-confirm to trigger reliably.)
+
+        If `wait` is unset, the following wait mode is used:
+
+        - `IMMEDIATE`, when in normal tests, which never deadlocks the device, but may
+          return an empty layout in case the next one didn't come up immediately. (E.g.,
+          in SignTx flow, the device is waiting for more TxRequest/TxAck exchanges
+          before showing the next UI layout.)
+        - `CURRENT_LAYOUT`, when in tests running through a `DeviceHandler`. This mode
+          returns the current layout or waits for some layout to come up if there is
+          none at the moment. The assumption is that wirelink is communicating on
+          another thread and won't be blocked by waiting on debuglink.
+
+        Force waiting for the layout by setting `wait=True`. Force not waiting by
+        setting `wait=False` -- useful when, e.g., you are causing the next layout to be
+        deliberately delayed.
         """
         if not self.allow_interactions:
             self.wait_layout()
@@ -655,12 +784,24 @@ class DebugLink:
         self._write(decision)
         if self.model is models.T1B1:
             return
+
+        if wait is True:
+            wait_type = DebugWaitType.CURRENT_LAYOUT
+        elif wait is False:
+            wait_type = DebugWaitType.IMMEDIATE
+        else:
+            wait_type = self.input_wait_type
+
         # When the call below returns, we know that `decision` has been processed in Core.
         # XXX Due to a bug, the reply may get lost at the end of a workflow.
         # We assume that no single input event takes more than 5 seconds to process,
         # and give up waiting after that.
         try:
-            self._call(messages.DebugLinkGetState(return_empty_state=True), timeout=5)
+            msg = messages.DebugLinkGetState(
+                wait_layout=wait_type,
+                return_empty_state=True,
+            )
+            self._call(msg, timeout=5)
         except Timeout as e:
             LOG.warning("timeout waiting for DebugLinkState: %s", e)
 
@@ -693,10 +834,15 @@ class DebugLink:
         """Send text input to the device. See `_decision` for more details."""
         self._decision(messages.DebugLinkDecision(input=word))
 
-    def click(self, click: Tuple[int, int], hold_ms: int | None = None) -> None:
+    def click(
+        self,
+        click: t.Tuple[int, int],
+        hold_ms: int | None = None,
+        wait: bool | None = None,
+    ) -> None:
         """Send a click to the device. See `_decision` for more details."""
         x, y = click
-        self._decision(messages.DebugLinkDecision(x=x, y=y, hold_ms=hold_ms))
+        self._decision(messages.DebugLinkDecision(x=x, y=y, hold_ms=hold_ms), wait=wait)
 
     def stop(self) -> None:
         self._write(messages.DebugLinkStop())
@@ -758,7 +904,7 @@ class DebugLink:
             self._save_screenshot_t1(state.layout)
 
     def _save_screenshot_t1(self, data: bytes) -> None:
-        if self.t1_screenshot_directory is None:
+        if self.t1_screenshot_directory is None or not self.t1_take_screenshots:
             return
 
         from PIL import Image
@@ -780,6 +926,36 @@ class DebugLink:
         )
         im.save(img_location)
         self.t1_screenshot_counter += 1
+
+    def check_gc_info(self, fail_on_gc_leak: bool = True) -> None:
+        """Fetch GC heap information and check for leaks."""
+        if not self.has_gc_info:
+            return
+
+        resp = self._call(messages.DebugLinkGetGcInfo())
+        while not isinstance(resp, messages.DebugLinkGcInfo):
+            resp = self._read()
+
+        info = dict(sorted((item.name, item.value) for item in resp.items))
+        if info["total"]:
+            LOG.debug(
+                "GC info: free=%.2f%% max_free=%.2f%%",
+                100 * info["free"] / info["total"],
+                100 * info["max_free"] / info["total"],
+            )
+
+        prev_info = self.prev_gc_info
+        self.prev_gc_info = info
+
+        if not prev_info:
+            return
+        # Free heap memory should not decrease
+        if info["free"] < prev_info["free"]:
+            msg = f"GC leak found: {prev_info} -> {info}"
+            if fail_on_gc_leak:
+                raise AssertionError(msg)
+            else:
+                warnings.warn(msg)
 
 
 del _make_input_func
@@ -808,6 +984,14 @@ class NullDebugLink(DebugLink):
         return None
 
 
+class UnexpectedMenuError(Exception):
+    def __init__(self, layout_content: str) -> None:
+        self.layout_content = layout_content
+
+    def __str__(self) -> str:
+        return f"Layout content: {self.layout_content}"
+
+
 class DebugUI:
     INPUT_FLOW_DONE = object()
 
@@ -816,47 +1000,154 @@ class DebugUI:
         self.clear()
 
     def clear(self) -> None:
-        self.pins: Iterator[str] | None = None
-        self.passphrase = ""
-        self.input_flow: Union[
-            Generator[None, messages.ButtonRequest, None], object, None
-        ] = None
+        self.pins: t.Iterator[str] | None = None
+        self.passphrase = None
+        self.reset_input_flow()
 
-    def _default_input_flow(self, br: messages.ButtonRequest) -> None:
-        if br.code == messages.ButtonRequestType.PinEntry:
-            self.debuglink.input(self.get_pin())
-        else:
-            # Paginating (going as further as possible) and pressing Yes
-            if br.pages is not None:
-                for _ in range(br.pages - 1):
-                    self.debuglink.swipe_up()
+    def reset_input_flow(self) -> None:
+        self.input_flow: InputFlowType | object = self.default_input_flow()
+        next(self.input_flow)  # start default input flow generator
 
-            if self.debuglink.model is models.T3T1:
-                layout = self.debuglink.read_layout()
-                if "PromptScreen" in layout.all_components():
-                    self.debuglink.press_yes()
-                elif "SwipeContent" in layout.all_components():
-                    self.debuglink.swipe_up()
-                else:
-                    self.debuglink.press_yes()
+    def default_input_flow(self) -> InputFlowType:
+        while True:
+            br = yield
+            if br.code == messages.ButtonRequestType.PinEntry:
+                self.debuglink.input(self.get_pin())
+            else:
+                self._paginate_and_confirm(br.pages)
+
+    def _visit_vertical_menu(self, menu_layout: LayoutContent) -> None:
+        assert self.debuglink.layout_type in (LayoutType.Delizia, LayoutType.Eckhart)
+        assert "VerticalMenu" in menu_layout.all_components()
+
+        item_buttons = self.debuglink.screen_buttons.vertical_menu_items()
+        close_button = self.debuglink.screen_buttons.menu()
+
+        menu_buttons = menu_layout.find_unique_value_by_key(
+            key="buttons", default=None, only_type=list
+        )
+        for menu_button, item_button in zip(menu_buttons, item_buttons):
+            if menu_button.get("is_cancel"):
+                continue  # don't click cancel
+            self.debuglink.click(item_button)
+            self.debuglink.click(close_button)
+
+    def _visit_scrolled_vertical_menu(self, menu_layout: LayoutContent) -> None:
+        assert self.debuglink.layout_type is LayoutType.Delizia
+        assert "ScrolledVerticalMenu" in menu_layout.all_components()
+
+        item_buttons = self.debuglink.screen_buttons.vertical_menu_items()
+        close_button = self.debuglink.screen_buttons.menu()
+
+        _prev, next = self.debuglink.screen_buttons.vertical_menu_prev_next()
+        while True:
+            menu_items = menu_layout.find_unique_value_by_key(
+                key="menu_items", default=None, only_type=dict
+            )
+            for menu_item, item_button in zip(menu_items["current"], item_buttons):
+                if "cancel" in menu_item:
+                    continue  # don't click cancel
+                self.debuglink.click(item_button)
+                self.debuglink.click(close_button)
+            if not menu_items["has_next"]:
+                break
+            self.debuglink.click(next)
+            menu_layout = self.debuglink.read_layout()
+            assert "ScrolledVerticalMenu" in menu_layout.all_components()
+
+    def visit_menu_items(self) -> LayoutContent:
+        layout = self.debuglink.read_layout()
+        if (
+            not layout.has_menu()
+            and not layout.has_flow_menu()
+            or not self.debuglink.allow_interactions
+        ):
+            return layout
+
+        # enter menu layout and click its items
+        is_menu = False
+        is_flow_menu = False
+        if layout.has_menu():
+            is_menu = True
+            self.debuglink.press_info()
+        elif layout.has_flow_menu():
+            is_flow_menu = True
+            self.debuglink.click(self.debuglink.screen_buttons.menu())
+
+        if self.debuglink.layout_type is LayoutType.Eckhart:
+            menu_layout = self.debuglink.read_layout()
+            if "VerticalMenu" in menu_layout.all_components():
+                self._visit_vertical_menu(menu_layout)
+            else:
+                raise UnexpectedMenuError(menu_layout.json_str)
+        elif self.debuglink.layout_type is LayoutType.Delizia:
+            menu_layout = self.debuglink.read_layout()
+            if "ScrolledVerticalMenu" in menu_layout.all_components():
+                self._visit_scrolled_vertical_menu(menu_layout)
+            elif "VerticalMenu" in menu_layout.all_components():
+                self._visit_vertical_menu(menu_layout)
+            else:
+                raise UnexpectedMenuError(menu_layout.json_str)
+        elif self.debuglink.layout_type is LayoutType.Caesar:
+            menu_items_count = self.debuglink.read_layout().page_count()
+            for _ in range(menu_items_count):
+                self.debuglink.press_middle()
+                # paginate through all properties and confirm
+                self._paginate_and_confirm(None)
+                # paginate to next menu item
+                self.debuglink.press_right()
+
+        if is_menu:
+            # confirm info menu layout
+            self.debuglink.press_yes()
+        elif is_flow_menu:
+            # close the menu
+            self.debuglink.click(self.debuglink.screen_buttons.menu())
+        return layout
+
+    def _paginate_and_confirm(self, pages: int | None) -> None:
+        if pages is None:
+            pages = self.debuglink.read_layout().page_count()
+
+        # Paginating (going as further as possible)
+        for _ in range(pages - 1):
+            if self.debuglink.model is models.T3W1:
+                self.debuglink.click(self.debuglink.screen_buttons.ok())
+            else:
+                self.debuglink.swipe_up()
+
+        # Visit info menus (if exist)
+        layout = self.visit_menu_items()
+
+        # Confirm current layout
+        if self.debuglink.model is models.T3T1:
+            if "PromptScreen" in layout.all_components():
+                self.debuglink.press_yes()
+            elif "SwipeContent" in layout.all_components():
+                self.debuglink.swipe_up()
             else:
                 self.debuglink.press_yes()
+        elif self.debuglink.model is models.T3W1:
+            if "TextScreen" in layout.all_components():
+                self.debuglink.click(self.debuglink.screen_buttons.ok())
+            else:
+                self.debuglink.press_yes()
+        else:
+            self.debuglink.press_yes()
 
     def button_request(self, br: messages.ButtonRequest) -> None:
         self.debuglink.snapshot_legacy()
 
-        if self.input_flow is None:
-            self._default_input_flow(br)
-        elif self.input_flow is self.INPUT_FLOW_DONE:
+        if self.input_flow is self.INPUT_FLOW_DONE:
             raise AssertionError("input flow ended prematurely")
         else:
             try:
-                assert isinstance(self.input_flow, Generator)
+                assert isinstance(self.input_flow, t.Generator)
                 self.input_flow.send(br)
             except StopIteration:
                 self.input_flow = self.INPUT_FLOW_DONE
 
-    def get_pin(self, code: PinMatrixRequestType | None = None) -> str:
+    def get_pin(self) -> str:
         self.debuglink.snapshot_legacy()
 
         if self.pins is None:
@@ -867,18 +1158,24 @@ class DebugUI:
         except StopIteration:
             raise AssertionError("PIN sequence ended prematurely")
 
-    def get_passphrase(self, available_on_device: bool) -> str:
+    def get_passphrase(self, available_on_device: bool) -> str | None | object:
         self.debuglink.snapshot_legacy()
         return self.passphrase
 
+    def confirm_screen(self) -> None:
+        self.debuglink.press_yes()
+
 
 class MessageFilter:
-    def __init__(self, message_type: type[protobuf.MessageType], **fields: Any) -> None:
+
+    def __init__(
+        self, message_type: t.Type[protobuf.MessageType], **fields: t.Any
+    ) -> None:
         self.message_type = message_type
-        self.fields: Dict[str, Any] = {}
+        self.fields: t.Dict[str, t.Any] = {}
         self.update_fields(**fields)
 
-    def update_fields(self, **fields: Any) -> "MessageFilter":
+    def update_fields(self, **fields: t.Any) -> "MessageFilter":
         for name, value in fields.items():
             try:
                 self.fields[name] = self.from_message_or_type(value)
@@ -926,7 +1223,7 @@ class MessageFilter:
         return True
 
     def to_string(self, maxwidth: int = 80) -> str:
-        fields: list[Tuple[str, str]] = []
+        fields: list[t.Tuple[str, str]] = []
         for field in self.message_type.FIELDS.values():
             if field.name not in self.fields:
                 continue
@@ -956,12 +1253,76 @@ class MessageFilter:
 
 
 class MessageFilterGenerator:
-    def __getattr__(self, key: str) -> Callable[..., "MessageFilter"]:
+    def __getattr__(self, key: str) -> t.Callable[..., "MessageFilter"]:
         message_type = getattr(messages, key)
         return MessageFilter(message_type).update_fields
 
 
 message_filters = MessageFilterGenerator()
+
+
+class SessionDebugWrapper(Session):
+    def __init__(self, session: Session) -> None:
+        if isinstance(session, SessionDebugWrapper):
+            raise Exception("Cannot wrap already wrapped session!")
+        self.__dict__["_session"] = session
+
+    def __getattr__(self, name: str) -> t.Any:
+        return getattr(self._session, name)
+
+    def __setattr__(self, name: str, value: t.Any) -> None:
+        if hasattr(self._session, name):
+            setattr(self._session, name, value)
+        else:
+            self.__dict__[name] = value
+
+    @property
+    def protocol_version(self) -> int:
+        return self.client.protocol_version
+
+    @property
+    def debug_client(self) -> TrezorClientDebugLink:
+        if not isinstance(self.client, TrezorClientDebugLink):
+            raise Exception("Debug client not available")
+        return self.client
+
+    def _write(self, msg: t.Any) -> None:
+        if isinstance(self.client, TrezorClientDebugLink):
+            msg = self.client._filter_message(msg)
+        self._session._write(msg)
+
+    def _read(self, timeout: float | None = None) -> t.Any:
+        msg = self._session._read(timeout)
+        if isinstance(self.client, TrezorClientDebugLink):
+            msg = self.client._filter_message(msg)
+        return msg
+
+    def resume(self) -> None:
+        self._session.resume()
+
+    def lock(self) -> None:
+        """Lock the device.
+
+        If the device does not have a PIN configured, this will do nothing.
+        Otherwise, a lock screen will be shown and the device will prompt for PIN
+        before further actions.
+
+        This call does _not_ invalidate passphrase cache. If passphrase is in use,
+        the device will not prompt for it after unlocking.
+
+        To invalidate passphrase cache, use `session.end()`. To lock _and_ invalidate
+        passphrase cache, use `session.lock()` followed by `session.end()`.
+        """
+        self.call(messages.LockDevice())
+        self.refresh_features()
+
+    def ensure_unlocked(self) -> None:
+        btc.get_address(self, "Testnet", PASSPHRASE_TEST_PATH)
+        self.refresh_features()
+
+
+class DebugLinkNotFound(Exception):
+    pass
 
 
 class TrezorClientDebugLink(TrezorClient):
@@ -975,68 +1336,228 @@ class TrezorClientDebugLink(TrezorClient):
     # without special DebugLink interface provided
     # by the device.
 
-    def __init__(self, transport: "Transport", auto_interact: bool = True) -> None:
+    protocol: ProtocolV1Channel | ProtocolV2Channel
+    actual_responses: list[protobuf.MessageType] | None = None
+    filters: t.Dict[
+        t.Type[protobuf.MessageType],
+        t.Callable[[protobuf.MessageType], protobuf.MessageType] | None,
+    ] = {}
+
+    def __init__(
+        self,
+        transport: Transport,
+        auto_interact: bool = True,
+        open_transport: bool = True,
+        debug_transport: Transport | None = None,
+        app_name: str = "trezorlib-debug",
+        host_name: str = "testhost",
+    ) -> None:
         try:
-            debug_transport = transport.find_debug()
+            debug_transport = debug_transport or transport.find_debug()
             self.debug = DebugLink(debug_transport, auto_interact)
-            # try to open debuglink, see if it works
-            self.debug.open()
-            self.debug.close()
+            if open_transport:
+                self.debug.open()
+                # try to open debuglink, see if it works
+                if not self.debug.transport.ping():
+                    raise DebugLinkNotFound(self.debug.transport.get_path())
+
         except Exception:
             if not auto_interact:
                 self.debug = NullDebugLink()
             else:
                 raise
 
+        if open_transport:
+            transport.open()
+
         # set transport explicitly so that sync_responses can work
         self.transport = transport
+        self.ui: DebugUI = DebugUI(self.debug)
 
-        self.reset_debug_features()
+        def get_pin(_msg: messages.PinMatrixRequest) -> str:
+            try:
+                pin = self.ui.get_pin()
+            except Cancelled:
+                raise
+            return pin
+
+        self.pin_callback = get_pin
+        self.button_callback = self.ui.button_request
+
+        super().__init__(transport, app_name=app_name, host_name=host_name)
         self.sync_responses()
-        super().__init__(transport, ui=self.ui)
 
         # So that we can choose right screenshotting logic (T1 vs TT)
         # and know the supported debug capabilities
+        if self.protocol_version is ProtocolVersion.V2:
+            assert isinstance(self.protocol, ProtocolV2Channel)
+            self.do_pairing(pairing_method=messages.ThpPairingMethod.SkipPairing)
         self.debug.model = self.model
         self.debug.version = self.version
+
+        self.reset_debug_features()
 
     @property
     def layout_type(self) -> LayoutType:
         return self.debug.layout_type
 
-    def reset_debug_features(self) -> None:
-        """Prepare the debugging client for a new testcase.
+    def get_new_client(self) -> TrezorClientDebugLink:
+        new_client = TrezorClientDebugLink(
+            self.transport,
+            self.debug.allow_interactions,
+            open_transport=False,
+            debug_transport=self.debug.transport,
+        )
+        new_client.debug.screenshot_recording_dir = self.debug.screenshot_recording_dir
+        new_client.debug.t1_screenshot_directory = self.debug.t1_screenshot_directory
+        new_client.debug.t1_screenshot_counter = self.debug.t1_screenshot_counter
+        new_client.debug.t1_take_screenshots = self.debug.t1_take_screenshots
+        new_client.debug.prev_gc_info = self.debug.prev_gc_info
+        return new_client
 
-        Clears all debugging state that might have been modified by a testcase.
+    def close_transport(self) -> None:
+        self.transport.close()
+        self.debug.close()
+
+    def lock(self) -> None:
+        s = self.get_seedless_session()
+        s.lock()
+
+    def get_session(
+        self,
+        passphrase: str | object = "",
+        derive_cardano: bool = False,
+    ) -> SessionDebugWrapper:
+        if isinstance(passphrase, str):
+            passphrase = Mnemonic.normalize_string(passphrase)
+        session = SessionDebugWrapper(
+            super().get_session(
+                passphrase,
+                derive_cardano,
+            )
+        )
+        return session
+
+    # FIXME: can be deleted
+    def get_seedless_session(
+        self, *args: t.Any, **kwargs: t.Any
+    ) -> SessionDebugWrapper:
+        session = super().get_seedless_session(*args, **kwargs)
+        if not isinstance(session, SessionDebugWrapper):
+            session = SessionDebugWrapper(session)
+        return session
+
+    def watch_layout(self, watch: bool = True) -> None:
+        """Enable or disable watching layout changes.
+
+        Since trezor-core v2.3.2, it is necessary to call `watch_layout()` before
+        using `debug.wait_layout()`, otherwise layout changes are not reported.
         """
-        self.ui: DebugUI = DebugUI(self.debug)
-        self.in_with_statement = False
-        self.expected_responses: list[MessageFilter] | None = None
-        self.actual_responses: list[protobuf.MessageType] | None = None
-        self.filters: dict[
-            type[protobuf.MessageType],
-            Callable[[protobuf.MessageType], protobuf.MessageType] | None,
-        ] = {}
+        if self.version >= (2, 3, 2):
+            # version check is necessary because otherwise we cannot reliably detect
+            # whether and where to wait for reply:
+            # - T1 reports unknown debuglink messages on the wirelink
+            # - TT < 2.3.0 does not reply to unknown debuglink messages due to a bug
+            self.debug.watch_layout(watch)
 
-    def ensure_open(self) -> None:
-        """Only open session if there isn't already an open one."""
-        if self.session_counter == 0:
-            self.open()
+    def use_pin_sequence(self, pins: t.Iterable[str]) -> None:
+        """Respond to PIN prompts from device with the provided PINs.
+        The sequence must be at least as long as the expected number of PIN prompts.
+        """
+        self.ui.pins = iter(pins)
 
-    def open(self) -> None:
-        super().open()
-        if self.session_counter == 1:
-            self.debug.open()
+    def use_mnemonic(self, mnemonic: str) -> None:
+        """Use the provided mnemonic to respond to device.
+        Only applies to T1, where device prompts the host for mnemonic words."""
+        self.mnemonic = Mnemonic.normalize_string(mnemonic).split(" ")
 
-    def close(self) -> None:
-        if self.session_counter == 1:
-            self.debug.close()
-        super().close()
+    def sync_responses(self) -> None:
+        """Synchronize Trezor device receiving with caller.
+
+        When a failed test does not read out the response, the next caller will write
+        a request, but read the previous response -- while the device had already sent
+        and placed into queue the new response.
+
+        This function will call `Ping` and read responses until it locates a `Success`
+        with the expected text. This means that we are reading up-to-date responses.
+        """
+        import secrets
+
+        if self.protocol_version is ProtocolVersion.V1:
+            assert isinstance(self.protocol, ProtocolV1Channel)
+            if self.model is models.T1B1:
+                # Start by canceling whatever is on screen. This will work to cancel T1 PIN
+                # prompt, which is in TINY mode and does not respond to `Ping`.
+                self.protocol.write(messages.Cancel())
+
+            message = "SYNC" + secrets.token_hex(8)
+            self.protocol.write(messages.Ping(message=message))
+            success = messages.Success(message=message)
+            while True:
+                try:
+                    if self.protocol.read() == success:
+                        return
+                except Exception:
+                    pass
+
+        if self.protocol_version is ProtocolVersion.V2:
+            assert isinstance(self.protocol, ProtocolV2Channel)
+            self.protocol.sync_responses()
+
+    def mnemonic_callback(self, _: t.Any) -> str:
+        word, pos = self.debug.read_recovery_word()
+        if word:
+            return word
+        if pos:
+            return self.mnemonic[pos - 1]
+
+        raise RuntimeError("Unexpected call")
+
+    def set_expected_responses(
+        self,
+        expected: list["ExpectedMessage" | t.Tuple[bool, "ExpectedMessage"]],
+    ) -> None:
+        """Set a sequence of expected responses to session calls.
+
+        Within a given with-block, the list of received responses from device must
+        match the list of expected responses, otherwise an ``AssertionError`` is raised.
+
+        If an expected response is given a field value other than ``None``, that field value
+        must exactly match the received field value. If a given field is ``None``
+        (or unspecified) in the expected response, the received field value is not
+        checked.
+
+        Each expected response can also be a tuple ``(bool, message)``. In that case, the
+        expected response is only evaluated if the first field is ``True``.
+        This is useful for differentiating sequences between Trezor models:
+
+        >>> trezor_one = session.features.model == "1"
+        >>> client.set_expected_responses([
+        >>>     messages.ButtonRequest(code=ConfirmOutput),
+        >>>     (trezor_one, messages.ButtonRequest(code=ConfirmOutput)),
+        >>>     messages.Success(),
+        >>> ])
+        """
+        if not self.in_with_statement:
+            raise RuntimeError("Must be called inside 'with' statement")
+
+        # make sure all items are (bool, message) tuples
+        expected_with_validity = (
+            e if isinstance(e, tuple) else (True, e) for e in expected
+        )
+
+        # only apply those items that are (True, message)
+        self.expected_responses = [
+            MessageFilter.from_message_or_type(expected)
+            for valid, expected in expected_with_validity
+            if valid
+        ]
+        self.actual_responses = []
 
     def set_filter(
         self,
-        message_type: type[protobuf.MessageType],
-        callback: Callable[[protobuf.MessageType], protobuf.MessageType] | None,
+        message_type: t.Type[protobuf.MessageType],
+        callback: t.Callable[[protobuf.MessageType], protobuf.MessageType] | None,
     ) -> None:
         """Configure a filter function for a specified message type.
 
@@ -1060,55 +1581,19 @@ class TrezorClientDebugLink(TrezorClient):
         else:
             return msg
 
-    def set_input_flow(
-        self, input_flow: InputFlowType | Callable[[], InputFlowType]
-    ) -> None:
-        """Configure a sequence of input events for the current with-block.
+    def reset_debug_features(self) -> None:
+        """Prepare the debugging session for a new testcase.
 
-        The `input_flow` must be a generator function. A `yield` statement in the
-        input flow function waits for a ButtonRequest from the device, and returns
-        its code.
-
-        Example usage:
-
-        >>> def input_flow():
-        >>>     # wait for first button prompt
-        >>>     code = yield
-        >>>     assert code == ButtonRequestType.Other
-        >>>     # press No
-        >>>     client.debug.press_no()
-        >>>
-        >>>     # wait for second button prompt
-        >>>     yield
-        >>>     # press Yes
-        >>>     client.debug.press_yes()
-        >>>
-        >>> with client:
-        >>>     client.set_input_flow(input_flow)
-        >>>     some_call(client)
+        Clears all debugging state that might have been modified by a testcase.
         """
-        if not self.in_with_statement:
-            raise RuntimeError("Must be called inside 'with' statement")
-
-        if callable(input_flow):
-            input_flow = input_flow()
-        if not hasattr(input_flow, "send"):
-            raise RuntimeError("input_flow should be a generator function")
-        self.ui.input_flow = input_flow
-        next(input_flow)  # start the generator
-
-    def watch_layout(self, watch: bool = True) -> None:
-        """Enable or disable watching layout changes.
-
-        Since trezor-core v2.3.2, it is necessary to call `watch_layout()` before
-        using `debug.wait_layout()`, otherwise layout changes are not reported.
-        """
-        if self.version >= (2, 3, 2):
-            # version check is necessary because otherwise we cannot reliably detect
-            # whether and where to wait for reply:
-            # - T1 reports unknown debuglink messages on the wirelink
-            # - TT < 2.3.0 does not reply to unknown debuglink messages due to a bug
-            self.debug.watch_layout(watch)
+        self.ui.clear()
+        self.in_with_statement = False
+        self.expected_responses: list[MessageFilter] | None = None
+        self.actual_responses: list[protobuf.MessageType] | None = None
+        self.filters: t.Dict[
+            t.Type[protobuf.MessageType],
+            t.Callable[[protobuf.MessageType], protobuf.MessageType] | None,
+        ] = {}
 
     def __enter__(self) -> "TrezorClientDebugLink":
         # For usage in with/expected_responses
@@ -1117,7 +1602,7 @@ class TrezorClientDebugLink(TrezorClient):
         self.in_with_statement = True
         return self
 
-    def __exit__(self, exc_type: Any, value: Any, traceback: Any) -> None:
+    def __exit__(self, exc_type: t.Any, value: t.Any, _traceback: t.Any) -> None:
         __tracebackhide__ = True  # for pytest # pylint: disable=W0612
 
         # copy expected/actual responses before clearing them
@@ -1136,98 +1621,11 @@ class TrezorClientDebugLink(TrezorClient):
             # If no other exception was raised, evaluate missed responses
             # (raises AssertionError on mismatch)
             self._verify_responses(expected_responses, actual_responses)
-
-        elif isinstance(input_flow, Generator):
+        elif isinstance(input_flow, t.Generator):
             # Propagate the exception through the input flow, so that we see in
             # traceback where it is stuck.
-            input_flow.throw(exc_type, value, traceback)
-
-    def set_expected_responses(
-        self,
-        expected: Sequence[Union["ExpectedMessage", Tuple[bool, "ExpectedMessage"]]],
-    ) -> None:
-        """Set a sequence of expected responses to client calls.
-
-        Within a given with-block, the list of received responses from device must
-        match the list of expected responses, otherwise an AssertionError is raised.
-
-        If an expected response is given a field value other than None, that field value
-        must exactly match the received field value. If a given field is None
-        (or unspecified) in the expected response, the received field value is not
-        checked.
-
-        Each expected response can also be a tuple (bool, message). In that case, the
-        expected response is only evaluated if the first field is True.
-        This is useful for differentiating sequences between Trezor models:
-
-        >>> trezor_one = client.features.model == "1"
-        >>> client.set_expected_responses([
-        >>>     messages.ButtonRequest(code=ConfirmOutput),
-        >>>     (trezor_one, messages.ButtonRequest(code=ConfirmOutput)),
-        >>>     messages.Success(),
-        >>> ])
-        """
-        if not self.in_with_statement:
-            raise RuntimeError("Must be called inside 'with' statement")
-
-        # make sure all items are (bool, message) tuples
-        expected_with_validity = (
-            e if isinstance(e, tuple) else (True, e) for e in expected
-        )
-
-        # only apply those items that are (True, message)
-        self.expected_responses = [
-            MessageFilter.from_message_or_type(expected)
-            for valid, expected in expected_with_validity
-            if valid
-        ]
-        self.actual_responses = []
-
-    def use_pin_sequence(self, pins: Iterable[str]) -> None:
-        """Respond to PIN prompts from device with the provided PINs.
-        The sequence must be at least as long as the expected number of PIN prompts.
-        """
-        self.ui.pins = iter(pins)
-
-    def use_passphrase(self, passphrase: str) -> None:
-        """Respond to passphrase prompts from device with the provided passphrase."""
-        self.ui.passphrase = Mnemonic.normalize_string(passphrase)
-
-    def use_mnemonic(self, mnemonic: str) -> None:
-        """Use the provided mnemonic to respond to device.
-        Only applies to T1, where device prompts the host for mnemonic words."""
-        self.mnemonic = Mnemonic.normalize_string(mnemonic).split(" ")
-
-    def _raw_read(self) -> protobuf.MessageType:
-        __tracebackhide__ = True  # for pytest # pylint: disable=W0612
-
-        resp = super()._raw_read()
-        resp = self._filter_message(resp)
-        if self.actual_responses is not None:
-            self.actual_responses.append(resp)
-        return resp
-
-    def _raw_write(self, msg: protobuf.MessageType) -> None:
-        return super()._raw_write(self._filter_message(msg))
-
-    @staticmethod
-    def _expectation_lines(expected: list[MessageFilter], current: int) -> list[str]:
-        start_at = max(current - EXPECTED_RESPONSES_CONTEXT_LINES, 0)
-        stop_at = min(current + EXPECTED_RESPONSES_CONTEXT_LINES + 1, len(expected))
-        output: list[str] = []
-        output.append("Expected responses:")
-        if start_at > 0:
-            output.append(f"    (...{start_at} previous responses omitted)")
-        for i in range(start_at, stop_at):
-            exp = expected[i]
-            prefix = "    " if i != current else ">>> "
-            output.append(textwrap.indent(exp.to_string(), prefix))
-        if stop_at < len(expected):
-            omitted = len(expected) - stop_at
-            output.append(f"    (...{omitted} following responses omitted)")
-
-        output.append("")
-        return output
+            input_flow.throw(value)
+        self.actual_responses = None
 
     @classmethod
     def _verify_responses(
@@ -1264,51 +1662,75 @@ class TrezorClientDebugLink(TrezorClient):
                 output.append(textwrap.indent(protobuf.format_message(act), "    "))
                 raise AssertionError("\n".join(output))
 
-    def sync_responses(self) -> None:
-        """Synchronize Trezor device receiving with caller.
+    @staticmethod
+    def _expectation_lines(expected: list[MessageFilter], current: int) -> list[str]:
+        start_at = max(current - EXPECTED_RESPONSES_CONTEXT_LINES, 0)
+        stop_at = min(current + EXPECTED_RESPONSES_CONTEXT_LINES + 1, len(expected))
+        output: list[str] = []
+        output.append("Expected responses:")
+        if start_at > 0:
+            output.append(f"    (...{start_at} previous responses omitted)")
+        for i in range(start_at, stop_at):
+            exp = expected[i]
+            prefix = "    " if i != current else ">>> "
+            output.append(textwrap.indent(exp.to_string(), prefix))
+        if stop_at < len(expected):
+            omitted = len(expected) - stop_at
+            output.append(f"    (...{omitted} following responses omitted)")
 
-        When a failed test does not read out the response, the next caller will write
-        a request, but read the previous response -- while the device had already sent
-        and placed into queue the new response.
+        output.append("")
+        return output
 
-        This function will call `Ping` and read responses until it locates a `Success`
-        with the expected text. This means that we are reading up-to-date responses.
+    def set_input_flow(
+        self,
+        input_flow: InputFlowType | t.Callable[[], InputFlowType],
+    ) -> None:
+        """Configure a sequence of input events for the current with-block.
+
+        The `input_flow` must be a generator function. A `yield` statement in the
+        input flow function waits for a ButtonRequest from the device, and returns
+        its code.
+
+        Example usage:
+
+        >>> def input_flow():
+        >>>     # wait for first button prompt
+        >>>     code = yield
+        >>>     assert code == ButtonRequestType.Other
+        >>>     # press No
+        >>>     client.debug.press_no()
+        >>>
+        >>>     # wait for second button prompt
+        >>>     yield
+        >>>     # press Yes
+        >>>     client.debug.press_yes()
+        >>>
+        >>> with client:
+        >>>     client.set_input_flow(input_flow)
+        >>>     some_call(session)
         """
-        import secrets
+        if not self.in_with_statement:
+            raise RuntimeError("Must be called inside 'with' statement")
 
-        # Start by canceling whatever is on screen. This will work to cancel T1 PIN
-        # prompt, which is in TINY mode and does not respond to `Ping`.
-        cancel_msg = mapping.DEFAULT_MAPPING.encode(messages.Cancel())
-        self.transport.begin_session()
+        if callable(input_flow):
+            input_flow = input_flow()
+        if not hasattr(input_flow, "send"):
+            raise RuntimeError("input_flow should be a generator function")
+        self.ui.input_flow = input_flow
+
+        next(input_flow)  # start the generator
+
+    def notify_read(self, msg: protobuf.MessageType) -> None:
         try:
-            self.transport.write(*cancel_msg)
-
-            message = "SYNC" + secrets.token_hex(8)
-            ping_msg = mapping.DEFAULT_MAPPING.encode(messages.Ping(message=message))
-            self.transport.write(*ping_msg)
-            resp = None
-            while resp != messages.Success(message=message):
-                msg_id, msg_bytes = self.transport.read()
-                try:
-                    resp = mapping.DEFAULT_MAPPING.decode(msg_id, msg_bytes)
-                except Exception:
-                    pass
-        finally:
-            self.transport.end_session()
-
-    def mnemonic_callback(self, _) -> str:
-        word, pos = self.debug.read_recovery_word()
-        if word:
-            return word
-        if pos:
-            return self.mnemonic[pos - 1]
-
-        raise RuntimeError("Unexpected call")
+            if self.actual_responses is not None:
+                self.actual_responses.append(msg)
+        except Exception as e:
+            print(e)
 
 
 def load_device(
-    client: "TrezorClient",
-    mnemonic: Union[str, Iterable[str]],
+    session: "Session",
+    mnemonic: str | t.Iterable[str],
     pin: str | None,
     passphrase_protection: bool,
     label: str | None,
@@ -1322,12 +1744,12 @@ def load_device(
 
     mnemonics = [Mnemonic.normalize_string(m) for m in mnemonic]
 
-    if client.features.initialized:
+    if session.features.initialized:
         raise RuntimeError(
             "Device is initialized already. Call device.wipe() and try again."
         )
 
-    client.call(
+    session.call(
         messages.LoadDevice(
             mnemonics=mnemonics,
             pin=pin,
@@ -1340,20 +1762,20 @@ def load_device(
         expect=messages.Success,
     )
     if not _skip_init_device:
-        client.init_device()
+        session.refresh_features()
 
 
 # keep the old name for compatibility
 load_device_by_mnemonic = load_device
 
 
-def prodtest_t1(client: "TrezorClient") -> None:
-    if client.features.bootloader_mode is not True:
+def prodtest_t1(session: "Session") -> None:
+    if session.features.bootloader_mode is not True:
         raise RuntimeError("Device must be in bootloader mode")
 
-    client.call(
+    session.call(
         messages.ProdTestT1(
-            payload=b"\x00\xFF\x55\xAA\x66\x99\x33\xCCABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!\x00\xFF\x55\xAA\x66\x99\x33\xCC"
+            payload=b"\x00\xff\x55\xaa\x66\x99\x33\xccABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!\x00\xff\x55\xaa\x66\x99\x33\xcc"
         ),
         expect=messages.Success,
     )
@@ -1361,8 +1783,8 @@ def prodtest_t1(client: "TrezorClient") -> None:
 
 def record_screen(
     debug_client: "TrezorClientDebugLink",
-    directory: Union[str, None],
-    report_func: Union[Callable[[str], None], None] = None,
+    directory: str | None,
+    report_func: t.Callable[[str], None] | None = None,
 ) -> None:
     """Record screen changes into a specified directory.
 
@@ -1407,20 +1829,41 @@ def _is_emulator(debug_client: "TrezorClientDebugLink") -> bool:
     return debug_client.features.fw_vendor == "EMULATOR"
 
 
-def optiga_set_sec_max(client: "TrezorClient") -> None:
-    client.call(messages.DebugLinkOptigaSetSecMax(), expect=messages.Success)
+def optiga_set_sec_max(session: "Session") -> None:
+    session.call(messages.DebugLinkOptigaSetSecMax(), expect=messages.Success)
+
+
+def set_log_filter(debug: DebugLink, filter: str) -> None:
+    debug._call(messages.DebugLinkSetLogFilter(filter=filter))
+
+
+class DisplayStyle(Enum):
+    Hidden = "Hidden"
+    Shown = "Shown"
+    LastOnly = "LastOnly"
+    LastWithMarker = "LastWithMarker"
 
 
 class ScreenButtons:
-    def __init__(self, layout_type: LayoutType):
-        assert layout_type in (LayoutType.Bolt, LayoutType.Delizia)
+    def __init__(self, layout_type: LayoutType) -> None:
+        assert layout_type in (LayoutType.Bolt, LayoutType.Delizia, LayoutType.Eckhart)
         self.layout_type = layout_type
 
     def _width(self) -> int:
-        return 240
+        if self.layout_type in (LayoutType.Bolt, LayoutType.Delizia):
+            return 240
+        elif self.layout_type is LayoutType.Eckhart:
+            return 380
+        else:
+            raise ValueError("Wrong layout type")
 
     def _height(self) -> int:
-        return 240
+        if self.layout_type in (LayoutType.Bolt, LayoutType.Delizia):
+            return 240
+        elif self.layout_type is LayoutType.Eckhart:
+            return 520
+        else:
+            raise ValueError("Wrong layout type")
 
     def _grid(self, dim: int, grid_cells: int, cell: int) -> int:
         assert cell < grid_cells
@@ -1430,12 +1873,23 @@ class ScreenButtons:
 
     # 3 columns, 4 rows, 1st row is input area
     def _grid35(self, x: int, y: int) -> Coords:
+        assert x < 3, y < 5
         return self._grid(self._width(), 3, x), self._grid(self._height(), 5, y)
+
+    def _grid55(self, x: int, y: int) -> Coords:
+        assert x < 5, y < 5
+        return self._grid(self._width(), 5, x), self._grid(self._height(), 5, y)
 
     # TODO: do not expose this
     # 3 columns, 3 rows, 1st row is input area
     def grid34(self, x: int, y: int) -> Coords:
+        assert x < 3, y < 4
         return self._grid(self._width(), 3, x), self._grid(self._height(), 4, y)
+
+    # 2 columns, 3 rows, first two are header and description
+    def _grid25(self, x: int, y: int) -> Coords:
+        assert x < 2, y < 5
+        return self._grid(self._width(), 2, x), self._grid(self._height(), 5, y)
 
     # Horizontal coordinates
     def _left(self) -> int:
@@ -1470,8 +1924,12 @@ class ScreenButtons:
 
     # Menu/close menu button
     def menu(self) -> Coords:
-        if self.layout_type in (LayoutType.Bolt, LayoutType.Delizia):
-            return (215, 25)
+        return self._grid55(4, 0)
+
+    # Header back button
+    def back(self) -> Coords:
+        if self.layout_type is LayoutType.Eckhart:
+            return self._grid55(0, 0)
         else:
             raise ValueError("Wrong layout type")
 
@@ -1482,12 +1940,20 @@ class ScreenButtons:
 
     # Yes/No decision component
     def ui_yes(self) -> Coords:
-        assert self.layout_type is LayoutType.Delizia
-        return self.grid34(2, 2)
+        if self.layout_type is LayoutType.Delizia:
+            return self.grid34(2, 2)
+        elif self.layout_type is LayoutType.Eckhart:
+            return self.ok()
+        else:
+            raise ValueError("Wrong layout type")
 
     def ui_no(self) -> Coords:
-        assert self.layout_type is LayoutType.Delizia
-        return self.grid34(0, 2)
+        if self.layout_type is LayoutType.Delizia:
+            return self.grid34(0, 2)
+        elif self.layout_type is LayoutType.Eckhart:
+            return self.cancel()
+        else:
+            raise ValueError("Wrong layout type")
 
     # +/- buttons in number input component
     def number_input_minus(self) -> Coords:
@@ -1495,6 +1961,8 @@ class ScreenButtons:
             return (self._left(), self._grid(self._height(), 5, 1))
         elif self.layout_type is LayoutType.Delizia:
             return (self._left(), self._grid(self._height(), 5, 3))
+        elif self.layout_type is LayoutType.Eckhart:
+            return self.grid34(0, 2)
         else:
             raise ValueError("Wrong layout type")
 
@@ -1503,6 +1971,8 @@ class ScreenButtons:
             return (self._right(), self._grid(self._height(), 5, 1))
         elif self.layout_type is LayoutType.Delizia:
             return (self._right(), self._grid(self._height(), 5, 3))
+        elif self.layout_type is LayoutType.Eckhart:
+            return self.grid34(2, 2)
         else:
             raise ValueError("Wrong layout type")
 
@@ -1524,6 +1994,14 @@ class ScreenButtons:
                 24: self.grid34(2, 2),
                 33: self.grid34(2, 3),
             }
+        elif self.layout_type is LayoutType.Eckhart:
+            coords_map = {
+                12: self._grid35(0, 2),
+                18: self._grid35(2, 2),
+                20: self._grid35(0, 3),
+                24: self._grid35(2, 3),
+                33: self._grid35(2, 4),
+            }
         else:
             raise ValueError("Wrong layout type")
 
@@ -1532,10 +2010,10 @@ class ScreenButtons:
     def word_count_all_cancel(self) -> Coords:
         if self.layout_type is LayoutType.Bolt:
             return self.grid34(0, 3)
-
         elif self.layout_type is LayoutType.Delizia:
             return self.grid34(0, 3)
-
+        elif self.layout_type is LayoutType.Eckhart:
+            return self._grid35(0, 4)
         else:
             raise ValueError("Wrong layout type")
 
@@ -1551,6 +2029,11 @@ class ScreenButtons:
                 20: self.grid34(0, 1),
                 33: self.grid34(2, 1),
             }
+        elif self.layout_type is LayoutType.Eckhart:
+            coords_map = {
+                20: self._grid35(1, 2),
+                33: self._grid35(1, 3),
+            }
         else:
             raise ValueError("Wrong layout type")
 
@@ -1559,16 +2042,22 @@ class ScreenButtons:
     def word_count_repeated_cancel(self) -> Coords:
         if self.layout_type is LayoutType.Bolt:
             return self.grid34(0, 2)
-
         elif self.layout_type is LayoutType.Delizia:
             return self.grid34(0, 3)
-
+        elif self.layout_type is LayoutType.Eckhart:
+            return self._grid35(1, 4)
         else:
             raise ValueError("Wrong layout type")
 
     # select word component buttons
     def word_check_words(self) -> "list[Coords]":
         if self.layout_type in (LayoutType.Bolt, LayoutType.Delizia):
+            return [
+                (self._mid(), self._grid(self._height(), 4, 1)),
+                (self._mid(), self._grid(self._height(), 4, 2)),
+                (self._mid(), self._grid(self._height(), 4, 3)),
+            ]
+        elif self.layout_type is LayoutType.Eckhart:
             return [
                 (self._mid(), self._grid(self._height(), 5, 2)),
                 (self._mid(), self._grid(self._height(), 5, 3)),
@@ -1579,13 +2068,30 @@ class ScreenButtons:
 
     # vertical menu buttons
     def vertical_menu_items(self) -> "list[Coords]":
-        assert self.layout_type is LayoutType.Delizia
+        if self.layout_type is LayoutType.Delizia:
+            return [
+                (self._mid(), self._grid(self._height(), 4, 1)),
+                (self._mid(), self._grid(self._height(), 4, 2)),
+                (self._mid(), self._grid(self._height(), 4, 3)),
+            ]
+        elif self.layout_type is LayoutType.Eckhart:
+            return [
+                (self._mid(), self._grid(self._height(), 5, 1)),
+                (self._mid(), self._grid(self._height(), 5, 2)),
+                (self._mid(), self._grid(self._height(), 5, 3)),
+            ]
+        else:
+            raise ValueError("Wrong layout type")
 
-        return [
-            (self._mid(), self._grid(self._height(), 4, 1)),
-            (self._mid(), self._grid(self._height(), 4, 2)),
-            (self._mid(), self._grid(self._height(), 4, 3)),
-        ]
+    # vertical menu buttons
+    def vertical_menu_prev_next(self) -> "list[Coords]":
+        if self.layout_type is LayoutType.Delizia:
+            return [
+                (self._left(), self._grid(self._height(), 4, 3)),
+                (self._right(), self._grid(self._height(), 4, 3)),
+            ]
+        else:
+            raise ValueError("Wrong layout type")
 
     # Pin/passphrase keyboards
     def pin_passphrase_index(self, idx: int) -> Coords:
@@ -1595,7 +2101,6 @@ class ScreenButtons:
         return self.pin_passphrase_grid(idx % 3, idx // 3)
 
     def pin_passphrase_grid(self, x: int, y: int) -> Coords:
-        assert x < 3, y < 4
         y += 1  # first line is empty
         return self._grid35(x, y)
 
@@ -1607,10 +2112,10 @@ class ScreenButtons:
         return self.pin_passphrase_grid(0, 3)
 
     def passphrase_confirm(self) -> Coords:
-        if self.layout_type is LayoutType.Bolt:
+        if self.layout_type in (LayoutType.Bolt, LayoutType.Eckhart):
             return self.pin_passphrase_grid(2, 3)
         elif self.layout_type is LayoutType.Delizia:
-            return (215, 25)
+            return self._grid55(4, 0)
         else:
             raise ValueError("Wrong layout type")
 
@@ -1619,19 +2124,34 @@ class ScreenButtons:
 
     # Mnemonic keyboard
     def mnemonic_from_index(self, idx: int) -> Coords:
+        assert idx < 9
         return self.mnemonic_grid(idx)
 
     def mnemonic_grid(self, idx: int) -> Coords:
-        assert idx < 9
         grid_x = idx % 3
         grid_y = idx // 3 + 1  # first line is empty
-        return self.grid34(grid_x, grid_y)
+        if self.layout_type in (LayoutType.Bolt, LayoutType.Delizia):
+            return self.grid34(grid_x, grid_y)
+        elif self.layout_type is LayoutType.Eckhart:
+            return self._grid35(grid_x, grid_y)
+        else:
+            raise ValueError("Wrong layout type")
 
     def mnemonic_erase(self) -> Coords:
-        return (self._left(), self._top())
+        if self.layout_type in (LayoutType.Bolt, LayoutType.Delizia):
+            return (self._left(), self._top())
+        elif self.layout_type is LayoutType.Eckhart:
+            return self._grid35(0, 4)
+        else:
+            raise ValueError("Wrong layout type")
 
     def mnemonic_confirm(self) -> Coords:
-        return (self._mid(), self._top())
+        if self.layout_type in (LayoutType.Bolt, LayoutType.Delizia):
+            return (self._mid(), self._top())
+        elif self.layout_type is LayoutType.Eckhart:
+            return self._grid35(2, 4)
+        else:
+            raise ValueError("Wrong layout type")
 
 
 BUTTON_LETTERS_BIP39 = ("abc", "def", "ghi", "jkl", "mno", "pqr", "stu", "vwx", "yz")
@@ -1639,31 +2159,36 @@ BUTTON_LETTERS_SLIP39 = ("ab", "cd", "ef", "ghij", "klm", "nopq", "rs", "tuv", "
 
 # fmt: off
 PASSPHRASE_LOWERCASE_BOLT = (" ", "abc", "def", "ghi", "jkl", "mno", "pqrs", "tuv", "wxyz", "*#")
-PASSPHRASE_LOWERCASE_DELIZIA = ("abc", "def", "ghi", "jkl", "mno", "pq", "rst", "uvw", "xyz", " *#")
+PASSPHRASE_LOWERCASE_DE = ("abc", "def", "ghi", "jkl", "mno", "pq", "rst", "uvw", "xyz", " *#")
 PASSPHRASE_UPPERCASE_BOLT = (" ", "ABC", "DEF", "GHI", "JKL", "MNO", "PQRS", "TUV", "WXYZ", "*#")
-PASSPHRASE_UPPERCASE_DELIZIA = ("ABC", "DEF", "GHI", "JKL", "MNO", "PQ", "RST", "UVW", "XYZ", " *#")
+PASSPHRASE_UPPERCASE_DE = ("ABC", "DEF", "GHI", "JKL", "MNO", "PQ", "RST", "UVW", "XYZ", " *#")
 PASSPHRASE_DIGITS = ("1", "2", "3", "4", "5", "6", "7", "8", "9", "0")
 PASSPHRASE_SPECIAL = ("_<>", ".:@", "/|\\", "!()", "+%&", "-[]", "?{}", ",'`", ";\"~", "$^=")
 # fmt: on
 
+LABEL_LOWERCASE_ECKHART = PASSPHRASE_LOWERCASE_DE
+LABEL_UPPERCASE_ECKHART = PASSPHRASE_UPPERCASE_DE
+LABEL_DIGITS = PASSPHRASE_DIGITS
+LABEL_SPECIAL = PASSPHRASE_SPECIAL
+
 
 class ButtonActions:
-    def __init__(self, layout_type: LayoutType):
-        self.buttons = ScreenButtons(layout_type)
+    def __init__(self, debuglink: DebugLink) -> None:
+        self.debuglink = debuglink
 
     def _passphrase_choices(self, char: str) -> "tuple[str, ...]":
         if char in " *#" or char.islower():
-            if self.buttons.layout_type is LayoutType.Bolt:
+            if self.debuglink.layout_type is LayoutType.Bolt:
                 return PASSPHRASE_LOWERCASE_BOLT
-            elif self.buttons.layout_type is LayoutType.Delizia:
-                return PASSPHRASE_LOWERCASE_DELIZIA
+            elif self.debuglink.layout_type in (LayoutType.Delizia, LayoutType.Eckhart):
+                return PASSPHRASE_LOWERCASE_DE
             else:
                 raise ValueError("Wrong layout type")
         elif char.isupper():
-            if self.buttons.layout_type is LayoutType.Bolt:
+            if self.debuglink.layout_type is LayoutType.Bolt:
                 return PASSPHRASE_UPPERCASE_BOLT
-            elif self.buttons.layout_type is LayoutType.Delizia:
-                return PASSPHRASE_UPPERCASE_DELIZIA
+            elif self.debuglink.layout_type in (LayoutType.Delizia, LayoutType.Eckhart):
+                return PASSPHRASE_UPPERCASE_DE
             else:
                 raise ValueError("Wrong layout type")
         elif char.isdigit():
@@ -1671,26 +2196,48 @@ class ButtonActions:
         else:
             return PASSPHRASE_SPECIAL
 
-    def passphrase(self, char: str) -> Tuple[Coords, int]:
+    def _label_choices(self, char: str) -> "tuple[str, ...]":
+        if char in " *#" or char.islower():
+            if self.debuglink.layout_type is LayoutType.Eckhart:
+                return LABEL_LOWERCASE_ECKHART
+            else:
+                raise ValueError("Wrong layout type")
+        elif char.isupper():
+            if self.debuglink.layout_type is LayoutType.Eckhart:
+                return LABEL_UPPERCASE_ECKHART
+            else:
+                raise ValueError("Wrong layout type")
+        elif char.isdigit():
+            return PASSPHRASE_DIGITS
+        else:
+            return PASSPHRASE_SPECIAL
+
+    def passphrase(self, char: str) -> t.Tuple[Coords, int]:
         choices = self._passphrase_choices(char)
         idx = next(i for i, letters in enumerate(choices) if char in letters)
         click_amount = choices[idx].index(char) + 1
-        return self.buttons.pin_passphrase_index(idx), click_amount
+        return self.debuglink.screen_buttons.pin_passphrase_index(idx), click_amount
 
-    def type_word(self, word: str, is_slip39: bool = False) -> Iterator[Coords]:
+    def label(self, char: str) -> t.Tuple[Coords, int]:
+        choices = self._label_choices(char)
+        idx = next(i for i, letters in enumerate(choices) if char in letters)
+        click_amount = choices[idx].index(char) + 1
+        return self.debuglink.screen_buttons.pin_passphrase_index(idx), click_amount
+
+    def type_word(self, word: str, is_slip39: bool = False) -> t.Iterator[Coords]:
         if is_slip39:
             yield from self._type_word_slip39(word)
         else:
             yield from self._type_word_bip39(word)
 
-    def _type_word_slip39(self, word: str) -> Iterator[Coords]:
+    def _type_word_slip39(self, word: str) -> t.Iterator[Coords]:
         for l in word:
             idx = next(
                 i for i, letters in enumerate(BUTTON_LETTERS_SLIP39) if l in letters
             )
-            yield self.buttons.mnemonic_from_index(idx)
+            yield self.debuglink.screen_buttons.mnemonic_from_index(idx)
 
-    def _type_word_bip39(self, word: str) -> Iterator[Coords]:
+    def _type_word_bip39(self, word: str) -> t.Iterator[Coords]:
         coords_prev: Coords | None = None
         for letter in word:
             time.sleep(0.1)  # not being so quick to miss something
@@ -1703,9 +2250,70 @@ class ButtonActions:
             for _ in range(amount):
                 yield coords
 
-    def _letter_coords_and_amount(self, letter: str) -> Tuple[Coords, int]:
+    def _letter_coords_and_amount(self, letter: str) -> t.Tuple[Coords, int]:
         idx = next(
             i for i, letters in enumerate(BUTTON_LETTERS_BIP39) if letter in letters
         )
         click_amount = BUTTON_LETTERS_BIP39[idx].index(letter) + 1
-        return self.buttons.mnemonic_from_index(idx), click_amount
+        return self.debuglink.screen_buttons.mnemonic_from_index(idx), click_amount
+
+    def navigate_to_menu_item(self, idx: int) -> None:
+        """Navigate to the nth item in the vertical menu. Starts from 0."""
+        item_buttons = self.debuglink.screen_buttons.vertical_menu_items()
+        layout = self.debuglink.read_layout()
+        if self.debuglink.layout_type is LayoutType.Delizia:
+            # fido multi-screen menu with 2 items per screen
+            if "PagedVerticalMenu" in layout.all_components():
+                items_per_screen = 2
+                # get to the correct screen
+                for _ in range(idx // items_per_screen):
+                    self.debuglink.swipe_up()
+                    assert (
+                        "PagedVerticalMenu"
+                        in self.debuglink.read_layout().all_components()
+                    )
+                # click the correct item
+                new_idx = idx % items_per_screen
+                self.debuglink.click(item_buttons[new_idx])
+            elif "ScrolledVerticalMenu" in layout.all_components():
+                _prev, next = self.debuglink.screen_buttons.vertical_menu_prev_next()
+                menu = layout.find_unique_value_by_key(
+                    key="menu_items", default=None, only_type=dict
+                )
+                # multi-screen variant
+                if menu["has_next"]:
+                    items_per_screen = 2
+                    # get to the correct screen
+                    for _ in range(idx // items_per_screen):
+                        menu = self.debuglink.read_layout().find_unique_value_by_key(
+                            key="menu_items", default=None, only_type=dict
+                        )
+                        assert menu["has_next"]
+                        self.debuglink.click(next)
+                    # click the correct item
+                    assert (
+                        "ScrolledVerticalMenu"
+                        in self.debuglink.read_layout().all_components()
+                    )
+                    new_idx = idx % items_per_screen
+                    self.debuglink.click(item_buttons[new_idx])
+                # single-screen variant
+                else:
+                    assert len(item_buttons) > idx
+                    self.debuglink.click(item_buttons[idx])
+            # single-screen static menu
+            # FIXME: remove this when the ScrollableVerticalMenu is implemented everywhere
+            else:
+                assert len(item_buttons) > idx
+                self.debuglink.click(item_buttons[idx])
+
+        elif self.debuglink.layout_type is LayoutType.Eckhart:
+            assert "VerticalMenu" in layout.all_components()
+            # swipe up until the idx item gets to the first position
+            for _ in range(idx):
+                self.debuglink.swipe_up()
+            assert "VerticalMenu" in self.debuglink.read_layout().all_components()
+            # click the first item
+            self.debuglink.click(item_buttons[0])
+        else:
+            raise ValueError("Wrong layout type")

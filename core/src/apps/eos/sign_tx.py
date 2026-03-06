@@ -10,9 +10,12 @@ if TYPE_CHECKING:
 
 @auto_keychain(__name__)
 async def sign_tx(msg: EosSignTx, keychain: Keychain) -> EosSignedTx:
+    from trezor import TR
     from trezor.crypto.curve import secp256k1
     from trezor.crypto.hashlib import sha256
     from trezor.messages import EosSignedTx, EosTxActionAck, EosTxActionRequest
+    from trezor.ui.layouts import show_continue_in_app
+    from trezor.ui.layouts.progress import progress
     from trezor.utils import HashWriter
     from trezor.wire import DataError
     from trezor.wire.context import call
@@ -41,8 +44,11 @@ async def sign_tx(msg: EosSignTx, keychain: Keychain) -> EosSignedTx:
     write_uvarint(sha, num_actions)
     await require_sign_tx(num_actions)
 
+    progress_obj = progress(indeterminate=True)
+
     # actions
     for index in range(num_actions):
+        progress_obj.report(int(index / num_actions * 900))
         action = await call(EosTxActionRequest(), EosTxActionAck)
         is_last = index == num_actions - 1
         await process_action(sha, action, is_last)
@@ -55,4 +61,7 @@ async def sign_tx(msg: EosSignTx, keychain: Keychain) -> EosSignedTx:
         node.private_key(), digest, True, secp256k1.CANONICAL_SIG_EOS
     )
 
+    progress_obj.stop()
+
+    show_continue_in_app(TR.send__transaction_signed)
     return EosSignedTx(signature=base58_encode("SIG_", "K1", signature))

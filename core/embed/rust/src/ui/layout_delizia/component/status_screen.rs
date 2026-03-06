@@ -143,6 +143,12 @@ enum DismissType {
     Timeout(Timeout),
 }
 
+impl DismissType {
+    fn limited_timeout(time_ms: u32) -> Self {
+        Self::Timeout(Timeout::new(if animation_disabled() { 0 } else { time_ms }))
+    }
+}
+
 impl StatusScreen {
     fn new(
         icon: Icon,
@@ -172,12 +178,12 @@ impl StatusScreen {
         )
     }
 
-    pub fn new_success_timeout(msg: TString<'static>) -> Self {
+    pub fn new_success_timeout(msg: TString<'static>, time_ms: u32) -> Self {
         Self::new(
             theme::ICON_SIMPLE_CHECKMARK30,
             theme::GREEN_LIME,
             theme::GREEN_LIGHT,
-            DismissType::Timeout(Timeout::new(TIMEOUT_MS)),
+            DismissType::limited_timeout(time_ms),
             msg,
         )
     }
@@ -197,7 +203,7 @@ impl StatusScreen {
             theme::ICON_SIMPLE_CHECKMARK30,
             theme::GREY_EXTRA_LIGHT,
             theme::GREY_DARK,
-            DismissType::Timeout(Timeout::new(TIMEOUT_MS)),
+            DismissType::limited_timeout(TIMEOUT_MS),
             msg,
         )
     }

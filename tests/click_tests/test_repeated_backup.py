@@ -20,7 +20,8 @@ import pytest
 
 from trezorlib import device, exceptions, messages
 
-from ..common import MOCK_GET_ENTROPY
+from .. import translations as TR
+from ..common import MOCK_GET_ENTROPY, LayoutType
 from . import recovery, reset
 from .common import go_next
 
@@ -32,7 +33,7 @@ pytestmark = pytest.mark.models("core")
 
 
 @pytest.mark.setup_client(uninitialized=True)
-def test_repeated_backup(
+def test_repeated_backup_via_device(
     device_handler: "BackgroundDeviceHandler",
 ):
     features = device_handler.features()
@@ -40,7 +41,9 @@ def test_repeated_backup(
 
     assert features.initialized is False
 
-    device_handler.run(
+    session = device_handler.client.get_seedless_session()
+    device_handler.run_with_provided_session(
+        session,
         device.setup,
         strength=128,
         backup_type=messages.BackupType.Slip39_Basic,
@@ -79,8 +82,6 @@ def test_repeated_backup(
     reset.confirm_read(debug)
     # confirm backup done
     reset.confirm_read(debug)
-    # Your backup is done
-    go_next(debug)
 
     # retrieve the result to check that it does not raise a failure
     device_handler.result()
@@ -93,8 +94,9 @@ def test_repeated_backup(
     assert features.recovery_status == messages.RecoveryStatus.Nothing
 
     # run recovery to unlock backup
-    device_handler.run(
+    device_handler.run_with_session(
         device.recover,
+        seedless=True,
         type=messages.RecoveryType.UnlockRepeatedBackup,
     )
 
@@ -119,13 +121,25 @@ def test_repeated_backup(
     assert features.no_backup is False
     assert features.recovery_status == messages.RecoveryStatus.Backup
 
+    debug.synchronize_at(TR.reset__title_shamir_backup)
     # at this point, the backup is unlocked...
     go_next(debug)
 
     # ... so let's try to do a 2-of-3 backup
     # confirm backup intro
+    debug.synchronize_at(
+        [
+            TR.backup__title_create_wallet_backup,
+            TR.reset__recovery_wallet_backup_title,
+            "BlendedImage",
+            "ScrollableFrame",
+        ]
+    )
     reset.confirm_read(debug)
     # confirm checklist
+    debug.synchronize_at(
+        [TR.reset__title_shamir_backup, TR.reset__slip39_checklist_title, "Checklist"]
+    )
     reset.confirm_read(debug)
     # shares=3
     reset.set_selection(debug, 3 - 5)
@@ -139,9 +153,11 @@ def test_repeated_backup(
     reset.confirm_read(debug, middle_r=True)
 
     second_backup_2_of_3: list[str] = []
-    for _ in range(3):
+    for share in range(3):
         # read words
-        words = reset.read_words(debug, do_htc=False)
+        eckahrt = debug.layout_type is LayoutType.Eckhart
+        confirm_instruction = not eckahrt or share == 0
+        words = reset.read_words(debug, confirm_instruction=confirm_instruction)
 
         # confirm words
         reset.confirm_words(debug, words)
@@ -150,6 +166,9 @@ def test_repeated_backup(
         reset.confirm_read(debug)
 
         second_backup_2_of_3.append(" ".join(words))
+
+    # confirm backup success
+    reset.confirm_read(debug)
 
     # we are not in recovery mode anymore, because we finished the backup process!
     features = device_handler.features()
@@ -160,8 +179,9 @@ def test_repeated_backup(
     assert features.recovery_status == messages.RecoveryStatus.Nothing
 
     # try to unlock backup again...
-    device_handler.run(
+    device_handler.run_with_session(
         device.recover,
+        seedless=True,
         type=messages.RecoveryType.UnlockRepeatedBackup,
     )
 
@@ -200,8 +220,9 @@ def test_repeated_backup(
     assert features.recovery_status == messages.RecoveryStatus.Nothing
 
     # try to unlock backup yet again...
-    device_handler.run(
+    device_handler.run_with_session(
         device.recover,
+        seedless=True,
         type=messages.RecoveryType.UnlockRepeatedBackup,
     )
 

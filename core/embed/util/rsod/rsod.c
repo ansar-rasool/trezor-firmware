@@ -17,21 +17,24 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <trezor_rtl.h>
+
 #include <gfx/terminal.h>
 #include <io/display.h>
-#include <rtl/mini_printf.h>
 #include <sys/bootutils.h>
 #include <sys/system.h>
 #include <util/rsod.h>
+
+#include <rtl/strutils.h>
 
 #ifdef SCM_REVISION_INIT
 #include <util/scm_revision.h>
 #endif
 
-#define RSOD_DEFAULT_TITLE "INTERNAL ERROR";
-#define RSOD_DEFAULT_MESSAGE "UNSPECIFIED";
-#define RSOD_DEFAULT_FOOTER "PLEASE VISIT TREZOR.IO/RSOD";
-#define RSOD_EXIT_MESSAGE "EXIT %d"
+#define RSOD_DEFAULT_TITLE "Internal error";
+#define RSOD_DEFAULT_MESSAGE "Unspecified";
+#define RSOD_DEFAULT_FOOTER "Please visit trezor.io/rsod";
+#define RSOD_EXIT_MESSAGE "Exit "  // followed by exit code
 
 #ifdef KERNEL_MODE
 
@@ -51,13 +54,13 @@ void rsod_terminal(const systask_postmortem_t* pminfo) {
   const char* message = RSOD_DEFAULT_MESSAGE;
   const char* footer = RSOD_DEFAULT_FOOTER;
   const char* file = NULL;
-  char message_buf[32] = {0};
+  char message_buf[32] = "";
   int line = 0;
 
   switch (pminfo->reason) {
     case TASK_TERM_REASON_EXIT:
-      mini_snprintf(message_buf, sizeof(message_buf), RSOD_EXIT_MESSAGE,
-                    pminfo->exit.code);
+      cstr_append(message_buf, sizeof(message_buf), RSOD_EXIT_MESSAGE);
+      cstr_append_int32(message_buf, sizeof(message_buf), pminfo->exit.code);
       message = message_buf;
       break;
     case TASK_TERM_REASON_ERROR:
@@ -82,25 +85,35 @@ void rsod_terminal(const systask_postmortem_t* pminfo) {
   }
 
   if (title != NULL) {
-    term_printf("%s\n", title);
+    term_print(title);
+    term_print("\n");
   }
 
   if (message != NULL) {
-    term_printf("msg : %s\n", message);
+    term_print("msg : ");
+    term_print(message);
+    term_print("\n");
   }
 
   if (file) {
-    term_printf("file: %s:%d\n", file, line);
+    term_print("file: ");
+    term_print(file);
+    term_print(":");
+    term_print_int32(line);
+    term_print("\n");
   }
 
 #ifdef SCM_REVISION_INIT
-  const uint8_t* rev = SCM_REVISION;
-  term_printf("rev : %02x%02x%02x%02x%02x\n", rev[0], rev[1], rev[2], rev[3],
-              rev[4]);
+  char rev[10 + 1];
+  cstr_encode_hex(rev, sizeof(rev), SCM_REVISION, (sizeof(rev) - 1) / 2);
+  term_print("rev : ");
+  term_print(rev);
 #endif
 
   if (footer != NULL) {
-    term_printf("\n%s\n", footer);
+    term_print("\n");
+    term_print(footer);
+    term_print("\n");
   }
 
   display_set_backlight(255);
@@ -110,18 +123,18 @@ void rsod_terminal(const systask_postmortem_t* pminfo) {
 
 #ifdef FANCY_FATAL_ERROR
 
-#include "rust_ui.h"
+#include "rust_ui_common.h"
 
 void rsod_gui(const systask_postmortem_t* pminfo) {
   const char* title = RSOD_DEFAULT_TITLE;
   const char* message = RSOD_DEFAULT_MESSAGE;
   const char* footer = RSOD_DEFAULT_FOOTER;
-  char message_buf[128] = {0};
+  char message_buf[128] = "";
 
   switch (pminfo->reason) {
     case TASK_TERM_REASON_EXIT:
-      mini_snprintf(message_buf, sizeof(message_buf), RSOD_EXIT_MESSAGE,
-                    pminfo->exit.code);
+      cstr_append(message_buf, sizeof(message_buf), RSOD_EXIT_MESSAGE);
+      cstr_append_int32(message_buf, sizeof(message_buf), pminfo->exit.code);
       message = message_buf;
       break;
 
@@ -140,10 +153,17 @@ void rsod_gui(const systask_postmortem_t* pminfo) {
     case TASK_TERM_REASON_FATAL:
       message = pminfo->fatal.expr;
       if (message[0] == '\0') {
-        mini_snprintf(message_buf, sizeof(message_buf), "%s:%u",
-                      pminfo->fatal.file, (unsigned int)pminfo->fatal.line);
-        message = message_buf;
+        cstr_append(message_buf, sizeof(message_buf), pminfo->fatal.file);
+        cstr_append(message_buf, sizeof(message_buf), ":");
+        cstr_append_int32(message_buf, sizeof(message_buf), pminfo->fatal.line);
+      } else {
+        cstr_append(message_buf, sizeof(message_buf), message);
+        cstr_append(message_buf, sizeof(message_buf), "\n");
+        cstr_append(message_buf, sizeof(message_buf), pminfo->fatal.file);
+        cstr_append(message_buf, sizeof(message_buf), ":");
+        cstr_append_int32(message_buf, sizeof(message_buf), pminfo->fatal.line);
       }
+      message = message_buf;
       break;
 
     case TASK_TERM_REASON_FAULT:
@@ -162,9 +182,9 @@ void rsod_gui(const systask_postmortem_t* pminfo) {
 // Initializes system in emergency mode and shows RSOD
 static void init_and_show_rsod(const systask_postmortem_t* pminfo) {
   // Initialize the system's core services
-  // (If the kernel crashes in emergency mode, we are out of options
-  // and show the RSOD without attempting to re-enter emergency mode)
-  system_init(&rsod_terminal);
+  // Pass NULL as error handler => if the system crashes in this routine
+  // we will not try to re-enter emergency mode again and reboot directly.
+  system_init(NULL);
 
   // Initialize necessary drivers
   display_init(DISPLAY_RESET_CONTENT);

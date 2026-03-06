@@ -40,7 +40,7 @@ STATIC mp_obj_t mod_trezorcrypto_nem_validate_address(mp_obj_t address,
 STATIC MP_DEFINE_CONST_FUN_OBJ_2(mod_trezorcrypto_nem_validate_address_obj,
                                  mod_trezorcrypto_nem_validate_address);
 
-/// def compute_address(public_key: bytes, network: int) -> str:
+/// def compute_address(public_key: AnyBytes, network: int) -> str:
 ///     """
 ///     Compute a NEM address from a public key
 ///     """
@@ -53,8 +53,8 @@ STATIC mp_obj_t mod_trezorcrypto_nem_compute_address(mp_obj_t public_key,
 
   char address[NEM_ADDRESS_SIZE + 1];  // + 1 for the 0 byte
   if (!nem_get_address(p.buf, n, address)) {
-    mp_raise_ValueError(
-        "Failed to compute a NEM address from provided public key");
+    mp_raise_ValueError(MP_ERROR_TEXT(
+        "Failed to compute a NEM address from provided public key"));
   }
   return mp_obj_new_str(address, strlen(address));
 }

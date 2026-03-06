@@ -20,6 +20,9 @@ use crate::{
     ui::event::ButtonEvent,
 };
 
+#[cfg(feature = "power_manager")]
+use crate::ui::event::PMEvent;
+
 use super::base::{Layout, LayoutState};
 use crate::{
     error::Error,
@@ -48,6 +51,9 @@ use crate::{
         CommonUI, ModelUI,
     },
 };
+
+#[cfg(any(feature = "rgb_led", feature = "ui_debug"))]
+use crate::ui::shape::Renderer;
 
 impl AttachType {
     fn to_obj(self) -> Obj {
@@ -136,7 +142,7 @@ where
             self.returned_value = Some(self.inner.msg_try_into_obj(msg));
             Some(LayoutState::Done)
         } else if matches!(event, Event::Attach(_)) {
-            Some(LayoutState::Attached(ctx.button_request().take()))
+            Some(LayoutState::Attached(ctx.button_request()))
         } else {
             None
         }
@@ -146,10 +152,23 @@ where
         self.returned_value.as_ref()
     }
 
-    fn paint(&mut self) {
+    fn paint(&mut self) -> Result<(), Error> {
+        #[cfg(feature = "ui_debug")]
+        let mut overflow: bool = false;
         render_on_display(None, Some(Color::black()), |target| {
             self.inner.render(target);
+
+            #[cfg(feature = "rgb_led")]
+            target.led_state().set();
+
+            #[cfg(feature = "ui_debug")]
+            if target.should_raise_overflow_exception() {
+                overflow = true;
+            }
         });
+
+        // TODO: raise here, so we also test older layouts
+        Ok(())
     }
 }
 
@@ -297,7 +316,7 @@ impl LayoutObjInner {
 
         // Update page count if it changed
         if let Some(count) = self.event_ctx.page_count() {
-            self.page_count = count as u16;
+            self.page_count = count;
         }
 
         Ok(msg.into())
@@ -305,15 +324,14 @@ impl LayoutObjInner {
 
     /// Run a paint pass over the component tree. Returns true if any component
     /// actually requested painting since last invocation of the function.
-    fn obj_paint_if_requested(&mut self) -> bool {
+    fn obj_paint_if_requested(&mut self) -> Result<bool, Error> {
         display::sync();
 
         if self.repaint != Repaint::None {
             self.repaint = Repaint::None;
-            self.root_mut().paint();
-            true
+            self.root_mut().paint().map(|_| true)
         } else {
-            false
+            Ok(false)
         }
     }
 
@@ -394,7 +412,8 @@ impl LayoutObj {
                 Qstr::MP_QSTR_button_event => obj_fn_var!(3, 3, ui_layout_button_event).as_obj(),
                 Qstr::MP_QSTR_progress_event => obj_fn_var!(3, 3, ui_layout_progress_event).as_obj(),
                 Qstr::MP_QSTR_usb_event => obj_fn_var!(2, 2, ui_layout_usb_event).as_obj(),
-                Qstr::MP_QSTR_ble_event=> obj_fn_var!(3, 3, ui_layout_ble_event).as_obj(),
+                Qstr::MP_QSTR_ble_event => obj_fn_var!(3, 3, ui_layout_ble_event).as_obj(),
+                Qstr::MP_QSTR_pm_event => obj_fn_2!(ui_layout_pm_event).as_obj(),
                 Qstr::MP_QSTR_timer => obj_fn_2!(ui_layout_timer).as_obj(),
                 Qstr::MP_QSTR_paint => obj_fn_1!(ui_layout_paint).as_obj(),
                 Qstr::MP_QSTR_request_complete_repaint => obj_fn_1!(ui_layout_request_complete_repaint).as_obj(),
@@ -555,6 +574,25 @@ extern "C" fn ui_layout_ble_event(_n_args: usize, _args: *const Obj) -> Obj {
     Obj::const_none()
 }
 
+#[cfg(feature = "power_manager")]
+extern "C" fn ui_layout_pm_event(this: Obj, flags: Obj) -> Obj {
+    let block = || {
+        let this: Gc<LayoutObj> = this.try_into()?;
+        let flags: u32 = flags.try_into()?;
+
+        let event = PMEvent::from_packed_flags(flags);
+        let msg = this.inner_mut().obj_event(Event::PM(event))?;
+        Ok(msg)
+    };
+
+    unsafe { util::try_or_raise(block) }
+}
+
+#[cfg(not(feature = "power_manager"))]
+extern "C" fn ui_layout_pm_event(_this: Obj, _flags: Obj) -> Obj {
+    Obj::const_none()
+}
+
 extern "C" fn ui_layout_progress_event(n_args: usize, args: *const Obj) -> Obj {
     let block = |args: &[Obj], _kwargs: &Map| {
         if args.len() != 3 {
@@ -597,8 +635,11 @@ extern "C" fn ui_layout_timer(this: Obj, token: Obj) -> Obj {
 extern "C" fn ui_layout_paint(this: Obj) -> Obj {
     let block = || {
         let this: Gc<LayoutObj> = this.try_into()?;
-        let painted = this.inner_mut().obj_paint_if_requested().into();
-        Ok(painted)
+        let painted = this.inner_mut().obj_paint_if_requested();
+        if painted? {
+            display::refresh();
+        }
+        Ok(painted?.into())
     };
     unsafe { util::try_or_raise(block) }
 }

@@ -1,12 +1,9 @@
-use crate::{
-    trezorhal::secbool::{secbool, sectrue},
-    ui::{
-        component::{Child, Component, Event, EventCtx, Label, Pad},
-        constant::{screen, WIDTH},
-        display::Icon,
-        geometry::{Insets, Point, Rect},
-        shape::Renderer,
-    },
+use crate::ui::{
+    component::{Child, Component, Event, EventCtx, Label, Pad},
+    constant::{screen, WIDTH},
+    display::Icon,
+    geometry::{Insets, Point, Rect},
+    shape::Renderer,
 };
 
 use super::super::{
@@ -37,7 +34,7 @@ pub struct Menu {
 }
 
 impl Menu {
-    pub fn new(firmware_present: secbool) -> Self {
+    pub fn new() -> Self {
         let content_reboot = IconText::new("REBOOT TREZOR", Icon::new(REFRESH24));
         let content_reset = IconText::new("FACTORY RESET", Icon::new(FIRE24));
 
@@ -51,11 +48,7 @@ impl Menu {
                     .styled(button_bld_menu())
                     .with_expanded_touch_area(Insets::uniform(CORNER_BUTTON_TOUCH_EXPANSION)),
             ),
-            reboot: Child::new(
-                Button::with_icon_and_text(content_reboot)
-                    .styled(button_bld())
-                    .initially_enabled(sectrue == firmware_present),
-            ),
+            reboot: Child::new(Button::with_icon_and_text(content_reboot).styled(button_bld())),
             reset: Child::new(Button::with_icon_and_text(content_reset).styled(button_bld())),
         };
         instance.bg.clear();

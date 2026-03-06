@@ -85,7 +85,9 @@ impl Shape<'_> for LoaderStarry {
         for (i, c) in STARS.iter().enumerate() {
             if i == sel_idx {
                 self.draw_large_star(canvas, *c);
-            } else if (sel_idx + 1) % 8 == i || (sel_idx - 1) % 8 == i {
+            } else if (sel_idx + 1) % STAR_COUNT == i
+                || (sel_idx + STAR_COUNT - 1) % STAR_COUNT == i
+            {
                 self.draw_medium_star(canvas, *c);
             } else {
                 self.draw_small_star(canvas, *c);
@@ -95,7 +97,7 @@ impl Shape<'_> for LoaderStarry {
 }
 
 impl<'s> ShapeClone<'s> for LoaderStarry {
-    fn clone_at_bump<T>(self, bump: &'s T) -> Option<&'s mut dyn Shape>
+    fn clone_at_bump<T>(self, bump: &'s T) -> Option<&'s mut dyn Shape<'s>>
     where
         T: LocalAllocLeakExt<'s>,
     {

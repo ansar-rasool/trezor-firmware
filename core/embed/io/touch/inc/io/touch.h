@@ -67,11 +67,13 @@ secbool touch_set_sensitivity(uint8_t value);
 //
 // The purpose of this function is very special. It is used
 // in bootloader startup to detect if the user is touching the screen.
-// On some hardware it's a bit more sensitive then `touch_get_event()`
+// On some hardware it's a bit more sensitive than `touch_get_event()`
 // since it does not filter out any events.
 //
 // The function should not be used together with `touch_get_event()`.
 secbool touch_activity(void);
+
+uint32_t touch_get_state(void);
 
 #endif  // KERNEL_MODE
 

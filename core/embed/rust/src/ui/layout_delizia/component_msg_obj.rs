@@ -8,9 +8,9 @@ use super::component::{
 };
 use crate::{
     error::Error,
-    micropython::obj::Obj,
+    micropython::{gc::GcBox, obj::Obj},
     ui::{
-        component::{paginated::PaginateFull, Component, Never},
+        component::{paginated::Paginate, Component, Never},
         flow::Swipable,
         layout::{
             obj::ComponentMsgObj,
@@ -75,7 +75,7 @@ where
 
 impl<T> ComponentMsgObj for Frame<T>
 where
-    T: ComponentMsgObj + PaginateFull,
+    T: ComponentMsgObj + Paginate,
 {
     fn msg_try_into_obj(&self, msg: Self::Msg) -> Result<Obj, Error> {
         match msg {
@@ -174,7 +174,7 @@ where
     }
 }
 
-impl ComponentMsgObj for AddressDetails {
+impl ComponentMsgObj for GcBox<AddressDetails> {
     fn msg_try_into_obj(&self, _msg: Self::Msg) -> Result<Obj, Error> {
         Ok(CANCELLED.as_obj())
     }

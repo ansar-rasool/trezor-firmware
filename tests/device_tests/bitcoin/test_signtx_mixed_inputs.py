@@ -15,9 +15,11 @@
 # If not, see <https://www.gnu.org/licenses/lgpl-3.0.html>.
 
 from trezorlib import btc, messages
-from trezorlib.debuglink import TrezorClientDebugLink as Client
+from trezorlib.debuglink import SessionDebugWrapper as Session
 from trezorlib.tools import parse_path
 
+from ...common import is_core
+from ...input_flows import InputFlowConfirmAllWarnings
 from ...tx_cache import TxCache
 from .signtx import assert_tx_matches
 
@@ -34,7 +36,7 @@ TXHASH_cf52d7 = bytes.fromhex(
 )
 
 
-def test_non_segwit_segwit_inputs(client: Client):
+def test_non_segwit_segwit_inputs(session: Session):
     # First is non-segwit, second is segwit.
 
     inp1 = messages.TxInputType(
@@ -58,9 +60,12 @@ def test_non_segwit_segwit_inputs(client: Client):
         script_type=messages.OutputScriptType.PAYTOADDRESS,
     )
 
-    with client:
+    with session.client as client:
+        if is_core(client):
+            IF = InputFlowConfirmAllWarnings(client)
+            client.set_input_flow(IF.get())
         signatures, serialized_tx = btc.sign_tx(
-            client, "Testnet", [inp1, inp2], [out1], prev_txes=TX_API
+            session, "Testnet", [inp1, inp2], [out1], prev_txes=TX_API
         )
 
     assert len(signatures) == 2
@@ -71,7 +76,7 @@ def test_non_segwit_segwit_inputs(client: Client):
     )
 
 
-def test_segwit_non_segwit_inputs(client: Client):
+def test_segwit_non_segwit_inputs(session: Session):
     # First is segwit, second is non-segwit.
 
     inp1 = messages.TxInputType(
@@ -94,9 +99,12 @@ def test_segwit_non_segwit_inputs(client: Client):
         script_type=messages.OutputScriptType.PAYTOADDRESS,
     )
 
-    with client:
+    with session.client as client:
+        if is_core(client):
+            IF = InputFlowConfirmAllWarnings(client)
+            client.set_input_flow(IF.get())
         signatures, serialized_tx = btc.sign_tx(
-            client, "Testnet", [inp1, inp2], [out1], prev_txes=TX_API
+            session, "Testnet", [inp1, inp2], [out1], prev_txes=TX_API
         )
 
     assert len(signatures) == 2
@@ -107,7 +115,7 @@ def test_segwit_non_segwit_inputs(client: Client):
     )
 
 
-def test_segwit_non_segwit_segwit_inputs(client: Client):
+def test_segwit_non_segwit_segwit_inputs(session: Session):
     # First is segwit, second is non-segwit and third is segwit again.
 
     inp1 = messages.TxInputType(
@@ -138,9 +146,12 @@ def test_segwit_non_segwit_segwit_inputs(client: Client):
         script_type=messages.OutputScriptType.PAYTOADDRESS,
     )
 
-    with client:
+    with session.client as client:
+        if is_core(client):
+            IF = InputFlowConfirmAllWarnings(client)
+            client.set_input_flow(IF.get())
         signatures, serialized_tx = btc.sign_tx(
-            client, "Testnet", [inp1, inp2, inp3], [out1], prev_txes=TX_API
+            session, "Testnet", [inp1, inp2, inp3], [out1], prev_txes=TX_API
         )
 
     assert len(signatures) == 3
@@ -151,7 +162,7 @@ def test_segwit_non_segwit_segwit_inputs(client: Client):
     )
 
 
-def test_non_segwit_segwit_non_segwit_inputs(client: Client):
+def test_non_segwit_segwit_non_segwit_inputs(session: Session):
     # First is non-segwit, second is segwit and third is non-segwit again.
 
     inp1 = messages.TxInputType(
@@ -180,9 +191,12 @@ def test_non_segwit_segwit_non_segwit_inputs(client: Client):
         script_type=messages.OutputScriptType.PAYTOADDRESS,
     )
 
-    with client:
+    with session.client as client:
+        if is_core(client):
+            IF = InputFlowConfirmAllWarnings(client)
+            client.set_input_flow(IF.get())
         signatures, serialized_tx = btc.sign_tx(
-            client, "Testnet", [inp1, inp2, inp3], [out1], prev_txes=TX_API
+            session, "Testnet", [inp1, inp2, inp3], [out1], prev_txes=TX_API
         )
 
     assert len(signatures) == 3

@@ -1,6 +1,6 @@
 # This file is part of the Trezor project.
 #
-# Copyright (C) 2012-2022 SatoshiLabs and contributors
+# Copyright (C) SatoshiLabs and contributors
 #
 # This library is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License version 3
@@ -20,8 +20,8 @@ from typing import TYPE_CHECKING
 from . import exceptions, messages
 
 if TYPE_CHECKING:
-    from .client import TrezorClient
     from .tools import Address
+    from .transport.session import Session
 
 TYPE_TRANSACTION_TRANSFER = 0x0101
 TYPE_IMPORTANCE_TRANSFER = 0x0801
@@ -195,13 +195,13 @@ def create_sign_tx(transaction: dict, chunkify: bool = False) -> messages.NEMSig
 
 
 def get_address(
-    client: "TrezorClient",
+    session: "Session",
     n: "Address",
     network: int,
     show_display: bool = False,
     chunkify: bool = False,
 ) -> str:
-    return client.call(
+    return session.call(
         messages.NEMGetAddress(
             address_n=n, network=network, show_display=show_display, chunkify=chunkify
         ),
@@ -210,7 +210,7 @@ def get_address(
 
 
 def sign_tx(
-    client: "TrezorClient", n: "Address", transaction: dict, chunkify: bool = False
+    session: "Session", n: "Address", transaction: dict, chunkify: bool = False
 ) -> messages.NEMSignedTx:
     try:
         msg = create_sign_tx(transaction, chunkify=chunkify)
@@ -219,4 +219,4 @@ def sign_tx(
 
     assert msg.transaction is not None
     msg.transaction.address_n = n
-    return client.call(msg, expect=messages.NEMSignedTx)
+    return session.call(msg, expect=messages.NEMSignedTx)

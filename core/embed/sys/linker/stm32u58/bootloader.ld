@@ -1,5 +1,3 @@
-INCLUDE "./embed/sys/linker/stm32u58/memory.ld";
-
 ENTRY(reset_handler)
 
 MEMORY {
@@ -8,7 +6,6 @@ MEMORY {
   MAIN_RAM (wal) : ORIGIN = MAIN_RAM_START, LENGTH = MAIN_RAM_SIZE
   AUX1_RAM (wal) : ORIGIN = AUX1_RAM_START, LENGTH = AUX1_RAM_SIZE
   BOOT_ARGS (wal) : ORIGIN = BOOTARGS_START, LENGTH = BOOTARGS_SIZE
-  SAES_RAM (wal) : ORIGIN = SAES_RAM_START, LENGTH = SAES_RAM_SIZE
   FB1_RAM (wal) : ORIGIN = FB1_RAM_START, LENGTH = FB1_RAM_SIZE
   FB2_RAM (wal) : ORIGIN = FB2_RAM_START, LENGTH = FB2_RAM_SIZE
 }
@@ -23,19 +20,10 @@ _data_section_end = ADDR(.data) + SIZEOF(.data);
 _bss_section_start = ADDR(.bss);
 _bss_section_end = ADDR(.bss) + SIZEOF(.bss);
 
-_confidential_section_loadaddr = LOADADDR(.confidential);
-_confidential_section_start = ADDR(.confidential);
-_confidential_section_end = ADDR(.confidential) + SIZEOF(.confidential);
-
-_accessible_ram_0_start = MCU_SRAM1;
-_accessible_ram_0_end = MCU_SRAM3 + MCU_SRAM3_SIZE;
-_accessible_ram_1_start = MCU_SRAM4;
-_accessible_ram_1_end =  MCU_SRAM4 + MCU_SRAM4_SIZE;
-
 _bootargs_ram_start = BOOTARGS_START;
 _bootargs_ram_end = BOOTARGS_START + BOOTARGS_SIZE;
 
-_codelen = SIZEOF(.flash) + SIZEOF(.data) + SIZEOF(.confidential);
+_codelen = SIZEOF(.flash) + SIZEOF(.data);
 
 SECTIONS {
   .header : ALIGN(4) {
@@ -48,13 +36,13 @@ SECTIONS {
     *(.text*);
     . = ALIGN(4);
     *(.rodata*);
-    . = ALIGN(512);
+    . = ALIGN(4);
   } >FLASH AT>FLASH
 
   .data : ALIGN(4) {
     *(.data*);
-    . = ALIGN(512);
-  } >AUX1_RAM AT>FLASH
+    . = ALIGN(4);
+  } >MAIN_RAM AT>FLASH
 
   /DISCARD/ : {
     *(.ARM.exidx*);
@@ -63,7 +51,7 @@ SECTIONS {
   .bss : ALIGN(4) {
     *(.bss*);
     . = ALIGN(4);
-  } >AUX1_RAM
+  } >MAIN_RAM
 
   .buf : ALIGN(4) {
     *(.buf*);
@@ -75,11 +63,6 @@ SECTIONS {
   .stack : ALIGN(8) {
     . = 16K; /* Overflow causes UsageFault */
   } >MAIN_RAM
-
-  .confidential : ALIGN(512) {
-    *(.confidential*);
-    . = ALIGN(512);
-  } >MAIN_RAM AT>FLASH
 
   .fb1 : ALIGN(4) {
     *(.fb1*);

@@ -3,6 +3,8 @@ from typing import TYPE_CHECKING
 from trezor.messages import SolanaTokenInfo
 
 if TYPE_CHECKING:
+    from buffer_types import AnyBytes
+
     from typing_extensions import Self
 
 
@@ -13,7 +15,7 @@ class Definitions:
         self._tokens = tokens or {}
 
     @classmethod
-    def from_encoded(cls, encoded_token: bytes | None) -> Self:
+    def from_encoded(cls, encoded_token: AnyBytes | None) -> Self:
         from apps.common.definitions import decode_definition
 
         tokens: dict[bytes, SolanaTokenInfo] = {}
@@ -21,20 +23,17 @@ class Definitions:
         # get token definition
         if encoded_token is not None:
             token = decode_definition(encoded_token, SolanaTokenInfo)
-            tokens[token.mint] = token
+            tokens[bytes(token.mint)] = token
 
         return cls(tokens)
 
-    def has_token(self, mint: bytes) -> bool:
-        return mint in self._tokens
+    def get_token(self, mint: bytes) -> SolanaTokenInfo | None:
+        return self._tokens.get(mint)
 
-    def get_token(self, mint: bytes) -> SolanaTokenInfo:
-        token = self._tokens.get(mint)
-        if token is not None:
-            return token
 
-        return SolanaTokenInfo(
-            mint=mint,
-            symbol="[UNKN]",
-            name="Unknown token",
-        )
+def unknown_token(mint: bytes) -> SolanaTokenInfo:
+    return SolanaTokenInfo(
+        mint=mint,
+        symbol="[UNKN]",
+        name="Unknown token",
+    )

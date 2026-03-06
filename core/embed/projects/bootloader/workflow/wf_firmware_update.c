@@ -21,15 +21,19 @@
 #include <trezor_rtl.h>
 
 #include <sys/bootargs.h>
+#include <sys/bootutils.h>
 #include <sys/systick.h>
 #include <util/flash.h>
 #include <util/flash_utils.h>
+#include <util/rsod_special.h>
 
-#if USE_OPTIGA || USE_STORAGE_HWKEY
+#if defined(LOCKABLE_BOOTLOADER) || USE_STORAGE_HWKEY
 #include <sec/secret.h>
 #endif
 
-#include <poll.h>
+#ifdef USE_BACKUP_RAM
+#include <sys/backup_ram.h>
+#endif
 
 #include "bootui.h"
 #include "protob/protob.h"
@@ -39,6 +43,8 @@
 #ifdef TREZOR_EMULATOR
 #include "emulator.h"
 #endif
+
+#define MESSAGE_RX_TIMEOUT 10000
 
 typedef enum {
   UPLOAD_OK = 0,
@@ -60,6 +66,11 @@ typedef enum {
   UPLOAD_ERR_NOT_FULLTRUST_IMAGE = -13,
   UPLOAD_ERR_INVALID_CHUNK_PADDING = -14,
   UPLOAD_ERR_COMMUNICATION = -17,
+  UPLOAD_ERR_INVALID_SECMON_HEADER = -18,
+  UPLOAD_ERR_INVALID_SECMON_HEADER_SIG = -19,
+  UPLOAD_ERR_INVALID_SECMON_MODEL = -20,
+  UPLOAD_ERR_INVALID_SECMON_HASH = -21,
+  UPLOAD_ERR_SECMON_TOO_BIG = -22,
 } upload_status_t;
 
 #define FIRMWARE_UPLOAD_CHUNK_RETRY_COUNT 2
@@ -76,8 +87,23 @@ typedef struct {
   uint32_t erase_offset;                // offset of flash memory to erase
   int32_t firmware_upload_chunk_retry;  // retry counter
   size_t headers_offset;                // offset of headers in the first block
-  size_t read_offset;   // offset of the next read data in the chunk buffer
-  uint32_t chunk_size;  // size of already received chunk data
+  size_t read_offset;       // offset of the next read data in the chunk buffer
+  uint32_t chunk_size;      // size of already received chunk data
+  bool confirmed;           // true if the firmware is confirmed by the user
+  bool wireless_transport;  // whether the transport is over BLE
+#ifdef USE_SECMON_VERIFICATION
+  size_t secmon_code_offset;     // offset of the secmon code in the first block
+  size_t secmon_code_size;       // size of the secmon code
+  size_t secmon_code_processed;  // size of the processed secmon code
+  uint8_t expected_secmon_hash[IMAGE_HASH_DIGEST_LENGTH];  // expected hash of
+                                                           // the secmon code
+  // todo should be IMAGE_HASH_CTX, but due to limitations of the hash_processor
+  //  driver implementation, we can't run two hash calculations in parallel so
+  //  temporarily we use SW hashing for secmon code during update.
+  //  As secmon is only used on U5 MCUs where also SHA256is used for image
+  //  hashes, this works, but should be fixed by improving the hash_processor
+  SHA256_CTX secmon_hash_ctx;
+#endif
 } firmware_update_ctx_t;
 
 static int version_compare(uint32_t vera, uint32_t verb) {
@@ -150,13 +176,14 @@ static void fw_data_received(size_t len, void *ctx) {
   firmware_update_ctx_t *context = (firmware_update_ctx_t *)ctx;
 
   context->chunk_size += len;
-  // update loader but skip first block
-  if (context->firmware_block > 0) {
+  // update loader only after the update is confirmed
+  if (context->confirmed) {
     ui_screen_install_progress_upload(
         1000 *
-        (context->firmware_block * IMAGE_CHUNK_SIZE + context->chunk_size) /
-        (context->firmware_block * IMAGE_CHUNK_SIZE +
-         context->firmware_remaining));
+            (context->firmware_block * IMAGE_CHUNK_SIZE + context->chunk_size) /
+            (context->firmware_block * IMAGE_CHUNK_SIZE +
+             context->firmware_remaining),
+        context->wireless_transport);
   }
 }
 
@@ -231,6 +258,43 @@ static upload_status_t process_msg_FirmwareUpload(protob_io_t *iface,
         return UPLOAD_ERR_INVALID_IMAGE_HEADER_VERSION;
       }
 
+#ifdef USE_SECMON_VERIFICATION
+      size_t secmon_start_offset =
+          (size_t)IMAGE_CODE_ALIGN(vhdr.hdrlen + IMAGE_HEADER_SIZE);
+      size_t secmon_start = (size_t)chunk_buffer + secmon_start_offset;
+      const secmon_header_t *secmon_hdr =
+          read_secmon_header((const uint8_t *)secmon_start, FIRMWARE_MAXSIZE);
+
+      if (secmon_hdr != NULL) {
+        ctx->secmon_code_offset =
+            IMAGE_CODE_ALIGN(vhdr.hdrlen + IMAGE_HEADER_SIZE) +
+            SECMON_HEADER_SIZE;
+      }
+
+      if (secmon_hdr != (const secmon_header_t *)secmon_start) {
+        send_msg_failure(iface, FailureType_Failure_ProcessError,
+                         "Invalid secmon header");
+        return UPLOAD_ERR_INVALID_SECMON_HEADER;
+      }
+
+      if (sectrue != check_secmon_model(secmon_hdr)) {
+        send_msg_failure(iface, FailureType_Failure_ProcessError,
+                         "Wrong secmon model");
+        return UPLOAD_ERR_INVALID_SECMON_MODEL;
+      }
+
+      if (sectrue != check_secmon_header_sig(secmon_hdr)) {
+        send_msg_failure(iface, FailureType_Failure_ProcessError,
+                         "Invalid secmon signature");
+        return UPLOAD_ERR_INVALID_SECMON_HEADER_SIG;
+      }
+
+      ctx->secmon_code_size = secmon_hdr->codelen;
+
+      memcpy(ctx->expected_secmon_hash, secmon_hdr->hash,
+             IMAGE_HASH_DIGEST_LENGTH);
+#endif
+
       memcpy(&hdr, received_hdr, sizeof(hdr));
 
       vendor_header current_vhdr;
@@ -302,8 +366,8 @@ static upload_status_t process_msg_FirmwareUpload(protob_io_t *iface,
         is_ilu = sectrue;
       }
 
-#if defined USE_OPTIGA
-      if (secfalse != secret_optiga_present() &&
+#if defined LOCKABLE_BOOTLOADER
+      if (secfalse != secret_bootloader_locked() &&
           ((vhdr.vtrust & VTRUST_SECRET_MASK) != VTRUST_SECRET_ALLOW)) {
         send_msg_failure(iface, FailureType_Failure_ProcessError,
                          "Install restricted");
@@ -311,12 +375,22 @@ static upload_status_t process_msg_FirmwareUpload(protob_io_t *iface,
       }
 #endif
 
-      ui_result_t response = UI_RESULT_CANCEL;
+#ifdef USE_SECMON_VERIFICATION
+      if (ctx->secmon_code_size >
+          ((hdr.codelen + IMAGE_HEADER_SIZE + vhdr.hdrlen) -
+           ctx->secmon_code_offset)) {
+        send_msg_failure(iface, FailureType_Failure_ProcessError,
+                         "Secmon code too big");
+        return UPLOAD_ERR_SECMON_TOO_BIG;
+      }
+#endif
+
+      confirm_result_t response = CANCEL;
       if (((vhdr.vtrust & VTRUST_NO_WARNING) == VTRUST_NO_WARNING) &&
           (sectrue == is_new || sectrue == is_ilu)) {
         // new installation or interaction less updated - auto confirm
         // only allowed for full-trust images
-        response = UI_RESULT_CONFIRM;
+        response = CONFIRM;
       } else {
         if (sectrue != is_new) {
           int version_cmp = version_compare(hdr.version, current_hdr->version);
@@ -328,12 +402,13 @@ static upload_status_t process_msg_FirmwareUpload(protob_io_t *iface,
         }
       }
 
-      if (UI_RESULT_CONFIRM != response) {
+      if (CONFIRM != response) {
         send_user_abort(iface, "Firmware install cancelled");
         return UPLOAD_ERR_USER_ABORT;
       }
 
-      ui_screen_install_start();
+      ui_screen_install_start(ctx->wireless_transport);
+      ctx->confirmed = true;
 
       // if firmware is not upgrade, erase storage
       if (sectrue != should_keep_seed) {
@@ -341,6 +416,9 @@ static upload_status_t process_msg_FirmwareUpload(protob_io_t *iface,
         secret_bhk_regenerate();
 #endif
         ensure(erase_storage(NULL), NULL);
+#ifdef USE_BACKUP_RAM
+        ensure(backup_ram_erase_protected() * sectrue, NULL);
+#endif
       }
 
       ctx->headers_offset = IMAGE_HEADER_SIZE + vhdr.hdrlen;
@@ -402,6 +480,46 @@ static upload_status_t process_msg_FirmwareUpload(protob_io_t *iface,
                      "Invalid chunk hash");
     return UPLOAD_ERR_INVALID_CHUNK_HASH;
   }
+
+#ifdef USE_SECMON_VERIFICATION
+  // validate secmon code hash
+  if (ctx->secmon_code_size > 0) {
+    if (ctx->secmon_code_processed == 0) {
+      // todo SW SHA256, see comment in firmware_update_ctx_t
+      sha256_Init(&ctx->secmon_hash_ctx);
+    }
+
+    size_t secmon_code_remaining =
+        ctx->secmon_code_size - ctx->secmon_code_processed;
+
+    size_t secmon_code_to_process = IMAGE_CHUNK_SIZE - ctx->secmon_code_offset;
+
+    secmon_code_to_process = MIN(secmon_code_to_process, secmon_code_remaining);
+
+    sha256_Update(&ctx->secmon_hash_ctx,
+                  (uint8_t *)chunk_buffer + ctx->secmon_code_offset,
+                  secmon_code_to_process);
+
+    ctx->secmon_code_processed += secmon_code_to_process;
+    ctx->secmon_code_offset = 0;
+
+    if (ctx->secmon_code_processed >= ctx->secmon_code_size) {
+      // secmon code is fully processed
+      uint8_t secmon_hash[IMAGE_HASH_DIGEST_LENGTH];
+      sha256_Final(&ctx->secmon_hash_ctx, secmon_hash);
+
+      if (memcmp(secmon_hash, ctx->expected_secmon_hash,
+                 IMAGE_HASH_DIGEST_LENGTH) != 0) {
+        send_msg_failure(iface, FailureType_Failure_ProcessError,
+                         "Invalid secmon hash");
+        return UPLOAD_ERR_INVALID_SECMON_HASH;
+      }
+      ctx->secmon_code_size = 0;  // reset secmon code size to prevent
+      // reprocessing in the next chunk
+    }
+  }
+
+#endif
 
   // buffer with the received data
   const uint32_t *src = (const uint32_t *)chunk_buffer;
@@ -493,6 +611,8 @@ workflow_result_t workflow_firmware_update(protob_io_t *iface) {
     return WF_ERROR;
   }
 
+  ctx.wireless_transport = iface->wire->wireless;
+
   ctx.firmware_remaining = msg.has_length ? msg.length : 0;
   if ((ctx.firmware_remaining > 0) &&
       ((ctx.firmware_remaining % sizeof(uint32_t)) == 0) &&
@@ -518,12 +638,22 @@ workflow_result_t workflow_firmware_update(protob_io_t *iface) {
 
   upload_status_t s = UPLOAD_IN_PROGRESS;
 
-  while (true) {
-    uint16_t ifaces[1] = {protob_get_iface_flag(iface) | MODE_READ};
-    poll_event_t e = {0};
-    uint8_t i = poll_events(ifaces, 1, &e, 100);
+  uint32_t msg_deadline = ticks_timeout(MESSAGE_RX_TIMEOUT);
 
-    if (e.type == EVENT_NONE || i != protob_get_iface_flag(iface)) {
+  while (true) {
+    sysevents_t awaited = {0};
+    sysevents_t signalled = {0};
+
+    awaited.read_ready = 1 << protob_get_iface_flag(iface);
+
+    sysevents_poll(&awaited, &signalled, ticks_timeout(100));
+
+    if (awaited.read_ready != signalled.read_ready) {
+      if (ticks_expired(msg_deadline)) {
+        // timeout
+        ui_screen_fail();
+        return WF_ERROR;
+      }
       continue;
     }
 
@@ -534,6 +664,8 @@ workflow_result_t workflow_firmware_update(protob_io_t *iface) {
       return WF_ERROR;
     }
     s = process_msg_FirmwareUpload(iface, &ctx);
+
+    msg_deadline = ticks_timeout(MESSAGE_RX_TIMEOUT);
 
     if (s < 0 && s != UPLOAD_ERR_USER_ABORT) {  // error, but not user abort
       if (s == UPLOAD_ERR_BOOTLOADER_LOCKED) {
@@ -547,7 +679,7 @@ workflow_result_t workflow_firmware_update(protob_io_t *iface) {
       systick_delay_ms(100);
       return WF_CANCELLED;
     } else if (s == UPLOAD_OK) {  // last chunk received
-      ui_screen_install_progress_upload(1000);
+      ui_screen_install_progress_upload(1000, ctx.wireless_transport);
       ui_screen_done(4, sectrue);
       ui_screen_done(3, secfalse);
       systick_delay_ms(1000);

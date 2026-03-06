@@ -26,6 +26,10 @@ typedef enum {
   HAPTIC_BUTTON_PRESS = 0,
   // Effect at the end of hold-to-confirm action
   HAPTIC_HOLD_TO_CONFIRM = 1,
+  // Bootloader entry
+  HAPTIC_BOOTLOADER_ENTRY = 2,
+  // Power on
+  HAPTIC_POWER_ON = 3,
 } haptic_effect_t;
 
 #ifdef KERNEL_MODE

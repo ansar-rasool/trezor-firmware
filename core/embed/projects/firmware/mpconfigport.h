@@ -60,6 +60,7 @@
 #define MICROPY_OPT_MATH_FACTORIAL  (0)
 #define MICROPY_OPT_LOAD_ATTR_FAST_PATH (1)
 #define MICROPY_OPT_MAP_LOOKUP_CACHE (1)
+#define MICROPY_ROM_TEXT_COMPRESSION (1)
 
 #define MICROPY_CONFIG_ROM_LEVEL (MICROPY_CONFIG_ROM_LEVEL_CORE_FEATURES)
 
@@ -75,7 +76,9 @@
 #define MICROPY_REPL_EMACS_KEYS     (1)
 #define MICROPY_REPL_AUTO_INDENT    (1)
 #define MICROPY_LONGINT_IMPL        (MICROPY_LONGINT_IMPL_MPZ)
+#ifndef MICROPY_ENABLE_SOURCE_LINE
 #define MICROPY_ENABLE_SOURCE_LINE  (1)
+#endif
 #define MICROPY_FLOAT_IMPL          (MICROPY_FLOAT_IMPL_FLOAT)
 #define MICROPY_STREAMS_NON_BLOCK   (1)
 #define MICROPY_MODULE_WEAK_LINKS   (1)
@@ -158,6 +161,9 @@
 #define MICROPY_PY_USOCKET          (0)
 #define MICROPY_PY_NETWORK          (0)
 
+// allocate traceback data only on debug builds
+#define MICROPY_PY_SYS_TRACEBACK_DISABLE (PYOPT)
+
 #define MICROPY_PY_TREZORCONFIG     (1)
 #define MICROPY_PY_TREZORCRYPTO     (1)
 #define MICROPY_PY_TREZORIO         (1)
@@ -166,15 +172,6 @@
 #define MICROPY_PY_TREZORPROTO      (1)
 #define MICROPY_PY_TREZORTRANSLATE  (1)
 #define MICROPY_PY_TREZORUI_API     (1)
-
-#ifdef SYSTEM_VIEW
-#define MP_PLAT_PRINT_STRN(str, len) segger_print(str, len)
-// uncomment DEST_RTT and comment DEST_SYSTEMVIEW
-// if you want to print to RTT instead of SystemView
-// OpenOCD supports only the RTT output method
-// #define SYSTEMVIEW_DEST_RTT         (1)
-#define SYSTEMVIEW_DEST_SYSTEMVIEW  (1)
-#endif
 
 #define MP_STATE_PORT MP_STATE_VM
 
@@ -197,10 +194,8 @@ typedef int mp_int_t; // must be pointer size
 typedef unsigned int mp_uint_t; // must be pointer size
 typedef long mp_off_t;
 
-#include <sys/irq.h>
-
-#define MICROPY_BEGIN_ATOMIC_SECTION()     irq_lock()
-#define MICROPY_END_ATOMIC_SECTION(state)  irq_unlock(state)
+#define MICROPY_BEGIN_ATOMIC_SECTION()     (0)
+#define MICROPY_END_ATOMIC_SECTION(state)  (void)(state)
 #define MICROPY_EVENT_POLL_HOOK \
     do { \
         extern void mp_handle_pending(bool); \

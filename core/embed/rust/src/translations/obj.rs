@@ -2,7 +2,7 @@ use crate::{
     error::Error,
     io::InputStream,
     micropython::{
-        buffer::{get_buffer, StrBuffer},
+        buffer::get_buffer,
         ffi,
         macros::{
             attr_tuple, obj_dict, obj_fn_0, obj_fn_1, obj_fn_2, obj_map, obj_module, obj_type,
@@ -20,24 +20,6 @@ use crate::{
 
 use super::translated_string::TranslatedString;
 
-impl TryFrom<TranslatedString> for StrBuffer {
-    type Error = Error;
-
-    fn try_from(value: TranslatedString) -> Result<Self, Self::Error> {
-        let blob = super::flash::get()?;
-        let translated = value.translate(blob.as_ref());
-        StrBuffer::alloc(translated)
-        // TODO fall back to English (which is static and can be converted
-        // infallibly) if the allocation fails?
-    }
-}
-
-fn translate(translation: TranslatedString) -> Result<Obj, Error> {
-    translation
-        .translate(super::flash::get()?.as_ref())
-        .try_into()
-}
-
 // SAFETY: Caller is supposed to be MicroPython, or copy MicroPython contracts
 // about the meaning of arguments.
 unsafe extern "C" fn tr_attr_fn(_self_in: Obj, attr: ffi::qstr, dest: *mut Obj) {
@@ -49,7 +31,9 @@ unsafe extern "C" fn tr_attr_fn(_self_in: Obj, attr: ffi::qstr, dest: *mut Obj) 
         }
         let attr = Qstr::from_u16(attr as u16);
         let result = if let Some(translation) = TranslatedString::from_qstr(attr) {
-            translate(translation)?
+            translation.map_translated(|t| t.try_into())?
+            // TODO fall back to English (which is static and can be converted
+            // infallibly) if the allocation fails?
         } else {
             return Err(Error::AttributeError(attr));
         };
@@ -211,11 +195,11 @@ pub static mp_module_trezortranslate: Module = obj_module! {
     ///     """Erase the translations blob from flash."""
     Qstr::MP_QSTR_erase => obj_fn_0!(erase).as_obj(),
 
-    /// def write(data: bytes, offset: int) -> None:
+    /// def write(data: AnyBytes, offset: int) -> None:
     ///     """Write data to the translations blob in flash."""
     Qstr::MP_QSTR_write => obj_fn_2!(write).as_obj(),
 
-    /// def verify(data: bytes) -> None:
+    /// def verify(data: AnyBytes) -> None:
     ///     """Verify the translations blob."""
     Qstr::MP_QSTR_verify => obj_fn_1!(verify).as_obj(),
 
@@ -225,10 +209,10 @@ pub static mp_module_trezortranslate: Module = obj_module! {
     ///     language: str
     ///     version: tuple[int, int, int, int]
     ///     data_len: int
-    ///     data_hash: bytes
+    ///     data_hash: AnyBytes
     ///     total_len: int
     ///
-    ///     def __init__(self, header_bytes: bytes) -> None:
+    ///     def __init__(self, header_bytes: AnyBytes) -> None:
     ///         """Parse header from bytes.
     ///         The header has variable length.
     ///         """

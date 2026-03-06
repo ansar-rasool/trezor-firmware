@@ -22,8 +22,9 @@ async def recovery_device(msg: RecoveryDevice) -> Success:
     import storage.device as storage_device
     import storage.recovery as storage_recovery
     from trezor import TR, config, wire, workflow
-    from trezor.enums import BackupType, ButtonRequestType
-    from trezor.ui.layouts import confirm_action, confirm_reset_device
+    from trezor.enums import BackupType
+    from trezor.ui.layouts import confirm_reset_device, prompt_recovery_check
+    from trezor.wire.context import try_get_ctx_ids
 
     from apps.common import mnemonic
     from apps.common.request_pin import (
@@ -38,14 +39,19 @@ async def recovery_device(msg: RecoveryDevice) -> Success:
 
     # --------------------------------------------------------
     # validate
-    if recovery_type == RecoveryType.NormalRecovery:
+    if recovery_type is RecoveryType.NormalRecovery:
         if storage_device.is_initialized():
             raise wire.UnexpectedMessage("Already initialized")
     elif recovery_type in (RecoveryType.DryRun, RecoveryType.UnlockRepeatedBackup):
         if not storage_device.is_initialized():
             raise wire.NotInitialized("Device is not initialized")
-        if (
-            recovery_type == RecoveryType.UnlockRepeatedBackup
+        elif recovery_type is RecoveryType.DryRun:
+            if storage_device.no_backup():
+                raise wire.ProcessError("Dry-run not available for seedless devices")
+            elif storage_device.needs_backup() or storage_device.unfinished_backup():
+                raise wire.ProcessError("Cannot do dry-run without backed-up seed")
+        elif (
+            recovery_type is RecoveryType.UnlockRepeatedBackup
             and mnemonic.get_type() == BackupType.Bip39
         ):
             raise wire.ProcessError("Repeated Backup not available for BIP39 backups")
@@ -69,8 +75,8 @@ async def recovery_device(msg: RecoveryDevice) -> Success:
     if recovery_type == RecoveryType.NormalRecovery:
         await confirm_reset_device(recovery=True)
 
-        # wipe storage to make sure the device is in a clear state
-        storage.reset()
+        # wipe storage to make sure the device is in a clear state (except protocol cache)
+        storage.reset(excluded=try_get_ctx_ids())
 
         # set up pin if requested
         if msg.pin_protection:
@@ -86,18 +92,7 @@ async def recovery_device(msg: RecoveryDevice) -> Success:
             storage_device.set_label(msg.label)
 
     elif recovery_type in (RecoveryType.DryRun, RecoveryType.UnlockRepeatedBackup):
-        title = (
-            TR.recovery__title_dry_run
-            if recovery_type == RecoveryType.DryRun
-            else TR.recovery__title_unlock_repeated_backup
-        )
-        await confirm_action(
-            "confirm_seedcheck",
-            title,
-            description=TR.recovery__check_dry_run,
-            br_code=ButtonRequestType.ProtectCall,
-            verb=TR.buttons__check,
-        )
+        await prompt_recovery_check(recovery_type)
 
         curpin, salt = await request_pin_and_sd_salt(TR.pin__enter)
         if not config.check_pin(curpin, salt):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .. import get_hw_model_as_number
+from ..unix_common import unix_common_files
 
 
 def configure(
@@ -17,6 +18,10 @@ def configure(
     hw_revision = 0
     mcu = "STM32U5G9xx"
 
+    features_available += unix_common_files(
+        env, features_wanted, defines, sources, paths
+    )
+
     defines += [
         "FRAMEBUFFER",
         ("USE_RGB_COLORS", "1"),
@@ -24,6 +29,7 @@ def configure(
         "UI_COLOR_32BIT",
         ("DISPLAY_RESX", "380"),
         ("DISPLAY_RESY", "520"),
+        ("LOCKABLE_BOOTLOADER", "1"),
     ]
     features_available.append("framebuffer")
     features_available.append("display_rgba8888")
@@ -45,6 +51,12 @@ def configure(
         paths += ["embed/io/sbu/inc"]
         defines += [("USE_SBU", "1")]
 
+    if "rgb_led" in features_wanted:
+        sources += ["embed/io/rgb_led/unix/rgb_led.c"]
+        paths += ["embed/io/rgb_led/inc"]
+        features_available.append("rgb_led")
+        defines += [("USE_RGB_LED", "1")]
+
     if "optiga" in features_wanted:
         sources += ["embed/sec/optiga/unix/optiga_hal.c"]
         sources += ["embed/sec/optiga/unix/optiga.c"]
@@ -54,10 +66,10 @@ def configure(
 
     if "tropic" in features_wanted:
         sources += [
-            "embed/sec/secret/unix/secret.c",
             "embed/sec/tropic/tropic.c",
             "embed/sec/tropic/unix/tropic01.c",
             "vendor/libtropic/src/libtropic.c",
+            "vendor/libtropic/src/lt_asn1_der.c",
             "vendor/libtropic/src/lt_crc16.c",
             "vendor/libtropic/src/lt_hkdf.c",
             "vendor/libtropic/src/lt_l1.c",
@@ -65,9 +77,11 @@ def configure(
             "vendor/libtropic/src/lt_l2.c",
             "vendor/libtropic/src/lt_l2_frame_check.c",
             "vendor/libtropic/src/lt_l3.c",
+            "vendor/libtropic/src/lt_l3_process.c",
             "vendor/libtropic/src/lt_random.c",
             "vendor/libtropic/hal/port/unix/lt_port_unix_tcp.c",
             "vendor/libtropic/hal/crypto/trezor_crypto/lt_crypto_trezor_aesgcm.c",
+            "vendor/libtropic/hal/crypto/trezor_crypto/lt_crypto_trezor_ecdsa.c",
             "vendor/libtropic/hal/crypto/trezor_crypto/lt_crypto_trezor_ed25519.c",
             "vendor/libtropic/hal/crypto/trezor_crypto/lt_crypto_trezor_sha256.c",
             "vendor/libtropic/hal/crypto/trezor_crypto/lt_crypto_trezor_x25519.c",
@@ -77,18 +91,22 @@ def configure(
         paths += ["vendor/libtropic/src"]
         defines += ["USE_TREZOR_CRYPTO"]
         defines += [("LT_USE_TREZOR_CRYPTO", "1")]
+        defines += [("LT_HELPERS", "1")]
         features_available.append("tropic")
         defines += [("USE_TROPIC", "1")]
 
+        paths += ["vendor/libtropic/TROPIC01_fw_update_files/boot_v_1_0_1/fw_v_1_0_0"]
+        defines += [("ABAB", "1")]
+
     if "input" in features_wanted:
         sources += ["embed/io/touch/unix/touch.c"]
-        sources += ["embed/io/touch/touch_fsm.c"]
+        sources += ["embed/io/touch/touch_poll.c"]
         paths += ["embed/io/touch/inc"]
         features_available.append("touch")
         defines += [("USE_TOUCH", "1")]
 
         sources += ["embed/io/button/unix/button.c"]
-        sources += ["embed/io/button/button_fsm.c"]
+        sources += ["embed/io/button/button_poll.c"]
         paths += ["embed/io/button/inc"]
         features_available.append("button")
         defines += [("USE_BUTTON", "1")]
@@ -98,6 +116,15 @@ def configure(
         paths += ["embed/io/ble/inc"]
         features_available.append("ble")
         defines += [("USE_BLE", "1")]
+
+    sources += [
+        "embed/sys/power_manager/unix/power_manager.c",
+    ]
+    defines += [("USE_POWER_MANAGER", "1")]
+    paths += ["embed/sys/power_manager/inc"]
+    features_available.append("power_manager")
+
+    paths += ["embed/sys/suspend/inc"]
 
     features_available.append("backlight")
     defines += [("USE_BACKLIGHT", "1")]
@@ -109,5 +136,9 @@ def configure(
     sources += [
         "embed/gfx/jpegdec/unix/jpegdec.c",
     ]
+
+    if "serial_number" in features_wanted:
+        defines += [("USE_SERIAL_NUMBER", "1")]
+        features_available.append("serial_number")
 
     return features_available

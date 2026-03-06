@@ -21,13 +21,7 @@
 #include <trezor_rtl.h>
 
 #include <rtl/cli.h>
-#include <sys/mpu.h>
-
-#ifdef STM32U5
-#include "stm32u5xx_ll_utils.h"
-#else
-#include "stm32f4xx_ll_utils.h"
-#endif
+#include <util/cpuid.h>
 
 static void prodtest_get_cpuid(cli_t* cli) {
   if (cli_arg_count(cli) > 0) {
@@ -35,15 +29,11 @@ static void prodtest_get_cpuid(cli_t* cli) {
     return;
   }
 
-  uint32_t cpuid[3];
+  cpuid_t cpuid = {0};
 
-  mpu_mode_t mpu_mode = mpu_reconfig(MPU_MODE_OTP);
-  cpuid[0] = LL_GetUID_Word0();
-  cpuid[1] = LL_GetUID_Word1();
-  cpuid[2] = LL_GetUID_Word2();
-  mpu_restore(mpu_mode);
+  cpuid_get(&cpuid);
 
-  cli_ok_hexdata(cli, &cpuid, sizeof(cpuid));
+  cli_ok_hexdata(cli, &cpuid.id, sizeof(cpuid.id));
 }
 
 // clang-format off

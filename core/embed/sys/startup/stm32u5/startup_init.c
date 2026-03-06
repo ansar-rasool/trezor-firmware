@@ -69,6 +69,28 @@ uint32_t SystemCoreClock = DEFAULT_FREQ * 1000000U;
 #pragma GCC optimize( \
     "no-stack-protector")  // applies to all functions in this file
 
+#ifndef SECURE_MODE
+
+// The following functions replace ST HAL routines from
+// stm32u5xx_hal_rcc.c and stm32u5xx_hal_rcc_ex.c that are not safe to call in
+// non-secure mode (e.g. the kernel running in non-secure mode),
+// because the RCC peripheral is not fully accessible.
+
+// Clocks are fully configured by secure monitor and the kernel can
+// rely on SystemCoreClock variable being set correctly.
+
+uint32_t HAL_RCC_GetHCLKFreq(void) { return SystemCoreClock; }
+
+uint32_t HAL_RCC_GetSysClockFreq(void) { return SystemCoreClock; }
+
+uint32_t HAL_RCCEx_GetPeriphCLKFreq(uint64_t PeriphClk) {
+  ensure(sectrue * (PeriphClk == RCC_PERIPHCLK_USART3),
+         "Only USART3 supported");
+  return SystemCoreClock;
+}
+
+#endif  // SECURE_MODE
+
 // This function replaces calls to universal, but flash-wasting
 //  function HAL_RCC_OscConfig.
 //
@@ -91,7 +113,15 @@ void lsi_init(void) {
 
   uint32_t bdcr_temp = RCC->BDCR;
 
-  if (RCC_LSI_DIV1 != (bdcr_temp & RCC_BDCR_LSIPREDIV)) {
+#if LSI_VALUE == 32000
+  uint32_t lsi_div = RCC_LSI_DIV1;
+#elif LSI_VALUE == 250
+  uint32_t lsi_div = RCC_LSI_DIV128;
+#else
+#error Unsupported LSI frequency
+#endif
+
+  if (lsi_div != (bdcr_temp & RCC_BDCR_LSIPREDIV)) {
     if (((bdcr_temp & RCC_BDCR_LSIRDY) == RCC_BDCR_LSIRDY) &&
         ((bdcr_temp & RCC_BDCR_LSION) != RCC_BDCR_LSION)) {
       // If LSIRDY is set while LSION is not enabled, LSIPREDIV can't be updated
@@ -110,7 +140,7 @@ void lsi_init(void) {
     }
 
     // Set LSI division factor
-    MODIFY_REG(RCC->BDCR, RCC_BDCR_LSIPREDIV, 0);
+    MODIFY_REG(RCC->BDCR, RCC_BDCR_LSIPREDIV, lsi_div);
   }
 
   // Enable the Internal Low Speed oscillator (LSI)
@@ -195,6 +225,11 @@ void SystemInit(void) {
   while (HAL_IS_BIT_CLR(PWR->SVMSR, PWR_SVMSR_ACTVOSRDY))
     ;
 
+  RCC->CR |= RCC_CR_HSION;
+  // wait until the HSI is on
+  while ((RCC->CR & RCC_CR_HSIRDY) != RCC_CR_HSIRDY)
+    ;
+
 #ifndef HSI_ONLY
   __HAL_RCC_HSE_CONFIG(RCC_HSE_ON);
   while (READ_BIT(RCC->CR, RCC_CR_HSERDY) == 0U)
@@ -202,10 +237,6 @@ void SystemInit(void) {
   __HAL_RCC_PLL_CONFIG(RCC_PLLSOURCE_HSE, RCC_PLLMBOOST_DIV1, DEFAULT_PLLM,
                        DEFAULT_PLLN, DEFAULT_PLLP, DEFAULT_PLLQ, DEFAULT_PLLR);
 #else
-  RCC->CR |= RCC_CR_HSION;
-  // wait until the HSI is on
-  while ((RCC->CR & RCC_CR_HSION) != RCC_CR_HSION)
-    ;
 
   __HAL_RCC_PLL_CONFIG(RCC_PLLSOURCE_HSI, RCC_PLLMBOOST_DIV1, DEFAULT_PLLM,
                        DEFAULT_PLLN, DEFAULT_PLLP, DEFAULT_PLLQ, DEFAULT_PLLR);
@@ -241,6 +272,13 @@ void SystemInit(void) {
   // Disable the internal Pull-Up in Dead Battery pins of UCPD peripheral
   HAL_PWREx_DisableUCPDDeadBattery();
 
+#ifdef USE_BACKUP_RAM
+  // Enable backup domain retention
+  // This bit can be written only when the regulator is LDO,
+  // which must be configured before switching to SMPS.
+  PWR->BDCR1 |= PWR_BDCR1_BREN;
+#endif
+
 #ifdef USE_SMPS
   // Switch to SMPS regulator instead of LDO
   SET_BIT(PWR->CR3, PWR_CR3_REGSEL);
@@ -254,7 +292,9 @@ void SystemInit(void) {
 
 #ifdef USE_LSE
   lse_init();
-#else
+#endif
+
+#if defined(USE_LSI) || !defined(USE_LSE)
   lsi_init();
 #endif
 
@@ -266,13 +306,6 @@ void SystemInit(void) {
 #ifndef HSI_ONLY
   // enable clock security system
   RCC->CR |= RCC_CR_CSSON;
-
-  // turn off the HSI as it is now unused (it will be turned on again
-  // automatically if a clock security failure occurs)
-  RCC->CR &= ~RCC_CR_HSION;
-  // wait until the HSI is off
-  while ((RCC->CR & RCC_CR_HSION) == RCC_CR_HSION)
-    ;
 #endif
 
   // TODO turn off MSI?
@@ -317,18 +350,21 @@ __attribute((no_stack_protector)) void reset_handler(void) {
   // contain random values and will be rewritten in the succesive
   // code
 
+#ifdef SECURE_MODE
   // Initialize system clocks
   SystemInit();
+#endif
 
   // Clear unused part of stack
   clear_unused_stack();
 
+#ifdef SECURE_MODE
   // Initialize random number generator
   rng_init();
 
   // Clear all memory except stack.
   // Keep also bootargs in bootloader and boardloader.
-  memregion_t region = MEMREGION_ALL_ACCESSIBLE_RAM;
+  memregion_t region = MEMREGION_ALL_STARTUP_RAM;
 
   MEMREGION_DEL_SECTION(&region, _stack_section);
 #if defined BOARDLOADER || defined BOOTLOADER
@@ -339,6 +375,7 @@ __attribute((no_stack_protector)) void reset_handler(void) {
   memregion_fill(&region, rng_get());
 #endif
   memregion_fill(&region, 0);
+#endif  // SECURE_MODE
 
   // Initialize .bss, .data, ...
   init_linker_sections();

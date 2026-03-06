@@ -49,15 +49,14 @@ class HomescreenBase(ui.Layout):
         return storage_cache.homescreen_shown is self.RENDER_INDICATOR
 
     def _paint(self) -> None:
-        if self.layout.paint():
-            ui.refresh()
+        self.layout.paint()
 
     def _first_paint(self) -> None:
         if not self.should_resume:
             super()._first_paint()
             storage_cache.homescreen_shown = self.RENDER_INDICATOR
-        # else:
-        #     self._paint()
+        else:
+            self._paint()
 
 
 class Homescreen(HomescreenBase):
@@ -67,28 +66,16 @@ class Homescreen(HomescreenBase):
         self,
         label: str | None,
         notification: str | None,
-        notification_is_error: bool,
-        hold_to_lock: bool,
+        notification_level: int,
+        lockable: bool,
     ) -> None:
-        level = 1
-        if notification is not None:
-            notification = notification.rstrip(
-                "!"
-            )  # TODO handle TS5 that doesn't have it
-            if notification == TR.homescreen__title_coinjoin_authorized:
-                level = 3
-            elif notification == TR.homescreen__title_experimental_mode:
-                level = 2
-            elif notification_is_error:
-                level = 0
-
         super().__init__(
             layout=_retry_with_gc(
                 trezorui_api.show_homescreen,
-                label=label,
+                label=label or utils.MODEL_FULL_NAME,
                 notification=notification,
-                notification_level=level,
-                hold=hold_to_lock,
+                notification_level=notification_level,
+                lockable=lockable,
                 skip_first_paint=self._should_resume(),
             )
         )
@@ -101,21 +88,9 @@ class Homescreen(HomescreenBase):
             event = await usbcheck
             self._event(self.layout.usb_event, event)
 
-    if utils.USE_BLE:
-
-        async def ble_checker_task(self) -> None:
-            from trezor import io, loop
-
-            blecheck = loop.wait(io.BLE_EVENT)
-            while True:
-                event = await blecheck
-                self._event(self.layout.ble_event, *event)
-
     def create_tasks(self) -> Iterator[loop.Task]:
         yield from super().create_tasks()
         yield self.usb_checker_task()
-        if utils.USE_BLE:
-            yield self.ble_checker_task()
 
 
 class Lockscreen(HomescreenBase):
@@ -149,6 +124,7 @@ class Lockscreen(HomescreenBase):
     async def get_result(self) -> Any:
         result = await super().get_result()
         if self.bootscreen:
+            # todo: should this be repaint()?
             self.request_complete_repaint()
         return result
 
@@ -170,7 +146,7 @@ class Busyscreen(HomescreenBase):
     async def get_result(self) -> Any:
         from trezor.wire import context
 
-        from apps.base import set_homescreen
+        from apps.common.lock_manager import set_homescreen
 
         # Handle timeout.
         result = await super().get_result()

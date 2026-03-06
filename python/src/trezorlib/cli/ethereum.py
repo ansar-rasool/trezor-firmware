@@ -1,6 +1,6 @@
 # This file is part of the Trezor project.
 #
-# Copyright (C) 2012-2022 SatoshiLabs and contributors
+# Copyright (C) SatoshiLabs and contributors
 #
 # This library is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License version 3
@@ -26,14 +26,14 @@ import click
 
 from .. import _rlp, definitions, ethereum, tools
 from ..messages import EthereumDefinitions
-from . import with_client
+from . import with_session
 
 if TYPE_CHECKING:
     import web3
     from eth_typing import ChecksumAddress  # noqa: I900
     from web3.types import Wei
 
-    from ..client import TrezorClient
+    from ..transport.session import Session
 
 PATH_HELP = "BIP-32 path, e.g. m/44h/60h/0h/0/0"
 
@@ -180,23 +180,37 @@ class CliSource(definitions.Source):
     token: Optional[bytes] = None
     delegate: definitions.Source = definitions.NullSource()
 
-    def get_network(self, chain_id: int) -> Optional[bytes]:
+    def get_eth_network(self, chain_id: int) -> Optional[bytes]:
         if self.network is not None:
             return self.network
-        return self.delegate.get_network(chain_id)
+        return self.delegate.get_eth_network(chain_id)
 
-    def get_network_by_slip44(self, slip44: int) -> Optional[bytes]:
+    def get_eth_network_by_slip44(self, slip44: int) -> Optional[bytes]:
         if self.network is not None:
             return self.network
-        return self.delegate.get_network_by_slip44(slip44)
+        return self.delegate.get_eth_network_by_slip44(slip44)
 
-    def get_token(self, chain_id: int, address: Any) -> Optional[bytes]:
+    def get_eth_token(self, chain_id: int, address: Any) -> Optional[bytes]:
         if self.token is not None:
             return self.token
-        return self.delegate.get_token(chain_id, address)
+        return self.delegate.get_eth_token(chain_id, address)
 
 
 DEFINITIONS_SOURCE = CliSource()
+
+
+def _network_def_from_address_n(address_n: tools.Address) -> Optional[bytes]:
+    """Get network definition bytes based on address_n.
+
+    Tries to extract the slip44 identifier and lookup the network definition.
+    Returns None on failure.
+    """
+    if len(address_n) < 2:
+        return None
+
+    # unharden the slip44 part if needed
+    slip44 = tools.unharden(address_n[1])
+    return DEFINITIONS_SOURCE.get_eth_network_by_slip44(slip44)
 
 
 #####################
@@ -268,24 +282,24 @@ def cli(
 @click.option("-n", "--address", required=True, help=PATH_HELP)
 @click.option("-d", "--show-display", is_flag=True)
 @click.option("-C", "--chunkify", is_flag=True)
-@with_client
+@with_session
 def get_address(
-    client: "TrezorClient", address: str, show_display: bool, chunkify: bool
+    session: "Session", address: str, show_display: bool, chunkify: bool
 ) -> str:
     """Get Ethereum address in hex encoding."""
     address_n = tools.parse_path(address)
-    network = ethereum.network_from_address_n(address_n, DEFINITIONS_SOURCE)
-    return ethereum.get_address(client, address_n, show_display, network, chunkify)
+    network = _network_def_from_address_n(address_n)
+    return ethereum.get_address(session, address_n, show_display, network, chunkify)
 
 
 @cli.command()
 @click.option("-n", "--address", required=True, help=PATH_HELP)
 @click.option("-d", "--show-display", is_flag=True)
-@with_client
-def get_public_node(client: "TrezorClient", address: str, show_display: bool) -> dict:
+@with_session
+def get_public_node(session: "Session", address: str, show_display: bool) -> dict:
     """Get Ethereum public node of given path."""
     address_n = tools.parse_path(address)
-    result = ethereum.get_public_node(client, address_n, show_display=show_display)
+    result = ethereum.get_public_node(session, address_n, show_display=show_display)
     return {
         "node": {
             "depth": result.node.depth,
@@ -344,9 +358,9 @@ def get_public_node(client: "TrezorClient", address: str, show_display: bool) ->
 @click.option("-C", "--chunkify", is_flag=True)
 @click.argument("to_address")
 @click.argument("amount", callback=_amount_to_int)
-@with_client
+@with_session
 def sign_tx(
-    client: "TrezorClient",
+    session: "Session",
     chain_id: int,
     address: str,
     amount: int,
@@ -397,10 +411,10 @@ def sign_tx(
         click.echo("Can't send tokens and custom data at the same time")
         sys.exit(1)
 
-    encoded_network = DEFINITIONS_SOURCE.get_network(chain_id)
+    encoded_network = DEFINITIONS_SOURCE.get_eth_network(chain_id)
     address_n = tools.parse_path(address)
     from_address = ethereum.get_address(
-        client, address_n, encoded_network=encoded_network
+        session, address_n, encoded_network=encoded_network
     )
 
     if token:
@@ -411,7 +425,7 @@ def sign_tx(
     if data:
         # use token definition regardless of whether the data is an ERC-20 transfer
         # -- this might prove useful in the future
-        encoded_token = DEFINITIONS_SOURCE.get_token(chain_id, to_address)
+        encoded_token = DEFINITIONS_SOURCE.get_eth_token(chain_id, to_address)
         data_bytes = ethereum.decode_hex(data)
     else:
         # force use provided token definition even if no data (that is what the user
@@ -446,7 +460,7 @@ def sign_tx(
         assert max_gas_fee is not None
         assert max_priority_fee is not None
         sig = ethereum.sign_tx_eip1559(
-            client,
+            session,
             n=address_n,
             nonce=nonce,
             gas_limit=gas_limit,
@@ -465,7 +479,7 @@ def sign_tx(
             gas_price = _get_web3().eth.gas_price
         assert gas_price is not None
         sig = ethereum.sign_tx(
-            client,
+            session,
             n=address_n,
             tx_type=tx_type,
             nonce=nonce,
@@ -526,14 +540,14 @@ def sign_tx(
 @click.option("-n", "--address", required=True, help=PATH_HELP)
 @click.option("-C", "--chunkify", is_flag=True)
 @click.argument("message")
-@with_client
+@with_session
 def sign_message(
-    client: "TrezorClient", address: str, message: str, chunkify: bool
+    session: "Session", address: str, message: str, chunkify: bool
 ) -> Dict[str, str]:
     """Sign message with Ethereum address."""
     address_n = tools.parse_path(address)
-    network = ethereum.network_from_address_n(address_n, DEFINITIONS_SOURCE)
-    ret = ethereum.sign_message(client, address_n, message, network, chunkify=chunkify)
+    network = _network_def_from_address_n(address_n)
+    ret = ethereum.sign_message(session, address_n, message, network, chunkify=chunkify)
     output = {
         "message": message,
         "address": ret.address,
@@ -550,9 +564,9 @@ def sign_message(
     help="Be compatible with Metamask's signTypedData_v4 implementation",
 )
 @click.argument("file", type=click.File("r"))
-@with_client
+@with_session
 def sign_typed_data(
-    client: "TrezorClient", address: str, metamask_v4_compat: bool, file: TextIO
+    session: "Session", address: str, metamask_v4_compat: bool, file: TextIO
 ) -> Dict[str, str]:
     """Sign typed data (EIP-712) with Ethereum address.
 
@@ -561,11 +575,11 @@ def sign_typed_data(
     - recursive structs
     """
     address_n = tools.parse_path(address)
-    network = ethereum.network_from_address_n(address_n, DEFINITIONS_SOURCE)
+    network = _network_def_from_address_n(address_n)
     defs = EthereumDefinitions(encoded_network=network)
     data = json.loads(file.read())
     ret = ethereum.sign_typed_data(
-        client,
+        session,
         address_n,
         data,
         metamask_v4_compat=metamask_v4_compat,
@@ -583,9 +597,9 @@ def sign_typed_data(
 @click.argument("address")
 @click.argument("signature")
 @click.argument("message")
-@with_client
+@with_session
 def verify_message(
-    client: "TrezorClient",
+    session: "Session",
     address: str,
     signature: str,
     message: str,
@@ -594,7 +608,7 @@ def verify_message(
     """Verify message signed with Ethereum address."""
     signature_bytes = ethereum.decode_hex(signature)
     return ethereum.verify_message(
-        client, address, signature_bytes, message, chunkify=chunkify
+        session, address, signature_bytes, message, chunkify=chunkify
     )
 
 
@@ -602,9 +616,9 @@ def verify_message(
 @click.option("-n", "--address", required=True, help=PATH_HELP)
 @click.argument("domain_hash_hex")
 @click.argument("message_hash_hex")
-@with_client
+@with_session
 def sign_typed_data_hash(
-    client: "TrezorClient", address: str, domain_hash_hex: str, message_hash_hex: str
+    session: "Session", address: str, domain_hash_hex: str, message_hash_hex: str
 ) -> Dict[str, str]:
     """
     Sign hash of typed data (EIP-712) with Ethereum address.
@@ -616,9 +630,9 @@ def sign_typed_data_hash(
     address_n = tools.parse_path(address)
     domain_hash = ethereum.decode_hex(domain_hash_hex)
     message_hash = ethereum.decode_hex(message_hash_hex) if message_hash_hex else None
-    network = ethereum.network_from_address_n(address_n, DEFINITIONS_SOURCE)
+    network = _network_def_from_address_n(address_n)
     ret = ethereum.sign_typed_data_hash(
-        client, address_n, domain_hash, message_hash, network
+        session, address_n, domain_hash, message_hash, network
     )
     output = {
         "domain_hash": domain_hash_hex,

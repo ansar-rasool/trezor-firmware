@@ -10,7 +10,7 @@ use crate::{
             text::paragraphs::{
                 Paragraph, ParagraphSource, ParagraphVecLong, ParagraphVecShort, Paragraphs, VecExt,
             },
-            ComponentExt, EventCtx, PaginateFull as _,
+            ComponentExt, EventCtx, Paginate as _,
         },
         flow::{
             base::{Decision, DecisionBuilder as _},
@@ -57,8 +57,6 @@ impl FlowController for ContinueRecoveryBeforeShares {
 
     fn handle_swipe(&'static self, direction: Direction) -> Decision {
         match (self, direction) {
-            (Self::Main, Direction::Left) => Self::Menu.swipe(direction),
-            (Self::Menu, Direction::Right) => Self::Main.swipe(direction),
             (Self::Main, Direction::Up) => self.return_msg(FlowMsg::Confirmed),
             _ => self.do_nothing(),
         }
@@ -82,11 +80,8 @@ impl FlowController for ContinueRecoveryBetweenShares {
 
     fn handle_swipe(&'static self, direction: Direction) -> Decision {
         match (self, direction) {
-            (Self::Main, Direction::Left) => Self::Menu.swipe(direction),
-            (Self::Menu, Direction::Right) => Self::Main.swipe(direction),
             (Self::Main, Direction::Up) => self.return_msg(FlowMsg::Confirmed),
             (Self::CancelIntro, Direction::Up) => Self::CancelConfirm.swipe(direction),
-            (Self::CancelIntro, Direction::Right) => Self::Menu.swipe(direction),
             (Self::CancelConfirm, Direction::Down) => Self::CancelIntro.swipe(direction),
             _ => self.do_nothing(),
         }
@@ -113,13 +108,9 @@ impl FlowController for ContinueRecoveryBetweenSharesAdvanced {
 
     fn handle_swipe(&'static self, direction: Direction) -> Decision {
         match (self, direction) {
-            (Self::Main, Direction::Left) => Self::Menu.swipe(direction),
-            (Self::Menu, Direction::Right) => Self::Main.swipe(direction),
             (Self::Main, Direction::Up) => self.return_msg(FlowMsg::Confirmed),
             (Self::CancelIntro, Direction::Up) => Self::CancelConfirm.swipe(direction),
-            (Self::CancelIntro, Direction::Right) => Self::Menu.swipe(direction),
             (Self::CancelConfirm, Direction::Down) => Self::CancelIntro.swipe(direction),
-            (Self::RemainingShares, Direction::Right) => Self::Menu.swipe(direction),
             _ => self.do_nothing(),
         }
     }
@@ -189,7 +180,6 @@ pub fn new_continue_recovery_homepage(
             .with_subtitle(TR::words__instructions.into())
             .with_menu_button()
             .with_swipeup_footer(footer_description)
-            .with_swipe(Direction::Left, SwipeSettings::default())
             .map_to_button_msg()
             .repeated_button_request(ButtonRequest::new(
                 ButtonRequestCode::RecoveryHomepage,
@@ -206,7 +196,6 @@ pub fn new_continue_recovery_homepage(
         Frame::left_aligned(cancel_title.into(), SwipeContent::new(paragraphs_cancel))
             .with_cancel_button()
             .with_swipeup_footer(Some(TR::words__continue_anyway_question.into()))
-            .with_swipe(Direction::Right, SwipeSettings::immediate())
             .map_to_button_msg()
             .repeated_button_request(ButtonRequest::new(
                 ButtonRequestCode::ProtectCall,
@@ -219,45 +208,22 @@ pub fn new_continue_recovery_homepage(
     )
     .with_cancel_button()
     .with_footer(TR::instructions__tap_to_confirm.into(), None)
-    .with_swipe(Direction::Down, SwipeSettings::default())
-    .with_swipe(Direction::Right, SwipeSettings::immediate())
+    .with_swipe(Direction::Down, SwipeSettings::Default)
     .map(super::util::map_to_confirm);
 
     let res = if show_instructions {
         let content_menu = Frame::left_aligned(
             TString::empty(),
-            VerticalMenu::empty().danger(theme::ICON_CANCEL, cancel_btn.into()),
+            VerticalMenu::empty().cancel_item(cancel_btn.into()),
         )
         .with_cancel_button()
-        .with_swipe(Direction::Right, SwipeSettings::immediate())
         .map(super::util::map_to_choice);
 
         let mut res = SwipeFlow::new(&ContinueRecoveryBeforeShares::Main)?;
         res.add_page(&ContinueRecoveryBeforeShares::Main, content_main)?
             .add_page(&ContinueRecoveryBeforeShares::Menu, content_menu)?;
         res
-    } else if pages.is_none() {
-        let content_menu = Frame::left_aligned(
-            TString::empty(),
-            VerticalMenu::empty().danger(theme::ICON_CANCEL, cancel_btn.into()),
-        )
-        .with_cancel_button()
-        .with_swipe(Direction::Right, SwipeSettings::immediate())
-        .map(super::util::map_to_choice);
-
-        let mut res = SwipeFlow::new(&ContinueRecoveryBetweenShares::Main)?;
-        res.add_page(&ContinueRecoveryBetweenShares::Main, content_main)?
-            .add_page(&ContinueRecoveryBetweenShares::Menu, content_menu)?
-            .add_page(
-                &ContinueRecoveryBetweenShares::CancelIntro,
-                content_cancel_intro,
-            )?
-            .add_page(
-                &ContinueRecoveryBetweenShares::CancelConfirm,
-                content_cancel_confirm,
-            )?;
-        res
-    } else {
+    } else if pages.is_some() {
         let content_menu = Frame::left_aligned(
             TString::empty(),
             VerticalMenu::empty()
@@ -265,17 +231,16 @@ pub fn new_continue_recovery_homepage(
                     theme::ICON_CHEVRON_RIGHT,
                     TR::recovery__title_remaining_shares.into(),
                 )
-                .danger(theme::ICON_CANCEL, cancel_btn.into()),
+                .cancel_item(cancel_btn.into()),
         )
         .with_cancel_button()
-        .with_swipe(Direction::Right, SwipeSettings::immediate())
         .map(super::util::map_to_choice);
 
         let (footer_instruction, footer_description) = (
             TR::instructions__tap_to_continue.into(),
             TR::recovery__more_shares_needed.into(),
         );
-        let n_remaining_shares = pages.as_ref().unwrap().len() / 2;
+        let n_remaining_shares = pages.as_ref().unwrap().len() as u16 / 2;
         let content_remaining_shares = Frame::left_aligned(
             TR::recovery__title_remaining_shares.into(),
             SwipeContent::new(SwipePage::vertical(pages.unwrap().into_paragraphs())),
@@ -288,8 +253,7 @@ pub fn new_continue_recovery_homepage(
             TR::instructions__swipe_down.into(),
         )
         .register_footer_update_fn(footer_update_fn)
-        .with_swipe(Direction::Up, SwipeSettings::default())
-        .with_swipe(Direction::Left, SwipeSettings::default())
+        .with_swipe(Direction::Up, SwipeSettings::Default)
         .with_vertical_pages()
         .map_to_button_msg()
         .repeated_button_request(ButtonRequest::new(
@@ -312,6 +276,26 @@ pub fn new_continue_recovery_homepage(
             .add_page(
                 &ContinueRecoveryBetweenSharesAdvanced::RemainingShares,
                 content_remaining_shares,
+            )?;
+        res
+    } else {
+        let content_menu = Frame::left_aligned(
+            TString::empty(),
+            VerticalMenu::empty().cancel_item(cancel_btn.into()),
+        )
+        .with_cancel_button()
+        .map(super::util::map_to_choice);
+
+        let mut res = SwipeFlow::new(&ContinueRecoveryBetweenShares::Main)?;
+        res.add_page(&ContinueRecoveryBetweenShares::Main, content_main)?
+            .add_page(&ContinueRecoveryBetweenShares::Menu, content_menu)?
+            .add_page(
+                &ContinueRecoveryBetweenShares::CancelIntro,
+                content_cancel_intro,
+            )?
+            .add_page(
+                &ContinueRecoveryBetweenShares::CancelConfirm,
+                content_cancel_confirm,
             )?;
         res
     };

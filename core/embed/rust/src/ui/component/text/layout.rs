@@ -1,13 +1,12 @@
 use crate::ui::{
     display::{toif::Icon, Color, Font, GlyphMetrics},
     geometry::{Alignment, Alignment2D, Dimensions, Offset, Point, Rect},
-    shape,
-    shape::Renderer,
+    shape::{self, Renderer},
 };
 
 const ELLIPSIS: &str = "...";
 
-#[derive(Copy, Clone)]
+#[derive(PartialEq, Eq, Copy, Clone)]
 pub enum LineBreaking {
     /// Break line only at whitespace, if possible. If we don't find any
     /// whitespace, break words.
@@ -19,7 +18,7 @@ pub enum LineBreaking {
     BreakWordsNoHyphen,
 }
 
-#[derive(Copy, Clone)]
+#[derive(PartialEq, Eq, Copy, Clone)]
 pub enum PageBreaking {
     /// Stop after hitting the bottom-right edge of the bounds.
     Cut,
@@ -54,18 +53,18 @@ pub struct TextLayout {
 }
 
 /// Configuration for chunkifying the text into smaller parts.
-#[derive(Copy, Clone)]
+#[derive(PartialEq, Eq, Copy, Clone)]
 pub struct Chunks {
     /// How many characters will be grouped in one chunk.
-    pub chunk_size: usize,
+    pub chunk_size: u8,
     /// How big will be the space between chunks (in pixels).
     pub x_offset: i16,
     /// Maximum amount of rows on one page, if any.
-    pub max_rows: Option<usize>,
+    pub max_rows: Option<u8>,
 }
 
 impl Chunks {
-    pub const fn new(chunk_size: usize, x_offset: i16) -> Self {
+    pub const fn new(chunk_size: u8, x_offset: i16) -> Self {
         Chunks {
             chunk_size,
             x_offset,
@@ -73,13 +72,13 @@ impl Chunks {
         }
     }
 
-    pub const fn with_max_rows(mut self, max_rows: usize) -> Self {
+    pub const fn with_max_rows(mut self, max_rows: u8) -> Self {
         self.max_rows = Some(max_rows);
         self
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(PartialEq, Eq, Copy, Clone)]
 pub struct TextStyle {
     /// Text font ID.
     pub text_font: Font,
@@ -186,11 +185,11 @@ impl TextStyle {
         }
     }
 
-    fn prev_page_ellipsis_icon_width(&self) -> i16 {
+    fn prev_page_ellipsis_width_no_margin(&self) -> i16 {
         if let Some((icon, _)) = self.prev_page_ellipsis_icon {
             icon.toif.width()
         } else {
-            0
+            self.text_font.text_width(ELLIPSIS)
         }
     }
 }
@@ -232,21 +231,35 @@ impl TextLayout {
     }
 
     /// Draw as much text as possible on the current screen.
-    pub fn render_text<'s>(&self, text: &str, target: &mut impl Renderer<'s>) -> LayoutFit {
-        self.render_text_with_alpha(text, target, 255)
+    pub fn render_text<'s>(
+        &self,
+        text: &str,
+        target: &mut impl Renderer<'s>,
+        must_fit: bool,
+    ) -> LayoutFit {
+        self.render_text_with_alpha(text, target, 255, must_fit)
     }
+
     /// Draw as much text as possible on the current screen.
     pub fn render_text_with_alpha<'s>(
         &self,
         text: &str,
         target: &mut impl Renderer<'s>,
         alpha: u8,
+        _must_fit: bool,
     ) -> LayoutFit {
-        self.layout_text(
+        let fit = self.layout_text(
             text,
             &mut self.initial_cursor(),
             &mut TextRenderer::new(target).with_alpha(alpha),
-        )
+        );
+
+        #[cfg(feature = "ui_debug")]
+        if _must_fit && matches!(fit, LayoutFit::OutOfBounds { .. }) {
+            target.raise_overflow_exception();
+        }
+
+        fit
     }
 
     /// Loop through the `text` and try to fit it on the current screen,
@@ -284,18 +297,19 @@ impl TextLayout {
                 // Showing the arrow at the last chunk position
                 // Assuming mono-font, so all the letters have the same width
                 let letter_size = self.style.text_font.text_width("a");
-                let icon_offset = self.style.prev_page_ellipsis_icon_width() + 2;
-                cursor.x += chunk_config.chunk_size as i16 * letter_size - icon_offset;
+                let icon_offset = self.style.prev_page_ellipsis_width_no_margin() + 2;
+                cursor.x += i16::from(chunk_config.chunk_size) * letter_size - icon_offset;
                 sink.prev_page_ellipsis(*cursor, self);
                 cursor.x += icon_offset + chunk_config.x_offset;
             } else {
                 sink.prev_page_ellipsis(*cursor, self);
                 cursor.x += self.style.prev_page_ellipsis_width();
             }
+            // Ignore leading '\r' character if the above ellipsis has been drawn
+            remaining_text = remaining_text.strip_prefix('\r').unwrap_or(remaining_text);
         }
 
         while !remaining_text.is_empty() {
-            let is_last_line = cursor.y + self.style.text_font.line_height() > self.bottom_y();
             let mut force_next_page = false;
 
             // Check if we have not reached the maximum number of lines we want to draw.
@@ -304,6 +318,11 @@ impl TextLayout {
                     force_next_page = true;
                 }
             }
+
+            let is_last_line =
+                (cursor.y + self.style.text_font.line_height() + self.style.line_spacing
+                    > self.bottom_y())
+                    || force_next_page;
 
             let line_ending_space = if is_last_line {
                 self.style.ellipsis_width()
@@ -323,9 +342,15 @@ impl TextLayout {
 
             if let Some(chunk_config) = self.style.chunks {
                 // Last chunk on the page should not be rendered, put just ellipsis there
-                // Chunks is last when the next chunk would not fit on the page horizontally
-                let is_last_chunk = (2 * span.advance.x - chunk_config.x_offset) > remaining_width;
-                if is_last_line && is_last_chunk && remaining_text.len() > chunk_config.chunk_size {
+                // Chunks is last when the next chunk would not fit on the page horizontally or
+                // the span doesn't cover the whole chunk size
+
+                let is_last_chunk = (2 * span.advance.x - chunk_config.x_offset) > remaining_width
+                    || span.length < usize::from(chunk_config.chunk_size);
+                if is_last_line
+                    && is_last_chunk
+                    && remaining_text.len() > chunk_config.chunk_size.into()
+                {
                     // Making sure no text is rendered here, and that we force a line break
                     span.length = 0;
                     span.advance.x = 2; // To start at the same horizontal line as the chunk itself
@@ -366,8 +391,9 @@ impl TextLayout {
                 if span.insert_hyphen_before_line_break {
                     sink.hyphen(*cursor, self);
                 }
-                // Check the amount of vertical space we have left --- or manually force the
-                // next page.
+
+                // Cannot be is_last_line since it includes self.style.line_spacing which is
+                // moot for page break.
                 if force_next_page || cursor.y + span.advance.y > self.bottom_y() {
                     // Not enough space on this page.
                     if !remaining_text.is_empty() {
@@ -381,9 +407,6 @@ impl TextLayout {
                         if should_append_ellipsis {
                             sink.ellipsis(*cursor, self);
                         }
-                        // TODO: This does not work in case we are the last
-                        // fitting text token on the line, with more text tokens
-                        // following and `text.is_empty() == true`.
                     }
 
                     // Report we are out of bounds and quit.
@@ -605,6 +628,50 @@ struct Span {
     insert_hyphen_before_line_break: bool,
 }
 
+pub struct Lines<'a, F> {
+    text: &'a str,
+    max_width: i16,
+    font: F,
+}
+
+impl<'a, F> Lines<'a, F> {
+    pub fn split(text: &'a str, max_width: i16, font: F) -> Self {
+        Self {
+            text,
+            max_width,
+            font,
+        }
+    }
+}
+
+impl<'a, F> Iterator for Lines<'a, F>
+where
+    F: Copy + GlyphMetrics,
+{
+    type Item = &'a str;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.text.is_empty() {
+            return None;
+        }
+        let span = Span::fit_horizontally(
+            self.text,
+            self.max_width,
+            self.font,
+            LineBreaking::BreakAtWhitespace,
+            0,
+            None,
+        );
+        let chunk = &self.text[..span.length];
+        self.text = &self.text[span.length + span.skip_next_chars..];
+        if chunk.is_empty() {
+            None
+        } else {
+            Some(chunk)
+        }
+    }
+}
+
 impl Span {
     pub fn fit_horizontally(
         text: &str,
@@ -669,13 +736,25 @@ impl Span {
         while let Some((i, ch)) = char_indices_iter.next() {
             let char_width = text_font.char_width(ch);
 
-            // When there is a set chunk size and we reach it,
-            // adjust the line advances and return the line.
+            // All chunkification logic goes here.
             if let Some(chunkify_config) = chunks {
-                if i == chunkify_config.chunk_size {
-                    line.advance.y = 0;
-                    line.advance.x += chunkify_config.x_offset;
-                    return line;
+                let final_index = text.len().min(usize::from(chunkify_config.chunk_size));
+                let chunk_width = text_font.text_width(&text[..final_index]);
+                if chunk_width <= max_width {
+                    return Self {
+                        length: final_index,
+                        advance: Offset::x(chunk_width + chunkify_config.x_offset),
+                        insert_hyphen_before_line_break: false,
+                        skip_next_chars: 0,
+                    };
+                } else {
+                    // We cannot fit the chunk on this line, line break.
+                    return Self {
+                        length: 0,
+                        advance: Offset::y(text_font.line_height()),
+                        insert_hyphen_before_line_break: false,
+                        skip_next_chars: 0,
+                    };
                 }
             }
 
@@ -733,6 +812,7 @@ impl Span {
 mod tests {
     use super::*;
 
+    #[derive(Copy, Clone)]
     pub struct Fixed {
         pub width: i16,
         pub height: i16,
@@ -826,5 +906,33 @@ mod tests {
             }
         }
         spans
+    }
+
+    #[test]
+    fn test_split_lines() {
+        let text = "Hello World!";
+
+        let mut i = Lines::split(text, 13, FIXED_FONT);
+        assert_eq!(i.next(), Some("Hello World!"));
+        assert_eq!(i.next(), None);
+
+        let mut i = Lines::split(text, 12, FIXED_FONT);
+        assert_eq!(i.next(), Some("Hello World!"));
+        assert_eq!(i.next(), None);
+
+        let mut i = Lines::split(text, 11, FIXED_FONT);
+        assert_eq!(i.next(), Some("Hello"));
+        assert_eq!(i.next(), Some("World!"));
+        assert_eq!(i.next(), None);
+
+        let mut i = Lines::split(text, 10, FIXED_FONT);
+        assert_eq!(i.next(), Some("Hello"));
+        assert_eq!(i.next(), Some("World!"));
+        assert_eq!(i.next(), None);
+
+        let mut i = Lines::split(text, 6, FIXED_FONT);
+        assert_eq!(i.next(), Some("Hello"));
+        assert_eq!(i.next(), Some("World!"));
+        assert_eq!(i.next(), None);
     }
 }

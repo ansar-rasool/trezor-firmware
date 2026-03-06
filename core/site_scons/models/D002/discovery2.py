@@ -18,16 +18,28 @@ def configure(
 
     mcu = "STM32U5G9xx"
     linker_script = """embed/sys/linker/stm32u5g/{target}.ld"""
+    memory_layout = "memory.ld"
 
-    stm32u5_common_files(env, defines, sources, paths)
+    features_available += stm32u5_common_files(
+        env, features_wanted, defines, sources, paths
+    )
 
-    env.get("ENV")[
-        "CPU_ASFLAGS"
-    ] = "-mthumb -mcpu=cortex-m33 -mfloat-abi=hard -mfpu=fpv5-sp-d16 "
-    env.get("ENV")[
-        "CPU_CCFLAGS"
-    ] = "-mthumb -mcpu=cortex-m33 -mfloat-abi=hard -mfpu=fpv5-sp-d16 -mtune=cortex-m33 -mcmse "
-    env.get("ENV")["RUST_TARGET"] = "thumbv8m.main-none-eabihf"
+    ENV = env.get("ENV")
+    assert ENV
+
+    ENV["CPU_ASFLAGS"] = "-mthumb -mcpu=cortex-m33 -mfloat-abi=hard -mfpu=fpv5-sp-d16 "
+    ENV["CPU_CCFLAGS"] = (
+        "-mthumb -mcpu=cortex-m33 -mfloat-abi=hard -mfpu=fpv5-sp-d16 -mtune=cortex-m33 "
+    )
+    ENV["RUST_TARGET"] = "thumbv8m.main-none-eabihf"
+
+    if "secure_domain" in features_wanted:
+        ENV["CPU_CCFLAGS"] += "-mcmse "
+
+    if "secmon_layout" in features_wanted:
+        defines += [("USE_SECMON_LAYOUT", "1")]
+        memory_layout = "memory_secmon.ld"
+        features_available.append("secmon_layout")
 
     defines += [
         mcu,
@@ -36,28 +48,39 @@ def configure(
         ("HW_REVISION", str(hw_revision)),
         ("HSE_VALUE", "16000000"),
         ("USE_HSE", "1"),
+        ("USE_BOOTARGS_RSOD", "1"),
+        ("LOCKABLE_BOOTLOADER", "1"),
+        ("USE_SECMON_VERIFICATION", "1"),
     ]
 
-    sources += [
-        "embed/io/display/ltdc_dsi/display_driver.c",
-        "embed/io/display/ltdc_dsi/panels/stm32u5a9j-dk/stm32u5a9j-dk.c",
-        "embed/io/display/ltdc_dsi/display_fb.c",
-        "embed/io/display/ltdc_dsi/display_fb_rgb888.c",
-        # "embed/io/display/ltdc_dsi/display_gfxmmu.c",
-        "embed/io/display/fb_queue/fb_queue.c",
-    ]
-    paths += ["embed/io/display/inc"]
+    if "boot_ucb" in features_wanted:
+        sources += ["embed/util/image/boot_header.c"]
+        sources += ["embed/util/image/boot_ucb.c"]
+        defines += [("USE_BOOT_UCB", "1")]
+        features_available.append("boot_ucb")
 
-    features_available.append("backlight")
-    defines += [("USE_BACKLIGHT", "1")]
-    sources += ["embed/io/backlight/stm32/backlight_pin.c"]
-    paths += ["embed/io/backlight/inc"]
+    if "display" in features_wanted:
+        sources += [
+            "embed/io/display/ltdc_dsi/display_driver.c",
+            "embed/io/display/ltdc_dsi/panels/stm32u5a9j-dk/stm32u5a9j-dk.c",
+            "embed/io/display/ltdc_dsi/display_fb.c",
+            "embed/io/display/ltdc_dsi/display_fb_rgb888.c",
+            # "embed/io/display/ltdc_dsi/display_gfxmmu.c",
+            "embed/io/display/fb_queue/fb_queue.c",
+        ]
+        paths += ["embed/io/display/inc"]
+        defines += [("USE_DISPLAY", "1")]
+
+        features_available.append("backlight")
+        defines += [("USE_BACKLIGHT", "1")]
+        sources += ["embed/io/backlight/stm32/backlight_pin.c"]
+        paths += ["embed/io/backlight/inc"]
 
     if "input" in features_wanted:
         sources += ["embed/io/i2c_bus/stm32u5/i2c_bus.c"]
         sources += ["embed/io/touch/sitronix/touch.c"]
         sources += ["embed/io/touch/sitronix/sitronix.c"]
-        sources += ["embed/io/touch/touch_fsm.c"]
+        sources += ["embed/io/touch/touch_poll.c"]
         paths += ["embed/io/i2c_bus/inc"]
         paths += ["embed/io/touch/inc"]
         features_available.append("touch")
@@ -65,22 +88,6 @@ def configure(
             ("USE_TOUCH", "1"),
             ("USE_I2C", "1"),
         ]
-
-    if "usb" in features_wanted:
-        sources += [
-            "embed/io/usb/stm32/usb_class_hid.c",
-            "embed/io/usb/stm32/usb_class_vcp.c",
-            "embed/io/usb/stm32/usb_class_webusb.c",
-            "embed/io/usb/stm32/usb.c",
-            "embed/io/usb/stm32/usbd_conf.c",
-            "embed/io/usb/stm32/usbd_core.c",
-            "embed/io/usb/stm32/usbd_ctlreq.c",
-            "embed/io/usb/stm32/usbd_ioreq.c",
-            "vendor/stm32u5xx_hal_driver/Src/stm32u5xx_ll_usb.c",
-        ]
-        features_available.append("usb")
-        paths += ["embed/io/usb/inc"]
-        defines += [("USE_USB", "1")]
 
     defines += [
         "FRAMEBUFFER",
@@ -106,9 +113,7 @@ def configure(
         "USE_OEM_KEYS_CHECK=1",
     ]
 
-    env.get("ENV")["LINKER_SCRIPT"] = linker_script
-
-    defs = env.get("CPPDEFINES_IMPLICIT")
-    defs += ["__ARM_FEATURE_CMSE=3"]
+    ENV["LINKER_SCRIPT"] = linker_script
+    ENV["MEMORY_LAYOUT"] = memory_layout
 
     return features_available

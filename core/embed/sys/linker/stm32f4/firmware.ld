@@ -1,5 +1,3 @@
-INCLUDE "./embed/sys/linker/stm32f4/memory.ld";
-
 ENTRY(reset_handler)
 
 MEMORY {
@@ -19,10 +17,6 @@ _data_section_end = ADDR(.data) + SIZEOF(.data);
 
 _bss_section_start = ADDR(.bss);
 _bss_section_end = ADDR(.bss) + SIZEOF(.bss);
-
-_confidential_section_loadaddr = 0;
-_confidential_section_start = 0;
-_confidential_section_end = 0;
 
 _codelen = LENGTH(FLASH) - SIZEOF(.vendorheader) - SIZEOF(.header) + SIZEOF(.flash2);
 _heap_start = ADDR(.heap);
@@ -55,6 +49,8 @@ SECTIONS {
     . = ALIGN(4);
     *(.rodata*);
     . = ALIGN(4);
+    KEEP(*(.bootloader));
+    *(.bootloader*);
     . = ALIGN(512);
   } >FLASH AT>FLASH
 

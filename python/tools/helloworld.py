@@ -2,7 +2,7 @@
 
 # This file is part of the Trezor project.
 #
-# Copyright (C) 2012-2022 SatoshiLabs and contributors
+# Copyright (C) SatoshiLabs and contributors
 #
 # This library is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License version 3
@@ -24,14 +24,18 @@ from trezorlib.tools import parse_path
 def main() -> None:
     # Use first connected device
     client = get_default_client()
+    session = client.get_session()
 
     # Print out Trezor's features and settings
-    print(client.features)
+    print(session.features)
 
     # Get the first address of first BIP44 account
     bip32_path = parse_path("44h/0h/0h/0/0")
-    address = btc.get_address(client, "Bitcoin", bip32_path, True)
+    address = btc.get_address(session, "Bitcoin", bip32_path, True)
     print("Bitcoin address:", address)
+
+    # Release underlying transport (USB/BLE/UDP)
+    client.transport.close()
 
 
 if __name__ == "__main__":

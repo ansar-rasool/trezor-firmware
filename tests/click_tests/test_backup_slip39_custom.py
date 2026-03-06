@@ -52,7 +52,9 @@ def test_backup_slip39_custom(
 
     assert features.initialized is False
 
-    device_handler.run(
+    session = device_handler.client.get_seedless_session()
+    device_handler.run_with_provided_session(
+        session,
         device.setup,
         strength=128,
         backup_type=messages.BackupType.Slip39_Basic,
@@ -71,16 +73,18 @@ def test_backup_slip39_custom(
     # retrieve the result to check that it's not a TrezorFailure exception
     device_handler.result()
 
-    device_handler.run(
+    device_handler.run_with_provided_session(
+        session,
         device.backup,
         group_threshold=group_threshold,
         groups=[(share_threshold, share_count)],
     )
 
     # confirm backup configuration
+    debug.synchronize_at("Paragraphs")  # XXX wait for homescreen to go away
     if share_count > 1:
         assert TR.regexp("reset__create_x_of_y_multi_share_backup_template").match(
-            debug.read_layout().text_content()
+            debug.read_layout().text_content().strip()
         )
     else:
         assert TR.regexp("backup__info_single_share_backup").match(
@@ -93,9 +97,11 @@ def test_backup_slip39_custom(
     reset.confirm_read(debug, middle_r=True)
 
     all_words: list[str] = []
-    for _ in range(share_count):
+    for share in range(share_count):
         # read words
-        words = reset.read_words(debug)
+        eckahrt = debug.layout_type is LayoutType.Eckhart
+        confirm_instruction = not eckahrt or share == 0
+        words = reset.read_words(debug, confirm_instruction=confirm_instruction)
 
         # confirm words
         reset.confirm_words(debug, words)
@@ -106,9 +112,12 @@ def test_backup_slip39_custom(
         all_words.append(" ".join(words))
 
     # confirm backup done
-    if debug.layout_type is LayoutType.Delizia and share_count > 1:
+    if (
+        debug.layout_type in (LayoutType.Delizia, LayoutType.Eckhart)
+        and share_count > 1
+    ):
         reset.confirm_read(debug)
-    elif debug.layout_type is not LayoutType.Delizia:
+    elif debug.layout_type not in (LayoutType.Delizia, LayoutType.Eckhart):
         reset.confirm_read(debug)
 
     # generate secret locally

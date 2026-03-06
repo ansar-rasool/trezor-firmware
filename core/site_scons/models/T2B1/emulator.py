@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .. import get_hw_model_as_number
+from ..unix_common import unix_common_files
 
 
 def configure(
@@ -16,6 +17,10 @@ def configure(
     hw_model = get_hw_model_as_number("T2B1")
     hw_revision = 0
     mcu = "STM32F427xx"
+
+    features_available += unix_common_files(
+        env, features_wanted, defines, sources, paths
+    )
 
     defines += [
         "FRAMEBUFFER",
@@ -34,6 +39,7 @@ def configure(
         ("MCU_TYPE", mcu),
         ("FLASH_BIT_ACCESS", "1"),
         ("FLASH_BLOCK_WORDS", "1"),
+        ("LOCKABLE_BOOTLOADER", "1"),
     ]
 
     if "sbu" in features_wanted:
@@ -50,7 +56,7 @@ def configure(
 
     if "input" in features_wanted:
         sources += ["embed/io/button/unix/button.c"]
-        sources += ["embed/io/button/button_fsm.c"]
+        sources += ["embed/io/button/button_poll.c"]
         paths += ["embed/io/button/inc"]
         features_available.append("button")
         defines += [("USE_BUTTON", "1")]

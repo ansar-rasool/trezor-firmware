@@ -12,10 +12,7 @@ use crate::{
     },
 };
 
-use super::super::{
-    component::{Frame, PromptScreen, SwipeContent, VerticalMenu},
-    theme,
-};
+use super::super::component::{Frame, PromptScreen, SwipeContent, VerticalMenu};
 
 /// Flow for a setting of homescreen wallpaper showing a preview of the image,
 /// menu to cancel and tap to confirm prompt.
@@ -34,11 +31,8 @@ impl FlowController for ConfirmHomescreen {
 
     fn handle_swipe(&'static self, direction: Direction) -> Decision {
         match (self, direction) {
-            (Self::Homescreen, Direction::Left) => Self::Menu.swipe(direction),
             (Self::Homescreen, Direction::Up) => Self::Confirm.swipe(direction),
-            (Self::Menu, Direction::Right) => Self::Homescreen.swipe(direction),
             (Self::Confirm, Direction::Down) => Self::Homescreen.swipe(direction),
-            (Self::Confirm, Direction::Left) => Self::Menu.swipe(direction),
             _ => self.do_nothing(),
         }
     }
@@ -68,10 +62,9 @@ pub fn new_confirm_homescreen(
 
     let content_menu = Frame::left_aligned(
         TString::empty(),
-        VerticalMenu::empty().danger(theme::ICON_CANCEL, TR::buttons__cancel.into()),
+        VerticalMenu::empty().cancel_item(TR::buttons__cancel.into()),
     )
     .with_cancel_button()
-    .with_swipe(Direction::Right, SwipeSettings::immediate())
     .map(super::util::map_to_choice);
 
     let content_confirm = Frame::left_aligned(
@@ -80,8 +73,7 @@ pub fn new_confirm_homescreen(
     )
     .with_menu_button()
     .with_footer(TR::instructions__tap_to_confirm.into(), None)
-    .with_swipe(Direction::Down, SwipeSettings::default())
-    .with_swipe(Direction::Left, SwipeSettings::default())
+    .with_swipe(Direction::Down, SwipeSettings::Default)
     .map(super::util::map_to_confirm);
 
     let mut res = SwipeFlow::new(&ConfirmHomescreen::Homescreen)?;

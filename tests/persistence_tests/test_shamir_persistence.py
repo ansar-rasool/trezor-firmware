@@ -16,10 +16,12 @@
 
 import pytest
 
-from trezorlib import device
+from trezorlib import device, messages
+from trezorlib.client import ProtocolVersion
 from trezorlib.debuglink import DebugLink, LayoutType
 from trezorlib.messages import RecoveryStatus
 
+from .. import translations as TR
 from ..click_tests import common, recovery
 from ..common import MNEMONIC_SLIP39_ADVANCED_20, MNEMONIC_SLIP39_BASIC_20_3of6
 from ..device_handler import BackgroundDeviceHandler
@@ -40,35 +42,50 @@ def test_abort(core_emulator: Emulator):
     debug = device_handler.debuglink()
     features = device_handler.features()
 
-    if debug.layout_type is LayoutType.Delizia:
-        pytest.skip("abort not supported on T3T1")
-
     assert features.recovery_status == RecoveryStatus.Nothing
 
-    device_handler.run(device.recover, pin_protection=False)
+    session = device_handler.client.get_seedless_session()
+    device_handler.run_with_provided_session(
+        session, device.recover, pin_protection=False
+    )
 
     recovery.confirm_recovery(debug)
     layout = debug.read_layout()
-    assert "number of words" in layout.text_content()
+    assert TR.recovery__num_of_words in layout.text_content()
 
     debug = _restart(device_handler, core_emulator)
     features = device_handler.features()
 
     assert features.recovery_status == RecoveryStatus.Recovery
 
-    assert "number of words" in debug.read_layout().text_content()
+    assert TR.recovery__num_of_words in debug.read_layout().text_content()
     # clicking at 24 in word choice
     recovery.select_number_of_words(debug, 24)
 
     # Cancelling the backup
-    assert "Enter your backup" in debug.read_layout().text_content()
-    layout = common.go_back(debug)
+    text_content = debug.read_layout().text_content()
+    assert any(
+        needle in text_content
+        for needle in [
+            TR.recovery__enter_each_word,
+            TR.recovery__enter_backup,
+        ]
+    )
 
-    assert layout.title().lower() in ("abort recovery", "cancel recovery")
-    for _ in range(layout.page_count()):
-        common.go_next(debug)
+    if debug.layout_type in (LayoutType.Delizia, LayoutType.Eckhart):
+        # cancel in the menu
+        debug.click(debug.screen_buttons.menu())
+        debug.button_actions.navigate_to_menu_item(0)
+    else:
+        layout = common.go_back(debug)
+        assert TR.recovery__title_cancel_recovery.lower() in layout.title().lower()
+        for _ in range(layout.page_count()):
+            common.go_next(debug)
 
     assert debug.read_layout().main_component() == "Homescreen"
+
+    # create a new client, since the existing THP channel state has been wiped
+    device_handler = BackgroundDeviceHandler(core_emulator.client.get_new_client())
     features = device_handler.features()
     assert features.recovery_status == RecoveryStatus.Nothing
 
@@ -82,7 +99,10 @@ def test_recovery_single_reset(core_emulator: Emulator):
     assert features.initialized is False
     assert features.recovery_status == RecoveryStatus.Nothing
 
-    device_handler.run(device.recover, pin_protection=False)
+    session = device_handler.client.get_seedless_session()
+    device_handler.run_with_provided_session(
+        session, device.recover, pin_protection=False
+    )
 
     recovery.confirm_recovery(debug)
 
@@ -103,6 +123,7 @@ def test_recovery_single_reset(core_emulator: Emulator):
 
 
 @core_only
+@pytest.mark.protocol("protocol_v1")
 def test_recovery_on_old_wallet(core_emulator: Emulator):
     """Check that the recovery workflow started on a disconnected device can survive
     handling by the old Wallet.
@@ -122,6 +143,9 @@ def test_recovery_on_old_wallet(core_emulator: Emulator):
             assert layout.main_component() == "MnemonicKeyboard"
 
     device_handler = BackgroundDeviceHandler(core_emulator.client)
+    if device_handler.client.protocol_version != ProtocolVersion.V1:
+        pytest.skip("Should run only on Protocol_V1")
+
     debug = device_handler.debuglink()
     features = device_handler.features()
 
@@ -129,7 +153,10 @@ def test_recovery_on_old_wallet(core_emulator: Emulator):
     assert features.recovery_status == RecoveryStatus.Nothing
 
     # enter recovery mode
-    device_handler.run(device.recover, pin_protection=False)
+    session = device_handler.client.get_seedless_session()
+    device_handler.run_with_provided_session(
+        session, device.recover, pin_protection=False
+    )
 
     recovery.confirm_recovery(debug)
 
@@ -145,9 +172,13 @@ def test_recovery_on_old_wallet(core_emulator: Emulator):
     words = first_share.split(" ")
 
     # start entering first share
-    assert (
-        "Enter any share" in debug.read_layout().text_content()
-        or "Enter each word" in debug.read_layout().text_content()
+    text_content = debug.read_layout().text_content()
+    assert any(
+        needle in text_content
+        for needle in [
+            TR.recovery__enter_any_share,
+            TR.recovery__enter_each_word,
+        ]
     )
     debug.press_yes()
     assert_mnemonic_keyboard(debug)
@@ -157,7 +188,7 @@ def test_recovery_on_old_wallet(core_emulator: Emulator):
     layout = debug.read_layout()
 
     # while keyboard is open, hit the device with Initialize/GetFeatures
-    device_handler.client.init_device()
+    device_handler.client.get_seedless_session().call(messages.Initialize())
     device_handler.client.refresh_features()
 
     # try entering remaining 19 words
@@ -167,7 +198,16 @@ def test_recovery_on_old_wallet(core_emulator: Emulator):
         layout = debug.read_layout()
 
     # check that we entered the first share successfully
-    assert "2 more shares needed" in layout.text_content()
+    text_content = layout.text_content().strip()
+
+    assert (
+        TR.format(
+            "recovery__x_more_shares_needed_template_plural",
+            count=2,
+            plural="shares",
+        )
+        in text_content
+    )
 
     # try entering the remaining shares
     for share in MNEMONIC_SLIP39_BASIC_20_3of6[1:3]:
@@ -185,19 +225,29 @@ def test_recovery_on_old_wallet(core_emulator: Emulator):
 def test_recovery_multiple_resets(core_emulator: Emulator):
     def enter_shares_with_restarts(debug: DebugLink) -> None:
         shares = MNEMONIC_SLIP39_ADVANCED_20
+        share_num = [1, 5, 3, 4]
+        group_num = [2, 3, 3, 3]
         layout = debug.read_layout()
-        expected_text = "Enter any share"
-        if debug.layout_type == LayoutType.Delizia:
-            expected_text = "Enter each word"
+        expected_text = TR.recovery__enter_any_share
+        if debug.layout_type in (LayoutType.Delizia, LayoutType.Eckhart):
+            expected_text = TR.recovery__enter_each_word
         remaining = len(shares)
-        for share in shares:
+        for idx, share in enumerate(shares):
             assert expected_text in layout.text_content()
             layout = recovery.enter_share(debug, share)
             remaining -= 1
-            expected_text = "You have entered"
+            expected_text = (
+                TR.format(
+                    "recovery__share_from_group_entered_template",
+                    share_num[idx],
+                    group_num[idx],
+                )
+                if debug.layout_type is LayoutType.Eckhart
+                else TR.recovery__you_have_entered
+            )
             debug = _restart(device_handler, core_emulator)
 
-        assert "Wallet recovery completed" in layout.text_content()
+        assert TR.recovery__wallet_recovered in layout.text_content()
 
     device_handler = BackgroundDeviceHandler(core_emulator.client)
     debug = device_handler.debuglink()
@@ -207,7 +257,10 @@ def test_recovery_multiple_resets(core_emulator: Emulator):
     assert features.recovery_status == RecoveryStatus.Nothing
 
     # start device and recovery
-    device_handler.run(device.recover, pin_protection=False)
+    session = device_handler.client.get_seedless_session()
+    device_handler.run_with_provided_session(
+        session, device.recover, pin_protection=False
+    )
 
     recovery.confirm_recovery(debug)
 

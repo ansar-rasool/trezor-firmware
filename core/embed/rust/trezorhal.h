@@ -4,13 +4,16 @@
 
 #include <gfx/gfx_bitblt.h>
 #include <io/display.h>
+#include <io/display_utils.h>
 #include <io/usb.h>
+#include <rtl/logging.h>
 #include <rtl/secbool.h>
-#include <sec/entropy.h>
+#include <sys/irq.h>
+#include <sys/sysevent.h>
 #include <sys/systick.h>
 #include <util/flash.h>
 #include <util/translations.h>
-#include "storage.h"
+#include "rust_types.h"
 
 #ifdef USE_HW_JPEG_DECODER
 #include <gfx/jpegdec.h>
@@ -18,6 +21,10 @@
 
 #ifdef USE_BLE
 #include <io/ble.h>
+#endif
+
+#ifdef USE_NRF
+#include <io/nrf.h>
 #endif
 
 #ifdef USE_BUTTON
@@ -34,6 +41,18 @@
 
 #ifdef USE_TOUCH
 #include <io/touch.h>
+#endif
+
+#ifdef USE_POWER_MANAGER
+#include <sys/power_manager.h>
+#endif
+
+#ifdef USE_SUSPEND
+#include <sys/suspend.h>
+#endif
+
+#ifdef USE_STORAGE
+#include <sec/storage.h>
 #endif
 
 #include "bip39.h"

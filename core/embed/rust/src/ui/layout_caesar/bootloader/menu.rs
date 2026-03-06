@@ -1,16 +1,13 @@
 #[cfg(feature = "ui_debug")]
 use crate::trace::{Trace, Tracer};
-use crate::{
-    trezorhal::secbool::{secbool, sectrue},
-    ui::{
-        component::{Child, Component, Event, EventCtx, Pad},
-        constant::screen,
-        display::Icon,
-        geometry::{Alignment, Alignment2D, Offset, Point, Rect},
-        layout::simplified::ReturnToC,
-        shape,
-        shape::Renderer,
-    },
+use crate::ui::{
+    component::{Child, Component, Event, EventCtx, Pad},
+    constant::screen,
+    display::Icon,
+    geometry::{Alignment, Alignment2D, Offset, Point, Rect},
+    layout::simplified::ReturnToC,
+    shape,
+    shape::Renderer,
 };
 
 use super::super::{
@@ -86,9 +83,7 @@ impl Trace for MenuChoice {
     }
 }
 
-pub struct MenuChoiceFactory {
-    firmware_present: secbool,
-}
+pub struct MenuChoiceFactory {}
 
 impl MenuChoiceFactory {
     const CHOICES: [(&'static str, &'static str, Icon); CHOICE_LENGTH] = [
@@ -97,8 +92,8 @@ impl MenuChoiceFactory {
         ("Reboot", "Trezor", ICON_REDO),
     ];
 
-    pub fn new(firmware_present: secbool) -> Self {
-        Self { firmware_present }
+    pub fn new() -> Self {
+        Self {}
     }
 }
 
@@ -107,11 +102,7 @@ impl ChoiceFactory for MenuChoiceFactory {
     type Item = MenuChoice;
 
     fn count(&self) -> usize {
-        if self.firmware_present == sectrue {
-            CHOICE_LENGTH
-        } else {
-            CHOICE_LENGTH - 1
-        }
+        CHOICE_LENGTH
     }
 
     fn get(&self, choice_index: usize) -> (Self::Item, Self::Action) {
@@ -123,7 +114,7 @@ impl ChoiceFactory for MenuChoiceFactory {
         let action = match choice_index {
             0 => MenuMsg::FactoryReset,
             1 => MenuMsg::Close,
-            2 if self.firmware_present == sectrue => MenuMsg::Reboot,
+            2 => MenuMsg::Reboot,
             _ => unreachable!(),
         };
         (choice_item, action)
@@ -136,8 +127,8 @@ pub struct Menu {
 }
 
 impl Menu {
-    pub fn new(firmware_present: secbool) -> Self {
-        let choices = MenuChoiceFactory::new(firmware_present);
+    pub fn new() -> Self {
+        let choices = MenuChoiceFactory::new();
         Self {
             pad: Pad::with_background(BLD_BG).with_clear(),
             choice_page: Child::new(ChoicePage::new(choices).with_only_one_item(true)),

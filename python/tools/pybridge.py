@@ -1,4 +1,21 @@
 #!/usr/bin/env python3
+
+# This file is part of the Trezor project.
+#
+# Copyright (C) SatoshiLabs and contributors
+#
+# This library is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Lesser General Public License version 3
+# as published by the Free Software Foundation.
+#
+# This library is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Lesser General Public License for more details.
+#
+# You should have received a copy of the License along with this library.
+# If not, see <https://www.gnu.org/licenses/lgpl-3.0.html>.
+
 # ### INSTRUCTIONS FOR USE ####
 #
 # 1. install Python 3.7 and up
@@ -36,12 +53,13 @@ import click
 from bottle import post, request, response, run
 
 import trezorlib.mapping
+import trezorlib.messages
 import trezorlib.models
 import trezorlib.transport
 from trezorlib.client import TrezorClient
 from trezorlib.protobuf import format_message
 from trezorlib.transport.bridge import BridgeTransport
-from trezorlib.ui import TrezorClientUI
+from trezorlib.transport.thp.protocol_v1 import ProtocolV1Channel
 
 # ignore bridge. we are the bridge
 BridgeTransport.ENABLED = False
@@ -59,15 +77,8 @@ logging.basicConfig(
 LOG = logging.getLogger()
 
 
-class SilentUI(TrezorClientUI):
-    def get_pin(self, _code: t.Any) -> str:
-        return ""
-
-    def get_passphrase(self) -> str:
-        return ""
-
-    def button_request(self, _br: t.Any) -> None:
-        pass
+def pin_callback(request: trezorlib.messages.PinMatrixRequest) -> str:
+    return ""
 
 
 class Session:
@@ -102,10 +113,15 @@ class Transport:
         self.path = transport.get_path()
         self.session: Session | None = None
         self.transport = transport
+        self.protocol = ProtocolV1Channel(transport, trezorlib.mapping.DEFAULT_MAPPING)
 
-        client = TrezorClient(transport, ui=SilentUI())
+        transport.open()
+        client = TrezorClient(transport)
+        client.pin_callback = pin_callback
         self.model = client.model
-        client.end_session()
+
+        client.get_seedless_session().end()
+        transport.close()
 
     def acquire(self, sid: str) -> str:
         if self.session_id() != sid:
@@ -114,11 +130,11 @@ class Transport:
             self.session.release()
 
         self.session = Session(self)
-        self.transport.begin_session()
+        self.transport.open()
         return self.session.id
 
     def release(self) -> None:
-        self.transport.end_session()
+        self.transport.close()
         self.session = None
 
     def session_id(self) -> str | None:
@@ -139,10 +155,10 @@ class Transport:
         }
 
     def write(self, msg_id: int, data: bytes) -> None:
-        self.transport.write(msg_id, data)
+        self.protocol._write(msg_id, data)
 
     def read(self) -> tuple[int, bytes]:
-        return self.transport.read()
+        return self.protocol._read()
 
     @classmethod
     def find(cls, path: str) -> Transport | None:
@@ -211,7 +227,7 @@ def do_enumerate():
 def do_acquire(path: str, sid: str):
     check_origin()
     if sid == "null":
-        sid = None  # type: ignore [is incompatible with declared type]
+        sid = None  # type: ignore [is not assignable to declared type]
     trezor = Transport.find(path)
     if trezor is None:
         response.status = 404

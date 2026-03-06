@@ -1,3 +1,19 @@
+# This file is part of the Trezor project.
+#
+# Copyright (C) SatoshiLabs and contributors
+#
+# This library is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Lesser General Public License version 3
+# as published by the Free Software Foundation.
+#
+# This library is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Lesser General Public License for more details.
+#
+# You should have received a copy of the License along with this library.
+# If not, see <https://www.gnu.org/licenses/lgpl-3.0.html>.
+
 from __future__ import annotations
 
 import json
@@ -52,7 +68,10 @@ def version_from_json(json_str: str) -> VersionTuple:
 
 
 def _normalize(what: str) -> str:
-    return unicodedata.normalize("NFKC", what)
+    normalized = unicodedata.normalize("NFC", what)
+    if normalized != what:
+        raise RuntimeError(f"Invalid string normalization at: '{what}'")
+    return normalized
 
 
 def offsets_seq(data: t.Iterable[bytes]) -> t.Iterator[int]:
@@ -76,7 +95,7 @@ class Header(Struct):
         "language" / c.PaddedString(8, "ascii"),  # BCP47 language tag
         "model" / EnumAdapter(c.Bytes(4), Model),
         "firmware_version" / TupleAdapter(c.Int8ul, c.Int8ul, c.Int8ul, c.Int8ul),
-        "data_len" / c.Int16ul,
+        "data_len" / c.Int32ul,
         "data_hash" / c.Bytes(32),
         ALIGN_SUBCON,
         c.Terminated,
@@ -141,7 +160,7 @@ class BlobTable(Struct):
         return None
 
 
-class TranslatedStrings(Struct):
+class TranslatedStringsChunk(Struct):
     offsets: list[int]
     strings: bytes
 
@@ -156,10 +175,23 @@ class TranslatedStrings(Struct):
     # fmt: on
 
     @classmethod
-    def from_items(cls, items: list[str]) -> Self:
+    def from_items(cls, items: list[str]) -> list[Self]:
         item_bytes = [_normalize(item).encode("utf-8") for item in items]
-        offsets = list(offsets_seq(item_bytes))
-        return cls(offsets=offsets, strings=b"".join(item_bytes))
+
+        item_chunks = [[]]
+        for item in item_bytes:
+            item_chunks[-1].append(item)
+            last_chunk_size = sum(len(item) for item in item_chunks[-1])
+            if last_chunk_size >= 32 * 1024:
+                item_chunks.append([])
+
+        translation_chunks = []
+        for item_bytes in item_chunks:
+            offsets = list(offsets_seq(item_bytes))
+            chunk = cls(offsets=offsets, strings=b"".join(item_bytes))
+            translation_chunks.append(chunk)
+        assert len(translation_chunks) <= MAX_TRANSLATION_CHUNKS
+        return translation_chunks
 
     def __len__(self) -> int:
         return len(self.offsets) - 1
@@ -219,14 +251,16 @@ class FontsTable(BlobTable):
 
 # =========
 
+MAX_TRANSLATION_CHUNKS = 4
+
 
 class Payload(Struct):
-    translations_bytes: bytes
+    translations_chunks_bytes: list[bytes]
     fonts_bytes: bytes
 
     # fmt: off
     SUBCON = c.Struct(
-        "translations_bytes" / c.Prefixed(c.Int16ul, c.GreedyBytes),
+        "translations_chunks_bytes" / c.PrefixedArray(c.Int16ul, c.Prefixed(c.Int16ul, c.GreedyBytes)),
         "fonts_bytes" / c.Prefixed(c.Int16ul, c.GreedyBytes),
         c.Terminated,
     )
@@ -240,15 +274,15 @@ class TranslationsBlob(Struct):
 
     # fmt: off
     SUBCON = c.Struct(
-        "magic" / c.Const(b"TRTR00"),
+        "magic" / c.Const(b"TRTR01"),
         "total_length" / c.Rebuild(
-            c.Int16ul,
-            (
-                c.len_(c.this.header_bytes)
-                + c.len_(c.this.proof_bytes)
-                + c.len_(c.this.payload.translations_bytes)
-                + c.len_(c.this.payload.fonts_bytes)
-                + 2 * 4  # sizeof(u16) * number of fields
+            c.Int32ul,
+            lambda ctx: (
+                len(ctx.header_bytes)
+                + len(ctx.proof_bytes)
+                + sum(map(len, ctx.payload['translations_chunks_bytes']))
+                + len(ctx.payload['fonts_bytes'])
+                + 2 * (4 + len(ctx.payload['translations_chunks_bytes']))  # sizeof(u16) * number of fields
             )
         ),
         "_start_offset" / c.Tell,
@@ -263,29 +297,33 @@ class TranslationsBlob(Struct):
     # fmt: on
 
     @property
-    def header(self):
+    def header(self) -> Header:
         return Header.parse(self.header_bytes)
 
     @property
-    def proof(self):
+    def proof(self) -> Proof:
         return Proof.parse(self.proof_bytes)
 
     @proof.setter
-    def proof(self, proof: Proof):
+    def proof(self, proof: Proof) -> None:
         self.proof_bytes = proof.build()
 
     @property
-    def translations(self):
-        return TranslatedStrings.parse(self.payload.translations_bytes)
+    def translation_chunks(self) -> list[TranslatedStringsChunk]:
+        return [
+            TranslatedStringsChunk.parse(chunk)
+            for chunk in self.payload.translations_chunks_bytes
+        ]
 
     @property
-    def fonts(self):
+    def fonts(self) -> FontsTable:
         return FontsTable.parse(self.payload.fonts_bytes)
 
     def build(self) -> bytes:
         assert len(self.header_bytes) % ALIGNMENT == 0
         assert len(self.proof_bytes) % ALIGNMENT == 0
-        assert len(self.payload.translations_bytes) % ALIGNMENT == 0
+        for chunk in self.payload.translations_chunks_bytes:
+            assert len(chunk) % ALIGNMENT == 0
         assert len(self.payload.fonts_bytes) % ALIGNMENT == 0
         return super().build()
 
@@ -297,7 +335,7 @@ ALL_LAYOUTS = frozenset(LayoutType) - {LayoutType.T1}
 ALL_LAYOUT_NAMES = frozenset(layout.name for layout in ALL_LAYOUTS)
 
 
-def check_blob(lang_data: JsonDef):
+def check_blob(lang_data: JsonDef) -> None:
     json_header: JsonHeader = lang_data["header"]
     lang_version = f"{json_header['language']} v{json_header['version']}"
 
@@ -333,6 +371,16 @@ def get_translation(lang_data: JsonDef, key: str, layout_type: LayoutType) -> st
     return item  # Same translation for all layouts
 
 
+def chunked(values: list[t.Any], n: int) -> t.Iterable[list[t.Any]]:
+    offset = 0
+    while True:
+        chunk = values[offset : offset + n]
+        if not chunk:
+            break
+        yield chunk
+        offset += n
+
+
 def blob_from_defs(
     lang_data: JsonDef,
     order: Order,
@@ -348,7 +396,8 @@ def blob_from_defs(
         get_translation(lang_data, key, layout_type) for _, key in sorted(order.items())
     ]
 
-    translations = TranslatedStrings.from_items(translations_ordered)
+    translations_chunks = TranslatedStringsChunk.from_items(translations_ordered)
+    translations_chunks_bytes = [chunk.build() for chunk in translations_chunks]
 
     if layout_type.name not in lang_data["fonts"]:
         raise ValueError(
@@ -358,13 +407,13 @@ def blob_from_defs(
     model_fonts = lang_data["fonts"][layout_type.name]
     fonts = FontsTable.from_dir(model_fonts, fonts_dir)
 
-    translations_bytes = translations.build()
-    assert len(translations_bytes) % ALIGNMENT == 0
+    for chunk_bytes in translations_chunks_bytes:
+        assert len(chunk_bytes) % ALIGNMENT == 0
     fonts_bytes = fonts.build()
     assert len(fonts_bytes) % ALIGNMENT == 0
 
     payload = Payload(
-        translations_bytes=translations_bytes,
+        translations_chunks_bytes=translations_chunks_bytes,
         fonts_bytes=fonts_bytes,
     )
     data = payload.build()

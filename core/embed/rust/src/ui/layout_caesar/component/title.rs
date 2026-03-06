@@ -15,7 +15,6 @@ pub struct Title {
     area: Rect,
     title: TString<'static>,
     marquee: Marquee,
-    needs_marquee: bool,
     centered: bool,
 }
 
@@ -24,7 +23,6 @@ impl Title {
         Self {
             title,
             marquee: Marquee::new(title, theme::FONT_HEADER, theme::FG, theme::BG),
-            needs_marquee: false,
             area: Rect::zero(),
             centered: false,
         }
@@ -42,13 +40,12 @@ impl Title {
     pub fn set_text(&mut self, ctx: &mut EventCtx, new_text: TString<'static>) {
         self.title = new_text;
         self.marquee.set_text(new_text);
-        let text_width = new_text.map(|s| theme::FONT_HEADER.text_width(s));
-        self.needs_marquee = text_width > self.area.width();
-        // Resetting the marquee to the beginning and starting it when necessary.
         self.marquee.reset();
-        if self.needs_marquee {
-            self.marquee.start(ctx, Instant::now());
-        }
+        self.marquee.start(ctx, Instant::now());
+    }
+
+    pub fn height() -> i16 {
+        theme::FONT_HEADER.text_height()
     }
 
     /// Display title/header at the top left of the given area.
@@ -57,8 +54,7 @@ impl Title {
         title: &TString<'static>,
         area: Rect,
     ) {
-        let text_height = theme::FONT_HEADER.text_height();
-        let title_baseline = area.top_left() + Offset::y(text_height - 1);
+        let title_baseline = area.top_left() + Offset::y(Self::height() - 1);
         title.map(|s| {
             shape::Text::new(title_baseline, s, theme::FONT_HEADER)
                 .with_fg(theme::FG)
@@ -72,8 +68,7 @@ impl Title {
         title: &TString<'static>,
         area: Rect,
     ) {
-        let text_height = theme::FONT_HEADER.text_height();
-        let title_baseline = area.top_center() + Offset::y(text_height - 1);
+        let title_baseline = area.top_center() + Offset::y(Self::height() - 1);
         title.map(|s| {
             shape::Text::new(title_baseline, s, theme::FONT_HEADER)
                 .with_align(Alignment::Center)
@@ -89,24 +84,20 @@ impl Component for Title {
     fn place(&mut self, bounds: Rect) -> Rect {
         self.area = bounds;
         self.marquee.place(bounds);
-        let width = self.title.map(|s| theme::FONT_HEADER.text_width(s));
-        self.needs_marquee = width > self.area.width();
         bounds
     }
 
     fn event(&mut self, ctx: &mut EventCtx, event: Event) -> Option<Self::Msg> {
-        if self.needs_marquee {
-            if matches!(event, Event::Attach(_)) {
-                self.marquee.start(ctx, Instant::now());
-            } else {
-                return self.marquee.event(ctx, event);
-            }
+        if matches!(event, Event::Attach(_)) {
+            self.marquee.start(ctx, Instant::now());
+        } else {
+            return self.marquee.event(ctx, event);
         }
         None
     }
 
     fn render<'s>(&'s self, target: &mut impl Renderer<'s>) {
-        if self.needs_marquee {
+        if self.title.map(|s| theme::FONT_HEADER.text_width(s)) > self.area.width() {
             self.marquee.render(target);
         } else if self.centered {
             Self::render_header_centered(target, &self.title, self.area);

@@ -45,11 +45,7 @@ impl FlowController for ShowTutorial {
             (Self::StepNavigation, Direction::Down) => Self::StepBegin.swipe(direction),
             (Self::StepMenu, Direction::Up) => Self::StepHold.swipe(direction),
             (Self::StepMenu, Direction::Down) => Self::StepNavigation.swipe(direction),
-            (Self::StepMenu, Direction::Left) => Self::Menu.swipe(direction),
             (Self::StepHold, Direction::Down) => Self::StepMenu.swipe(direction),
-            (Self::Menu, Direction::Left) => Self::DidYouKnow.swipe(direction),
-            (Self::Menu, Direction::Right) => Self::StepMenu.swipe(direction),
-            (Self::DidYouKnow, Direction::Right) => Self::Menu.swipe(direction),
             (Self::HoldToExit, Direction::Down) => Self::StepMenu.swipe(direction),
             (Self::StepDone, Direction::Up) => self.return_msg(FlowMsg::Confirmed),
             _ => self.do_nothing(),
@@ -98,7 +94,7 @@ pub fn new_show_tutorial() -> Result<SwipeFlow, error::Error> {
         ))),
     )
     .with_swipeup_footer(None)
-    .with_swipe(Direction::Down, SwipeSettings::default())
+    .with_swipe(Direction::Down, SwipeSettings::Default)
     .map_to_button_msg();
 
     let content_step_menu = Frame::left_aligned(
@@ -111,7 +107,7 @@ pub fn new_show_tutorial() -> Result<SwipeFlow, error::Error> {
     .with_menu_button()
     .button_styled(theme::button_warning_low())
     .with_swipeup_footer(None)
-    .with_swipe(Direction::Down, SwipeSettings::default())
+    .with_swipe(Direction::Down, SwipeSettings::Default)
     .map_to_button_msg();
 
     let content_step_hold = Frame::left_aligned(
@@ -119,7 +115,7 @@ pub fn new_show_tutorial() -> Result<SwipeFlow, error::Error> {
         SwipeContent::new(PromptScreen::new_hold_to_confirm()),
     )
     .with_footer(TR::instructions__hold_to_exit_tutorial.into(), None)
-    .with_swipe(Direction::Down, SwipeSettings::default())
+    .with_swipe(Direction::Down, SwipeSettings::Default)
     .map(super::util::map_to_confirm);
 
     let content_step_done = Frame::left_aligned(
@@ -137,11 +133,9 @@ pub fn new_show_tutorial() -> Result<SwipeFlow, error::Error> {
         VerticalMenu::empty()
             .item(theme::ICON_CHEVRON_RIGHT, TR::tutorial__did_you_know.into())
             .item(theme::ICON_REBOOT, TR::tutorial__restart_tutorial.into())
-            .danger(theme::ICON_CANCEL, TR::tutorial__exit.into()),
+            .cancel_item(TR::tutorial__exit.into()),
     )
     .with_cancel_button()
-    .with_swipe(Direction::Right, SwipeSettings::immediate())
-    .with_swipe(Direction::Left, SwipeSettings::immediate())
     .map(super::util::map_to_choice);
 
     let content_did_you_know = Frame::left_aligned(
@@ -152,7 +146,6 @@ pub fn new_show_tutorial() -> Result<SwipeFlow, error::Error> {
         ))),
     )
     .with_cancel_button()
-    .with_swipe(Direction::Right, SwipeSettings::immediate())
     .map_to_button_msg();
 
     let content_hold_to_exit = Frame::left_aligned(
@@ -160,7 +153,7 @@ pub fn new_show_tutorial() -> Result<SwipeFlow, error::Error> {
         SwipeContent::new(PromptScreen::new_hold_to_confirm_danger()),
     )
     .with_footer(TR::instructions__hold_to_exit_tutorial.into(), None)
-    .with_swipe(Direction::Down, SwipeSettings::default())
+    .with_swipe(Direction::Down, SwipeSettings::Default)
     .map(super::util::map_to_confirm);
 
     let mut res = SwipeFlow::new(&ShowTutorial::StepWelcome)?;

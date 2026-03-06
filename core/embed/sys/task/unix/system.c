@@ -26,12 +26,19 @@
 #include <sys/systick.h>
 #include <sys/systimer.h>
 
+#ifdef USE_DBG_CONSOLE
+#include <sys/dbg_console.h>
+#endif
+
 systask_error_handler_t g_error_handler = NULL;
 
 void system_init(systask_error_handler_t error_handler) {
   g_error_handler = error_handler;
   systick_init();
   systimer_init();
+#ifdef USE_DBG_CONSOLE
+  dbg_console_init();
+#endif
 }
 
 void system_deinit(void) { systick_deinit(); }
@@ -108,10 +115,10 @@ void system_exit_fatal_ex(const char* message, size_t message_len,
 
     pminfo.reason = TASK_TERM_REASON_FATAL;
 
-    len = MIN(message_len, sizeof(pminfo.fatal.expr) - 1);
+    len = MIN(file_len, sizeof(pminfo.fatal.file) - 1);
     strncpy(pminfo.fatal.file, file, len);
 
-    len = MIN(file_len, sizeof(pminfo.fatal.file) - 1);
+    len = MIN(message_len, sizeof(pminfo.fatal.expr) - 1);
     strncpy(pminfo.fatal.expr, message, len);
 
     pminfo.fatal.line = line;
@@ -139,7 +146,9 @@ const char* system_fault_message(const system_fault_t* fault) {
 
 void system_emergency_rescue(systask_error_handler_t error_handler,
                              const systask_postmortem_t* pminfo) {
-  error_handler(pminfo);
+  if (error_handler != NULL) {
+    error_handler(pminfo);
+  }
 
   // We should never reach this point
   reboot_device();

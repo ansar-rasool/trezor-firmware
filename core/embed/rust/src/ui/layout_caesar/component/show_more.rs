@@ -18,6 +18,8 @@ pub enum CancelInfoConfirmMsg {
 pub struct ShowMore<T> {
     content: Child<T>,
     buttons: Child<ButtonController>,
+    #[cfg(feature = "ui_debug")]
+    has_menu: bool,
 }
 
 impl<T> ShowMore<T>
@@ -37,7 +39,20 @@ where
         Self {
             content: Child::new(content),
             buttons: Child::new(ButtonController::new(btn_layout)),
+            #[cfg(feature = "ui_debug")]
+            has_menu: false,
         }
+    }
+
+    #[cfg(feature = "ui_debug")]
+    pub fn with_menu(mut self, has_menu: bool) -> Self {
+        self.has_menu = has_menu;
+        self
+    }
+
+    #[cfg(not(feature = "ui_debug"))]
+    pub fn with_menu(self, _has_menu: bool) -> Self {
+        self
     }
 }
 
@@ -92,5 +107,6 @@ where
         t.component("ShowMore");
         t.child("buttons", &self.buttons);
         t.child("content", &self.content);
+        t.bool("has_menu", self.has_menu);
     }
 }

@@ -55,7 +55,93 @@ pub fn format_i64(num: i64, buffer: &mut [u8]) -> Option<&str> {
     }
 }
 
+/// Formats a BLE pairing code as a zero-padded string with spaces between
+/// digits. Adds an extra space after the 3rd digit for improved readability.
+/// Example: code=123, width=6 produces "0 0 0   1 2 3"
+pub fn format_pairing_code(code: u32, width: usize) -> ShortString {
+    let mut buf = [0; 20];
+    let code_str = unwrap!(format_i64(code as _, &mut buf));
+
+    let mut formatted_code = ShortString::new();
+    let padding = width.saturating_sub(code_str.len());
+
+    for i in 0..width {
+        let c = if i < padding {
+            '0'
+        } else {
+            unwrap!(code_str.chars().nth(i - padding))
+        };
+        unwrap!(formatted_code.push(c));
+        if i < width - 1 {
+            unwrap!(formatted_code.push(' '));
+            if i == (width / 2 - 1) {
+                // extra space in the middle
+                unwrap!(formatted_code.push(' '));
+            }
+        }
+    }
+
+    formatted_code
+}
+
+/// Selects the correct plural form from a template string based on a count.
+///
+/// The `template` is a `&str` containing 2 or 3 variants separated by `|`:
+/// - 2 forms: "singular|plural" (e.g., `"day|days"`)
+/// - 3 forms: "singular|few|many" (e.g., `"den|dny|dnů"` for Czech)
+///
+/// # Arguments
+/// * `template` - A pipe-separated string with plural forms.
+/// * `count` - The numeric count to select the correct plural form.
+///
+/// # Returns
+/// A `ShortString` containing the correct plural form, or an empty
+/// `ShortString` if the template is malformed or conversion fails.
+pub fn plural_form(template: &str, count: u32) -> ShortString {
+    // If no separator found, return the whole template (fallback behavior)
+    if !template.contains('|') {
+        return ShortString::try_from(template).unwrap_or_default();
+    }
+
+    // Split the template by '|' into components
+    let mut parts = template.split('|');
+
+    // Get the required first two parts
+    let (first, second) = match (parts.next(), parts.next()) {
+        (Some(first), Some(second)) => (first, second),
+        _ => return ShortString::default(),
+    };
+    // Third form (many), optional
+    let third = parts.next();
+
+    // Choose appropriate form based on `count`
+    let selected = match third {
+        Some(many) => {
+            // Czech-style: 1 → singular, 2–4 → few, 0 or ≥5 → many
+            if count == 1 {
+                first
+            } else if (2..=4).contains(&count) {
+                second
+            } else {
+                many
+            }
+        }
+        None => {
+            // Simple fallback: 1 → singular, all others → plural
+            if count == 1 {
+                first
+            } else {
+                second
+            }
+        }
+    };
+
+    // Convert safely, returning empty string on failure
+    ShortString::try_from(selected).unwrap_or_default()
+}
+
 #[derive(Copy, Clone)]
+#[cfg_attr(test, derive(Debug))]
 pub enum TString<'a> {
     #[cfg(feature = "micropython")]
     Allocated(StrBuffer),
@@ -220,5 +306,52 @@ impl ufmt::uDebug for TString<'_> {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn test_format_code() {
+        use super::format_pairing_code;
+        let width = 6;
+        // Test normal cases with different digit counts
+        assert_eq!(format_pairing_code(123, width).as_str(), "0 0 0  1 2 3");
+        assert_eq!(format_pairing_code(7, width).as_str(), "0 0 0  0 0 7");
+        assert_eq!(format_pairing_code(123456, width).as_str(), "1 2 3  4 5 6");
+
+        // Test boundary cases
+        assert_eq!(format_pairing_code(0, width).as_str(), "0 0 0  0 0 0");
+        assert_eq!(format_pairing_code(999999, width).as_str(), "9 9 9  9 9 9");
+
+        // Test with values having exactly 6 digits
+        assert_eq!(format_pairing_code(100000, width).as_str(), "1 0 0  0 0 0");
+
+        // Verify behavior with sequential values around boundaries
+        assert_eq!(format_pairing_code(9999, width).as_str(), "0 0 9  9 9 9");
+        assert_eq!(format_pairing_code(10000, width).as_str(), "0 1 0  0 0 0");
+        assert_eq!(format_pairing_code(99999, width).as_str(), "0 9 9  9 9 9");
+
+        // Test different even width (width=4, middle after position 1)
+        let width = 4;
+        assert_eq!(format_pairing_code(1, width).as_str(), "0 0  0 1");
+        assert_eq!(format_pairing_code(12, width).as_str(), "0 0  1 2");
+        assert_eq!(format_pairing_code(123, width).as_str(), "0 1  2 3");
+        assert_eq!(format_pairing_code(1234, width).as_str(), "1 2  3 4");
+    }
+
+    #[test]
+    fn test_plural_form() {
+        use super::plural_form;
+        // malformed templete, returns empty string
+        assert_eq!(plural_form("day", 1).as_str(), "day");
+        // simple singular/plural
+        assert_eq!(plural_form("day|days", 1).as_str(), "day");
+        assert_eq!(plural_form("day|days", 3).as_str(), "days");
+        // Czech-style singular/few/many
+        assert_eq!(plural_form("den|dny|dní", 1).as_str(), "den");
+        assert_eq!(plural_form("den|dny|dní", 3).as_str(), "dny");
+        assert_eq!(plural_form("den|dny|dní", 5).as_str(), "dní");
     }
 }

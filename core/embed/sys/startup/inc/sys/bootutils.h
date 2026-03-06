@@ -17,13 +17,23 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef TREZORHAL_BOOTUTILS_H
-#define TREZORHAL_BOOTUTILS_H
+#pragma once
 
-#include <trezor_types.h>
+#include <sys/systask.h>
 
-// Immediately resets the device and initiates the normal boot sequence.
+// Wipe information structure
+typedef struct {
+  char title[64];
+  char message[64];
+  char footer[64];
+} bootutils_wipe_info_t;
+
+// Immediately resets the device and initiates the normal boot sequence as if
+// the device was powered on
 void __attribute__((noreturn)) reboot_device(void);
+
+// Immediately resets the device
+void __attribute__((noreturn)) reboot_to_off(void);
 
 // Resets the device and enters the bootloader,
 // halting there and waiting for further user instructions.
@@ -38,6 +48,18 @@ void __attribute__((noreturn)) reboot_to_bootloader(void);
 // with the firmware installation.
 void __attribute__((noreturn)) reboot_and_upgrade(const uint8_t hash[32]);
 
+#ifdef USE_BOOTARGS_RSOD
+// Resets the device with post-mortem information in bootargs
+// so that the bootloader can display it.
+void __attribute__((noreturn))
+reboot_with_rsod(const systask_postmortem_t *pminfo);
+#endif
+
+// Resets the device and wipes all the user data.
+// RSOD with wipe information is displayed.
+void __attribute__((noreturn))
+reboot_and_wipe(const bootutils_wipe_info_t *info);
+
 // Allows the user to read the displayed error message and then
 // reboots the device or waits for power-off.
 //
@@ -47,11 +69,13 @@ void __attribute__((noreturn)) reboot_and_upgrade(const uint8_t hash[32]);
 //    specified duration and then resets the device.
 void __attribute__((noreturn)) reboot_or_halt_after_rsod(void);
 
+// Platform dependent alignment for vector table addresses
+#define IMAGE_CODE_ALIGN(addr) \
+  ((((uint32_t)(uintptr_t)addr) + (CODE_ALIGNMENT - 1)) & ~(CODE_ALIGNMENT - 1))
+
 // Jumps to the next booting stage (e.g. bootloader to firmware).
 // `vectbl_address` points to the flash at the vector table of the next stage.
 //
 // Before jumping, the function disables all interrupts and clears the
 // memory and registers that could contain sensitive information.
 void __attribute__((noreturn)) jump_to_next_stage(uint32_t vectbl_address);
-
-#endif  // TREZORHAL_BOOTUTILS_H

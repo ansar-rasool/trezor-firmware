@@ -32,6 +32,10 @@
 #include <io/button.h>
 #endif
 
+#ifdef USE_POWER_MANAGER
+#include <sys/power_manager.h>
+#endif
+
 #include "embed/upymod/trezorobj.h"
 
 #define POLL_READ (0x0000)
@@ -49,14 +53,14 @@ static mp_obj_t parse_ble_event_data(const ble_event_t *event) {
     return mp_const_none;
   }
   // Parse pairing code
-  _Static_assert(sizeof(event->data) <= 6);
+  _Static_assert(sizeof(event->data) <= 6, "pairing code is too long");
   uint32_t code = 0;
   for (int i = 0; i < event->data_len; ++i) {
     uint8_t byte = event->data[i];
     if (byte >= '0' && byte <= '9') {
       code = 10 * code + (byte - '0');
     } else {
-      mp_raise_ValueError("Invalid pairing code");
+      mp_raise_ValueError(MP_ERROR_TEXT("Invalid pairing code"));
     }
   }
   return mp_obj_new_int_from_uint(code);
@@ -85,7 +89,7 @@ STATIC mp_obj_t mod_trezorio_poll(mp_obj_t ifaces, mp_obj_t list_ref,
                                   mp_obj_t timeout_ms) {
   mp_obj_list_t *ret = MP_OBJ_TO_PTR(list_ref);
   if (!MP_OBJ_IS_TYPE(list_ref, &mp_type_list) || ret->len < 2) {
-    mp_raise_TypeError("invalid list_ref");
+    mp_raise_TypeError(MP_ERROR_TEXT("invalid list_ref"));
   }
 
   sysevents_t awaited = {0};
@@ -214,6 +218,17 @@ STATIC mp_obj_t mod_trezorio_poll(mp_obj_t ifaces, mp_obj_t list_ref,
     }
 #endif
 
+#ifdef USE_POWER_MANAGER
+    if (signalled.read_ready & (1 << SYSHANDLE_POWER_MANAGER)) {
+      pm_event_t pm_event = {0};
+      if (pm_get_events(&pm_event)) {
+        ret->items[0] = MP_OBJ_NEW_SMALL_INT(SYSHANDLE_POWER_MANAGER);
+        ret->items[1] = mp_obj_new_int_from_uint(pm_event.all);
+        return mp_const_true;
+      }
+    }
+#endif
+
     if (signalled.read_ready & (1 << SYSHANDLE_USB)) {
       usb_event_t event = usb_get_event();
       ret->items[0] = MP_OBJ_NEW_SMALL_INT(SYSHANDLE_USB);
@@ -221,7 +236,7 @@ STATIC mp_obj_t mod_trezorio_poll(mp_obj_t ifaces, mp_obj_t list_ref,
       return mp_const_true;
     }
 
-    for (syshandle_t h = SYSHANDLE_USB_IFACE_0; h <= SYSHANDLE_USB_IFACE_7;
+    for (syshandle_t h = SYSHANDLE_USB_IFACE_MIN; h <= SYSHANDLE_USB_IFACE_MAX;
          h++) {
       if (signalled.read_ready & (1 << h)) {
         ret->items[0] = MP_OBJ_NEW_SMALL_INT(h);

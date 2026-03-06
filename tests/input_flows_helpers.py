@@ -99,7 +99,7 @@ class RecoveryFlow:
 
     def enter_your_backup(self) -> BRGeneratorType:
         assert (yield).name == "recovery"
-        if self.debug.layout_type is LayoutType.Delizia:
+        if self.debug.layout_type in (LayoutType.Delizia, LayoutType.Eckhart):
             assert TR.recovery__enter_each_word in self._text_content()
         else:
             assert TR.recovery__enter_backup in self._text_content()
@@ -131,7 +131,16 @@ class RecoveryFlow:
 
     def abort_recovery(self, confirm: bool) -> BRGeneratorType:
         yield
-        if self.client.layout_type is LayoutType.Caesar:
+        if self.client.layout_type is LayoutType.Bolt:
+            assert TR.recovery__enter_any_share in self._text_content()
+            self.debug.press_no()
+            yield
+            assert TR.recovery__wanna_cancel_recovery in self._text_content()
+            if confirm:
+                self.debug.press_yes()
+            else:
+                self.debug.press_no()
+        elif self.client.layout_type is LayoutType.Caesar:
             assert TR.recovery__num_of_words in self._text_content()
             self.debug.press_no()
             yield
@@ -141,27 +150,28 @@ class RecoveryFlow:
                 self.debug.press_yes()
             else:
                 self.debug.press_no()
-        elif self.client.layout_type is LayoutType.Delizia:
+        elif self.client.layout_type in (LayoutType.Delizia, LayoutType.Eckhart):
             assert TR.recovery__enter_each_word in self._text_content()
             self.debug.click(self.debug.screen_buttons.menu())
             self.debug.synchronize_at("VerticalMenu")
             if confirm:
-                self.debug.click(self.debug.screen_buttons.vertical_menu_items()[0])
+                self.debug.button_actions.navigate_to_menu_item(0)
             else:
                 self.debug.click(self.debug.screen_buttons.menu())
         else:
-            assert TR.recovery__enter_any_share in self._text_content()
-            self.debug.press_no()
-            yield
-            assert TR.recovery__wanna_cancel_recovery in self._text_content()
-            if confirm:
-                self.debug.press_yes()
-            else:
-                self.debug.press_no()
+            raise ValueError("Unknown model!")
 
     def abort_recovery_between_shares(self) -> BRGeneratorType:
         yield
-        if self.client.layout_type is LayoutType.Caesar:
+        if self.client.layout_type is LayoutType.Bolt:
+            assert TR.regexp("recovery__x_of_y_entered_template").search(
+                self._text_content()
+            )
+            self.debug.press_no()
+            assert (yield).name == "abort_recovery"
+            assert TR.recovery__wanna_cancel_recovery in self._text_content()
+            self.debug.press_yes()
+        elif self.client.layout_type is LayoutType.Caesar:
             assert TR.regexp("recovery__x_of_y_entered_template").search(
                 self._text_content()
             )
@@ -176,20 +186,61 @@ class RecoveryFlow:
             )
             self.debug.click(self.debug.screen_buttons.menu())
             self.debug.synchronize_at("VerticalMenu")
-            self.debug.click(self.debug.screen_buttons.vertical_menu_items()[0])
+            self.debug.button_actions.navigate_to_menu_item(0)
             assert (yield).name == "abort_recovery"
             self.debug.swipe_up()
             layout = self.debug.read_layout()
             assert layout.title() == TR.recovery__title_cancel_recovery
             self.debug.click(self.debug.screen_buttons.tap_to_confirm())
-        else:
+        elif self.client.layout_type is LayoutType.Eckhart:
             assert TR.regexp("recovery__x_of_y_entered_template").search(
                 self._text_content()
             )
-            self.debug.press_no()
+            self.debug.click(self.debug.screen_buttons.menu())
+            self.debug.synchronize_at("VerticalMenu")
+            self.debug.button_actions.navigate_to_menu_item(1)
             assert (yield).name == "abort_recovery"
-            assert TR.recovery__wanna_cancel_recovery in self._text_content()
-            self.debug.press_yes()
+            layout = self.debug.read_layout()
+            assert layout.title() == TR.recovery__title
+            self.debug.click(self.debug.screen_buttons.ok())
+        else:
+            raise ValueError("Unknown model!")
+
+    def go_back_from_mnemonic_first_word(self) -> BRGeneratorType:
+        yield
+        if self.client.layout_type is LayoutType.Eckhart:
+            # Go back from the first word input screen
+            assert "MnemonicKeyboard" in self.debug.read_layout().all_components()
+            self.debug.click(self.debug.screen_buttons.mnemonic_erase())
+        else:
+            raise ValueError("Unknown model!")
+
+    def abort_recovery_select_number_of_words(self) -> BRGeneratorType:
+        yield
+        if self.client.layout_type is LayoutType.Eckhart:
+            # Cancel the word count screen
+            assert "SelectWordCountScreen" in self.debug.read_layout().all_components()
+            self.debug.click(self.debug.screen_buttons.word_count_all_cancel())
+
+        else:
+            raise ValueError("Unknown model!")
+
+    def share_info_between_shares(self) -> BRGeneratorType:
+        yield
+        if self.client.layout_type is LayoutType.Eckhart:
+            assert TR.regexp("recovery__x_of_y_entered_template").search(
+                self._text_content()
+            )
+            self.debug.click(self.debug.screen_buttons.menu())
+            self.debug.synchronize_at("VerticalMenu")
+            self.debug.button_actions.navigate_to_menu_item(0)
+            assert (yield).name == "recovery_share"
+            layout = self.debug.read_layout()
+            assert layout.title() == TR.words__recovery_share
+            self.debug.click(self.debug.screen_buttons.menu())
+            self.debug.click(self.debug.screen_buttons.menu())
+        else:
+            raise ValueError("Unsupported model!")
 
     def input_number_of_words(self, num_words: int | None) -> BRGeneratorType:
         br = yield
@@ -239,7 +290,12 @@ class RecoveryFlow:
 
     def success_share_group_entered(self) -> BRGeneratorType:
         assert (yield).name == "share_success"
-        assert TR.recovery__you_have_entered in self._text_content()
+        if self.client.layout_type is LayoutType.Eckhart:
+            assert TR.regexp("recovery__share_from_group_entered_template").search(
+                self._text_content()
+            )
+        else:
+            assert TR.recovery__you_have_entered in self._text_content()
         self.debug.press_yes()
 
     def success_wallet_recovered(self) -> BRGeneratorType:
@@ -325,10 +381,11 @@ class RecoveryFlow:
                 if click_info:
                     if self.client.layout_type is LayoutType.Bolt:
                         yield from self.click_info_bolt()
-                    elif self.client.layout_type is LayoutType.Delizia:
-                        yield from self.click_info_delizia()
-                    else:
-                        raise ValueError("Unknown model!")
+                    elif self.client.layout_type in (
+                        LayoutType.Delizia,
+                        LayoutType.Eckhart,
+                    ):
+                        yield from self.click_info_delizia_eckhart()
                     yield from self.success_more_shares_needed()
 
     def click_info_bolt(self) -> t.Generator[t.Any, t.Any, None]:
@@ -339,19 +396,23 @@ class RecoveryFlow:
             self.debug.swipe_up()
         self.debug.press_yes()
 
-    def click_info_delizia(self) -> BRGeneratorType:
+    def click_info_delizia_eckhart(self) -> BRGeneratorType:
         # Moving through the menu into the show_shares screen
         self.debug.click(self.debug.screen_buttons.menu())
         self.debug.synchronize_at("VerticalMenu")
-        self.debug.click(self.debug.screen_buttons.vertical_menu_items()[0])
+        self.debug.button_actions.navigate_to_menu_item(0)
         br = yield
+        assert br.name == "show_shares"
+        assert br.code == B.Other
         # Scroll through remaining share pages
         assert br.pages is not None
         for _ in range(br.pages - 1):
-            self.debug.swipe_up()
+            if self.client.layout_type is LayoutType.Delizia:
+                self.debug.swipe_up()
+                assert br == (yield)
+            elif self.client.layout_type is LayoutType.Eckhart:
+                self.debug.click(self.debug.screen_buttons.ok())
 
-        assert br.name == "show_shares"
-        assert br.code == B.Other
         # Getting back to the homepage
         self.debug.click(self.debug.screen_buttons.menu())
         self.debug.click(self.debug.screen_buttons.menu())
@@ -366,7 +427,12 @@ class EthereumFlow:
 
     def confirm_data(self, info: bool = False, cancel: bool = False) -> BRGeneratorType:
         assert (yield).name == "confirm_data"
-        assert TR.ethereum__title_input_data in self.debug.read_layout().title()
+        if self.client.layout_type is LayoutType.Eckhart:
+            TR.regexp("ethereum__title_all_input_data_template").fullmatch(
+                self.debug.read_layout().title().strip()
+            )
+        else:
+            assert TR.ethereum__title_input_data in self.debug.read_layout().title()
         if info:
             self.debug.press_info()
         elif cancel:
@@ -378,7 +444,12 @@ class EthereumFlow:
         br = yield
         assert br.name == "confirm_data"
         assert br.pages is not None
-        assert TR.ethereum__title_input_data in self.debug.read_layout().title()
+        if self.client.layout_type is LayoutType.Eckhart:
+            TR.regexp("ethereum__title_all_input_data_template").fullmatch(
+                self.debug.read_layout().title().strip()
+            )
+        else:
+            assert TR.ethereum__title_input_data in self.debug.read_layout().title()
         for _ in range(br.pages - 1):
             self.debug.read_layout()
             go_next(self.debug)
@@ -389,13 +460,21 @@ class EthereumFlow:
         elif self.client.layout_type is LayoutType.Delizia:
             self.debug.read_layout()
             self.debug.click(self.debug.screen_buttons.tap_to_confirm())
+        elif self.client.layout_type is LayoutType.Eckhart:
+            self.debug.read_layout()
+            self.debug.click(self.debug.screen_buttons.ok())
 
     def paginate_data_go_back(self) -> BRGeneratorType:
         br = yield
         assert br.name == "confirm_data"
         assert br.pages is not None
         assert br.pages > 2
-        assert TR.ethereum__title_input_data in self.debug.read_layout().title()
+        if self.client.layout_type is LayoutType.Eckhart:
+            TR.regexp("ethereum__title_all_input_data_template").fullmatch(
+                self.debug.read_layout().title().strip()
+            )
+        else:
+            assert TR.ethereum__title_input_data in self.debug.read_layout().title()
         if self.client.layout_type is LayoutType.Bolt:
             self.debug.swipe_up()
             self.debug.swipe_up()
@@ -412,6 +491,13 @@ class EthereumFlow:
                 self.debug.swipe_up()
             # Close the menu wuth the cross button
             self.debug.click(self.debug.screen_buttons.menu())
+        elif self.client.layout_type is LayoutType.Eckhart:
+            # Scroll to the last page
+            for _ in range(br.pages - 1):
+                self.debug.click(self.debug.screen_buttons.ok())
+            # Go back to the first page and then cancel
+            for _ in range(br.pages):
+                self.debug.click(self.debug.screen_buttons.cancel())
         else:
             raise ValueError(f"Unknown layout: {self.client.layout_type}")
 
@@ -507,7 +593,7 @@ class EthereumFlow:
         if info:
             self.debug.click(self.debug.screen_buttons.menu())
             self.debug.synchronize_at("VerticalMenu")
-            self.debug.click(self.debug.screen_buttons.vertical_menu_items()[0])
+            self.debug.button_actions.navigate_to_menu_item(0)
             text = self.debug.read_layout().text_content()
             assert TR.ethereum__gas_limit in text
             assert TR.ethereum__gas_price in text
@@ -516,6 +602,54 @@ class EthereumFlow:
         self.debug.swipe_up()
         self.debug.read_layout()
         self.debug.click(self.debug.screen_buttons.tap_to_confirm())
+        assert (yield).name == "confirm_ethereum_tx"
+
+    def _confirm_tx_eckhart(
+        self, cancel: bool, info: bool, go_back_from_summary: bool
+    ) -> BRGeneratorType:
+
+        assert (yield).name == "confirm_output"
+        title_exp = (
+            TR.words__send
+            if self.client.layout_type is LayoutType.Eckhart
+            else TR.words__address
+        )
+        assert title_exp in self.debug.read_layout().title()
+        if cancel:
+            self.debug.press_no()
+            return
+
+        self.debug.click(self.debug.screen_buttons.ok())
+        assert (yield).name == "confirm_total"
+        layout = self.debug.read_layout()
+        title_exp = (
+            TR.words__send
+            if self.client.layout_type is LayoutType.Eckhart
+            else TR.words__title_summary
+        )
+        assert layout.title() == title_exp
+        assert TR.send__maximum_fee in layout.text_content()
+        if go_back_from_summary:
+            # Get back to the address screen
+            self.debug.click(self.debug.screen_buttons.cancel())
+            title = self.debug.read_layout().title()
+            assert title_exp in title
+            # Get back to the summary screen
+            self.debug.click(self.debug.screen_buttons.ok())
+            layout = self.debug.read_layout()
+            assert layout.title() == title_exp
+            assert TR.send__maximum_fee in layout.text_content()
+        if info:
+            self.debug.click(self.debug.screen_buttons.menu())
+            self.debug.synchronize_at("VerticalMenu")
+            self.debug.button_actions.navigate_to_menu_item(0)
+            text = self.debug.read_layout().text_content()
+            assert TR.ethereum__gas_limit in text
+            assert TR.ethereum__gas_price in text
+            self.debug.click(self.debug.screen_buttons.menu())
+            self.debug.click(self.debug.screen_buttons.menu())
+        self.debug.click(self.debug.screen_buttons.ok())
+        self.debug.read_layout()
         assert (yield).name == "confirm_ethereum_tx"
 
     def confirm_tx(
@@ -530,6 +664,8 @@ class EthereumFlow:
             yield from self._confirm_tx_caesar(cancel, info, go_back_from_summary)
         elif self.client.layout_type is LayoutType.Delizia:
             yield from self._confirm_tx_delizia(cancel, info, go_back_from_summary)
+        elif self.client.layout_type is LayoutType.Eckhart:
+            yield from self._confirm_tx_eckhart(cancel, info, go_back_from_summary)
         else:
             raise ValueError("Unknown model!")
 
@@ -575,12 +711,39 @@ class EthereumFlow:
 
             self.debug.press_yes()
 
+        elif self.client.layout_type is LayoutType.Caesar:
+            # confirm intro
+            if info:
+                self.debug.press_right()  # enter menu
+                self.debug.press_middle()  # choose item
+                assert self.debug.read_layout().title() in (
+                    TR.ethereum__staking_stake_address,
+                    TR.ethereum__staking_claim_address,
+                )
+                self.debug.press_left()  # back to menu
+                self.debug.press_left()  # close menu
+            self.debug.press_middle()
+            yield
+
+            # confirm summary
+            if info:
+                self.debug.press_right()
+                assert TR.ethereum__gas_limit in self.debug.read_layout().text_content()
+                self.debug.press_right()
+                assert TR.ethereum__gas_price in self.debug.read_layout().text_content()
+                self.debug.press_left()
+                self.debug.press_left()
+            self.debug.press_middle()
+            yield
+
+            self.debug.press_yes()
+
         elif self.client.layout_type is LayoutType.Delizia:
             # confirm intro
             if info:
                 self.debug.click(self.debug.screen_buttons.menu())
                 self.debug.synchronize_at("VerticalMenu")
-                self.debug.click(self.debug.screen_buttons.vertical_menu_items()[0])
+                self.debug.button_actions.navigate_to_menu_item(0)
                 assert self.debug.read_layout().title() in (
                     TR.ethereum__staking_stake_address,
                     TR.ethereum__staking_claim_address,
@@ -597,7 +760,7 @@ class EthereumFlow:
             if info:
                 self.debug.click(self.debug.screen_buttons.menu())
                 self.debug.synchronize_at("VerticalMenu")
-                self.debug.click(self.debug.screen_buttons.vertical_menu_items()[0])
+                self.debug.button_actions.navigate_to_menu_item(0)
                 assert TR.ethereum__gas_limit in self.debug.read_layout().text_content()
                 assert TR.ethereum__gas_price in self.debug.read_layout().text_content()
                 self.debug.click(self.debug.screen_buttons.menu())
@@ -607,28 +770,33 @@ class EthereumFlow:
 
             self.debug.press_yes()
 
-        elif self.client.layout_type is LayoutType.Caesar:
+        elif self.client.layout_type is LayoutType.Eckhart:
             # confirm intro
             if info:
-                self.debug.press_right()
+                self.debug.click(self.debug.screen_buttons.menu())
+                self.debug.synchronize_at("VerticalMenu")
+                self.debug.button_actions.navigate_to_menu_item(0)
                 assert self.debug.read_layout().title() in (
                     TR.ethereum__staking_stake_address,
                     TR.ethereum__staking_claim_address,
                 )
-                self.debug.press_left()
-            self.debug.press_middle()
-            yield
+                self.debug.click(self.debug.screen_buttons.menu())
+                self.debug.click(self.debug.screen_buttons.menu())
+
+            self.debug.click(self.debug.screen_buttons.ok())
+            br = yield
+            assert br.code == B.SignTx
+            assert br.name == "confirm_total"
 
             # confirm summary
             if info:
-                self.debug.press_right()
+                self.debug.click(self.debug.screen_buttons.menu())
+                self.debug.synchronize_at("VerticalMenu")
+                self.debug.button_actions.navigate_to_menu_item(0)
                 assert TR.ethereum__gas_limit in self.debug.read_layout().text_content()
-                self.debug.press_right()
                 assert TR.ethereum__gas_price in self.debug.read_layout().text_content()
-                self.debug.press_left()
-                self.debug.press_left()
-            self.debug.press_middle()
-            yield
+                self.debug.click(self.debug.screen_buttons.menu())
+                self.debug.click(self.debug.screen_buttons.menu())
 
             self.debug.press_yes()
 

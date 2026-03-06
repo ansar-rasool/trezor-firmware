@@ -2,7 +2,7 @@
 
 # This file is part of the Trezor project.
 #
-# Copyright (C) 2012-2022 SatoshiLabs and contributors
+# Copyright (C) SatoshiLabs and contributors
 #
 # This library is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License version 3
@@ -16,6 +16,7 @@
 # You should have received a copy of the License along with this library.
 # If not, see <https://www.gnu.org/licenses/lgpl-3.0.html>.
 
+import importlib.metadata
 import json
 import logging
 import os
@@ -24,15 +25,14 @@ from typing import TYPE_CHECKING, Any, Callable, Iterable, Optional, TypeVar, ca
 
 import click
 
-from .. import __version__, log, messages, protobuf, ui
-from ..client import TrezorClient
+from .. import log, messages, protobuf
 from ..transport import DeviceIsBusy, enumerate_devices
+from ..transport.session import Session
 from ..transport.udp import UdpTransport
 from . import (
     AliasedGroup,
     TrezorConnection,
     benchmark,
-    binance,
     ble,
     btc,
     cardano,
@@ -41,6 +41,7 @@ from . import (
     device,
     eos,
     ethereum,
+    evolu,
     fido,
     firmware,
     monero,
@@ -51,7 +52,8 @@ from . import (
     solana,
     stellar,
     tezos,
-    with_client,
+    tron,
+    with_session,
 )
 
 F = TypeVar("F", bound=Callable)
@@ -76,7 +78,6 @@ COMMAND_ALIASES = {
     "encrypt-keyvalue": crypto.encrypt_keyvalue,
     "decrypt-keyvalue": crypto.decrypt_keyvalue,
     # currency name aliases:
-    "bnb": binance.cli,
     "eth": ethereum.cli,
     "ada": cardano.cli,
     "sol": solana.cli,
@@ -84,6 +85,7 @@ COMMAND_ALIASES = {
     "xrp": ripple.cli,
     "xlm": stellar.cli,
     "xtz": tezos.cli,
+    "trx": tron.cli,
     # firmware aliases:
     "fw": firmware.cli,
     "update-firmware": firmware.update,
@@ -97,10 +99,10 @@ class TrezorctlGroup(AliasedGroup):
     """Command group that handles compatibility for trezorctl.
 
     With trezorctl 0.11.5, we started to convert old-style long commands
-    (such as "binance-sign-tx") to command groups ("binance") with subcommands
+    (such as "ethereum-sign-tx") to command groups ("ethereum") with subcommands
     ("sign-tx"). The `TrezorctlGroup` can perform subcommand lookup: if a command
-    "binance-sign-tx" does not exist in the default group, it tries to find "sign-tx"
-    subcommand of "binance" group.
+    "ethereum-sign-tx" does not exist in the default group, it tries to find "sign-tx"
+    subcommand of "ethereum" group.
     """
 
     def get_command(self, ctx: click.Context, cmd_name: str) -> Optional[click.Command]:
@@ -115,8 +117,8 @@ class TrezorctlGroup(AliasedGroup):
         if cmd:
             return cmd
 
-        # Old-style top-level commands looked like this: binance-sign-tx.
-        # We are moving to 'binance' command with 'sign-tx' subcommand.
+        # Old-style top-level commands looked like this: ethereum-sign-tx.
+        # We are moving to 'ethereum' command with 'sign-tx' subcommand.
         try:
             command, subcommand = cmd_name.split("-", maxsplit=1)
             # get_command can return None and the following line will fail.
@@ -142,7 +144,7 @@ class TrezorctlGroup(AliasedGroup):
         # This means that there is no reasonable way to use `hasattr` to detect where we
         # are, unless we want to look at the private `_result_callback` attribute.
         # Instead, we look at Click version and hope for the best.
-        from click import __version__ as click_version
+        click_version = importlib.metadata.version("click")
 
         if click_version.startswith("7."):
             return super().resultcallback()  # type: ignore [Cannot access attribute]
@@ -166,6 +168,13 @@ def configure_logging(verbose: int) -> None:
     "--path",
     help="Select device by specific path.",
     default=os.environ.get("TREZOR_PATH"),
+)
+@click.option(
+    "-B",
+    "--ble/--no-ble",
+    help="Enable/disable support for Bluetooth Low Energy.",
+    is_flag=True,
+    default=(os.environ.get("TREZOR_BLE") == "1"),
 )
 @click.option("-v", "--verbose", count=True, help="Show communication messages.")
 @click.option(
@@ -195,11 +204,12 @@ def configure_logging(verbose: int) -> None:
     "--record",
     help="Record screen changes into a specified directory.",
 )
-@click.version_option(version=__version__)
+@click.version_option(package_name="trezor")
 @click.pass_context
 def cli_main(
     ctx: click.Context,
     path: str,
+    ble: bool,
     verbose: int,
     is_json: bool,
     passphrase_on_host: bool,
@@ -216,7 +226,9 @@ def cli_main(
         except ValueError:
             raise click.ClickException(f"Not a valid session id: {session_id}")
 
-    ctx.obj = TrezorConnection(path, bytes_session_id, passphrase_on_host, script)
+    ctx.obj = TrezorConnection(
+        path, bytes_session_id, passphrase_on_host, script, ble_enabled=ble
+    )
 
     # Optionally record the screen into a specified directory.
     if record:
@@ -284,28 +296,37 @@ def format_device_name(features: messages.Features) -> str:
 
 @cli.command(name="list")
 @click.option("-n", "no_resolve", is_flag=True, help="Do not resolve Trezor names")
-def list_devices(no_resolve: bool) -> Optional[Iterable["Transport"]]:
+@click.pass_obj
+def list_devices(
+    obj: TrezorConnection, no_resolve: bool
+) -> Optional[Iterable["Transport"]]:
     """List connected Trezor devices."""
     if no_resolve:
-        return enumerate_devices()
+        for d in enumerate_devices(ble_enabled=obj.ble_enabled):
+            click.echo(d.get_path())
+        return
 
-    for transport in enumerate_devices():
+    from . import get_client
+
+    for transport in enumerate_devices(ble_enabled=obj.ble_enabled):
         try:
-            client = TrezorClient(transport, ui=ui.ClickUI())
+            transport.open()
+            client = get_client(transport)
             description = format_device_name(client.features)
-            client.end_session()
         except DeviceIsBusy:
             description = "Device is in use by another process"
-        except Exception:
-            description = "Failed to read details"
-        click.echo(f"{transport} - {description}")
+        except Exception as e:
+            description = "Failed to read details " + str(type(e))
+        finally:
+            transport.close()
+        click.echo(f"{transport.get_path()} - {description}")
     return None
 
 
 @cli.command()
 def version() -> str:
     """Show version of trezorctl/trezorlib."""
-    return __version__
+    return importlib.metadata.version("trezor")
 
 
 #
@@ -316,23 +337,21 @@ def version() -> str:
 @cli.command()
 @click.argument("message")
 @click.option("-b", "--button-protection", is_flag=True)
-@with_client
-def ping(client: "TrezorClient", message: str, button_protection: bool) -> str:
+@with_session(seedless=True)
+def ping(session: "Session", message: str, button_protection: bool) -> str:
     """Send ping message."""
-    return client.ping(message, button_protection=button_protection)
+    return session.ping(message, button_protection)
 
 
 @cli.command()
 @click.pass_obj
-def get_session(obj: TrezorConnection) -> str:
+@click.option("-c", "derive_cardano", is_flag=True, help="Derive Cardano session.")
+def get_session(obj: TrezorConnection, derive_cardano: bool = False) -> str:
     """Get a session ID for subsequent commands.
 
     Unlocks Trezor with a passphrase and returns a session ID. Use this session ID with
     `trezorctl -s SESSION_ID`, or set it to an environment variable `TREZOR_SESSION_ID`,
     to avoid having to enter passphrase for subsequent commands.
-
-    The session ID is valid until another client starts using Trezor, until the next
-    get-session call, or until Trezor is disconnected.
     """
     # make sure session is not resumed
     obj.session_id = None
@@ -343,25 +362,26 @@ def get_session(obj: TrezorConnection) -> str:
                 "Upgrade your firmware to enable session support."
             )
 
-        client.ensure_unlocked()
-        if client.session_id is None:
+        session = client.get_session(derive_cardano=derive_cardano)
+        if session.id is None:
             raise click.ClickException("Passphrase not enabled or firmware too old.")
         else:
-            return client.session_id.hex()
+            return session.id.hex()
 
 
 @cli.command()
-@with_client
-def clear_session(client: "TrezorClient") -> None:
+@with_session(must_resume=True, empty_passphrase=True)
+def clear_session(session: "Session") -> None:
     """Clear session (remove cached PIN, passphrase, etc.)."""
-    return client.clear_session()
+    session.call(messages.LockDevice())
+    session.end()
 
 
 @cli.command()
-@with_client
-def get_features(client: "TrezorClient") -> messages.Features:
+@with_session(seedless=True)
+def get_features(session: "Session") -> messages.Features:
     """Retrieve device features and settings."""
-    return client.features
+    return session.features
 
 
 @cli.command()
@@ -401,13 +421,13 @@ def wait_for_emulator(obj: TrezorConnection, timeout: float) -> None:
 # Basic coin functions
 #
 
-cli.add_command(binance.cli)
 cli.add_command(btc.cli)
 cli.add_command(cardano.cli)
 cli.add_command(crypto.cli)
 cli.add_command(device.cli)
 cli.add_command(eos.cli)
 cli.add_command(ethereum.cli)
+cli.add_command(evolu.cli)
 cli.add_command(fido.cli)
 cli.add_command(monero.cli)
 cli.add_command(nem.cli)
@@ -417,6 +437,7 @@ cli.add_command(settings.cli)
 cli.add_command(solana.cli)
 cli.add_command(stellar.cli)
 cli.add_command(tezos.cli)
+cli.add_command(tron.cli)
 
 cli.add_command(firmware.cli)
 cli.add_command(debug.cli)

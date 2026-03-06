@@ -21,12 +21,15 @@
 
 #include "sd_update.h"
 
+#ifdef USE_BOOT_UCB
+#error "SD card update is not compatible with boot UCB"
+#endif
+
 // we use SRAM as SD card read buffer (because DMA can't access the CCMRAM)
 __attribute__((section(".buf")))
 uint32_t sdcard_buf[BOOTLOADER_MAXSIZE / sizeof(uint32_t)];
 
-static uint32_t check_sdcard(const uint8_t *const *keys, uint8_t key_m,
-                             uint8_t key_n) {
+static uint32_t check_sdcard(void) {
   if (sectrue != sdcard_power_on()) {
     return 0;
   }
@@ -57,7 +60,7 @@ static uint32_t check_sdcard(const uint8_t *const *keys, uint8_t key_m,
       return 0;
     }
 
-    if (sectrue != check_image_header_sig(hdr, key_m, key_n, keys)) {
+    if (sectrue != check_bootloader_header_sig(hdr)) {
       return 0;
     }
 
@@ -89,44 +92,45 @@ static uint32_t check_sdcard(const uint8_t *const *keys, uint8_t key_m,
   return 0;
 }
 
-static void progress_callback(int pos, int len) { term_printf("."); }
+static void progress_callback(int pos, int len) { term_print("."); }
 
-static secbool copy_sdcard(const uint8_t *const *keys, uint8_t key_m,
-                           uint8_t key_n) {
+static secbool copy_sdcard(void) {
   display_set_backlight(255);
 
-  term_printf("Trezor Boardloader\n");
-  term_printf("==================\n\n");
+  term_print("Trezor Boardloader\n");
+  term_print("==================\n\n");
 
-  term_printf("bootloader found on the SD card\n\n");
-  term_printf("applying bootloader in 10 seconds\n\n");
-  term_printf("unplug now if you want to abort\n\n");
+  term_print("bootloader found on the SD card\n\n");
+  term_print("applying bootloader in 10 seconds\n\n");
+  term_print("unplug now if you want to abort\n\n");
 
   uint32_t codelen;
 
   for (int i = 10; i >= 0; i--) {
-    term_printf("%d ", i);
+    term_print_int32(i);
+    term_print(" ");
+
     hal_delay(1000);
-    codelen = check_sdcard(keys, key_m, key_n);
+    codelen = check_sdcard();
     if (0 == codelen) {
-      term_printf("\n\nno SD card, aborting\n");
+      term_print("\n\nno SD card, aborting\n");
       return secfalse;
     }
   }
 
-  term_printf("\n\nerasing flash:\n\n");
+  term_print("\n\nerasing flash:\n\n");
 
   // erase all flash (except boardloader)
   if (sectrue != erase_device(progress_callback)) {
-    term_printf(" failed\n");
+    term_print(" failed\n");
     return secfalse;
   }
-  term_printf(" done\n\n");
+  term_print(" done\n\n");
 
   ensure(flash_unlock_write(), NULL);
 
   // copy bootloader from SD card to Flash
-  term_printf("copying new bootloader from SD card\n\n");
+  term_print("copying new bootloader from SD card\n\n");
 
   ensure(flash_area_write_data(&BOOTLOADER_AREA, 0, sdcard_buf,
                                IMAGE_HEADER_SIZE + codelen),
@@ -134,14 +138,13 @@ static secbool copy_sdcard(const uint8_t *const *keys, uint8_t key_m,
 
   ensure(flash_lock_write(), NULL);
 
-  term_printf("\ndone\n\n");
-  term_printf("Unplug the device and remove the SD card\n");
+  term_print("\ndone\n\n");
+  term_print("Unplug the device and remove the SD card\n");
 
   return sectrue;
 }
 
-void sd_update_check_and_update(const uint8_t *const *keys, uint8_t key_m,
-                                uint8_t key_n) {
+void sd_update_check_and_update(void) {
   sdcard_init();
 
   // If the bootloader is being updated from SD card, we need to preserve the
@@ -152,18 +155,17 @@ void sd_update_check_and_update(const uint8_t *const *keys, uint8_t key_m,
       (const uint8_t *)BOOTLOADER_START, BOOTLOADER_IMAGE_MAGIC,
       flash_area_get_size(&BOOTLOADER_AREA));
 
-  if ((old_hdr != NULL) &&
-      (sectrue == check_image_header_sig(old_hdr, key_m, key_n, keys)) &&
+  if ((old_hdr != NULL) && (sectrue == check_bootloader_header_sig(old_hdr)) &&
       (sectrue ==
        check_image_contents(old_hdr, IMAGE_HEADER_SIZE, &BOOTLOADER_AREA))) {
     write_bootloader_min_version(old_hdr->monotonic);
   }
 
-  if (check_sdcard(keys, key_m, key_n) != 0) {
+  if (check_sdcard() != 0) {
 #ifdef FIXED_HW_DEINIT
     display_init(DISPLAY_RESET_CONTENT);
 #endif
-    copy_sdcard(keys, key_m, key_n);
+    copy_sdcard();
 #ifdef FIXED_HW_DEINIT
     display_deinit(DISPLAY_RETAIN_CONTENT);
 #endif

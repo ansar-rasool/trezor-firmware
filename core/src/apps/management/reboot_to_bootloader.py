@@ -1,19 +1,23 @@
+import utime
+from micropython import const
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from buffer_types import AnyBytes
     from typing import NoReturn
 
-    from trezor.enums import BootCommand
     from trezor.messages import RebootToBootloader
 
 
+_REBOOT_SUCCESS_TIMEOUT_MS = const(500)
+
+
 async def install_upgrade(
-    firmware_header: bytes, language_data_length: int
-) -> tuple[BootCommand, bytes]:
+    firmware_header: AnyBytes, language_data_length: int
+) -> AnyBytes:
     from ubinascii import hexlify
 
     from trezor import TR, utils, wire
-    from trezor.enums import BootCommand
     from trezor.ui.layouts import confirm_firmware_update, show_wait_text
 
     from apps.management.change_language import do_change_language
@@ -55,7 +59,7 @@ async def install_upgrade(
             # Continue firmware upgrade even if language change failed
             pass
 
-    return BootCommand.INSTALL_UPGRADE, hdr.hash
+    return hdr.hash
 
 
 async def reboot_to_bootloader(msg: RebootToBootloader) -> NoReturn:
@@ -77,9 +81,7 @@ async def reboot_to_bootloader(msg: RebootToBootloader) -> NoReturn:
         and msg.firmware_header is not None
         and is_official
     ):
-        boot_command, boot_args = await install_upgrade(
-            msg.firmware_header, msg.language_data_length
-        )
+        fw_hash = await install_upgrade(msg.firmware_header, msg.language_data_length)
 
     else:
         await confirm_action(
@@ -89,13 +91,22 @@ async def reboot_to_bootloader(msg: RebootToBootloader) -> NoReturn:
             verb=TR.buttons__restart,
             prompt_screen=True,
         )
-        boot_command = BootCommand.STOP_AND_WAIT
-        boot_args = None
+        fw_hash = None
 
     ctx = get_context()
-    await ctx.write(Success(message="Rebooting"))
-    # make sure the outgoing USB buffer is flushed
-    await loop.wait(ctx.iface.iface_num() | io.POLL_WRITE)
+    # After ACK-ing the `Success` message (over THP), the host may already be waiting for the bootloader to start.
+    # In case this THP ACK packet is lost, the device should stop retransmissions, and reboot anyway.
+    res = await loop.race(
+        ctx.write(Success(message="Rebooting")), loop.sleep(_REBOOT_SUCCESS_TIMEOUT_MS)
+    )
+    if res is None:
+        # make sure the outgoing buffer is flushed
+        await loop.wait(ctx.iface.iface_num() | io.POLL_WRITE)
+
+    utime.sleep_ms(10)
     # reboot to the bootloader, pass the firmware header hash if any
-    utils.reboot_to_bootloader(boot_command, boot_args)
+    if fw_hash is not None:
+        utils.reboot_and_upgrade(fw_hash)
+    else:
+        utils.reboot_to_bootloader()
     raise RuntimeError

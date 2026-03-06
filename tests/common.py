@@ -32,8 +32,8 @@ if TYPE_CHECKING:
     from _pytest.mark.structures import MarkDecorator
 
     from trezorlib.debuglink import DebugLink
-    from trezorlib.debuglink import TrezorClientDebugLink as Client
     from trezorlib.messages import ButtonRequest
+    from trezorlib.transport.session import Session
 
 PRIVATE_KEYS_DEV = [byte * 32 for byte in (b"\xdd", b"\xde", b"\xdf")]
 
@@ -111,10 +111,15 @@ def parametrize_using_common_fixtures(*paths: str) -> "MarkDecorator":
                     skiplist.append(models.T3B1)
                 if skip_model == "t3t1":
                     skiplist.append(models.T3T1)
+                if skip_model == "t3w1":
+                    skiplist.append(models.T3W1)
             if skiplist:
-                skip_marks = [pytest.mark.models(skip=skiplist)]
+                extra_marks = [pytest.mark.models(skip=skiplist)]
             else:
-                skip_marks = []
+                extra_marks = []
+
+            if test.get("experimental"):
+                extra_marks.append(pytest.mark.experimental)
 
             tests.append(
                 pytest.param(
@@ -126,7 +131,7 @@ def parametrize_using_common_fixtures(*paths: str) -> "MarkDecorator":
                             mnemonic=fixture["setup"]["mnemonic"],
                         )
                     ]
-                    + skip_marks,
+                    + extra_marks,
                     id=test_id,
                 )
             )
@@ -210,6 +215,8 @@ def read_and_confirm_mnemonic(
         mnemonic = yield from read_mnemonic_from_screen_caesar(debug)
     elif debug.layout_type is LayoutType.Delizia:
         mnemonic = yield from read_mnemonic_from_screen_delizia(debug)
+    elif debug.layout_type is LayoutType.Eckhart:
+        mnemonic = yield from read_mnemonic_from_screen_eckhart(debug)
     else:
         raise ValueError(f"Unknown model: {debug.layout_type}")
 
@@ -277,6 +284,29 @@ def read_mnemonic_from_screen_delizia(
     return mnemonic
 
 
+def read_mnemonic_from_screen_eckhart(
+    debug: "DebugLink",
+) -> Generator[None, "ButtonRequest", list[str]]:
+    mnemonic: list[str] = []
+    br = yield
+    assert br.pages is not None
+
+    # There is an intro screen
+    if br.pages != debug.read_layout().page_count() + 1:
+        debug.click(debug.screen_buttons.ok())
+
+    nwords = debug.read_layout().page_count()
+    assert nwords > 1
+
+    for _ in range(nwords):
+        words = debug.read_layout().seed_words()
+        mnemonic.extend(words)
+        debug.click(debug.screen_buttons.ok())
+
+    debug.press_yes()
+    return mnemonic
+
+
 def check_share(
     debug: "DebugLink", mnemonic: list[str], choose_wrong: bool = False
 ) -> bool:
@@ -294,7 +324,7 @@ def check_share(
         elif debug.layout_type is LayoutType.Caesar:
             # other models have the instruction in the title/subtitle
             word_pos_match = re.search(re_num_of_word, debug.read_layout().title())
-        elif debug.layout_type is LayoutType.Delizia:
+        elif debug.layout_type in (LayoutType.Delizia, LayoutType.Eckhart):
             word_pos_match = re.search(re_num_of_word, debug.read_layout().subtitle())
         else:
             word_pos_match = None
@@ -319,13 +349,26 @@ def click_info_button_bolt(debug: "DebugLink") -> Generator[Any, Any, ButtonRequ
     return (yield)
 
 
-def click_info_button_delizia(debug: "DebugLink"):
-    """Click Shamir backup info button and return back."""
+def click_info_button_delizia_eckhart(debug: "DebugLink"):
+    """Click Shamir backup info button, scroll through it and return back."""
     debug.click(debug.screen_buttons.menu())
     layout = debug.read_layout()
     assert "VerticalMenu" in layout.all_components()
-    debug.click(debug.screen_buttons.vertical_menu_items()[0])
+    # Click on the first item in the vertical menu
+    debug.button_actions.navigate_to_menu_item(0)
+
+    layout = debug.read_layout()
+
+    # Go through the info screen pages
+    for _ in range(layout.page_count() - 1):
+        if debug.layout_type is LayoutType.Delizia:
+            debug.swipe_up()
+        elif debug.layout_type is LayoutType.Eckhart:
+            debug.click(debug.screen_buttons.ok())
+
+    # Close info screen
     debug.click(debug.screen_buttons.menu())
+    # Close menu
     debug.click(debug.screen_buttons.menu())
 
 
@@ -336,10 +379,10 @@ def check_pin_backoff_time(attempts: int, start: float) -> None:
     assert got >= expected
 
 
-def get_test_address(client: "Client") -> str:
+def get_test_address(session: "Session") -> str:
     """Fetch a testnet address on a fixed path. Useful to make a pin/passphrase
     protected call, or to identify the root secret (seed+passphrase)"""
-    return btc.get_address(client, "Testnet", TEST_ADDRESS_N)
+    return btc.get_address(session, "Testnet", TEST_ADDRESS_N)
 
 
 def compact_size(n: int) -> bytes:
@@ -357,7 +400,10 @@ def get_text_possible_pagination(debug: "DebugLink", br: messages.ButtonRequest)
     text = debug.read_layout().text_content()
     if br.pages is not None:
         for _ in range(br.pages - 1):
-            debug.swipe_up()
+            if debug.layout_type is LayoutType.Eckhart:
+                debug.click(debug.screen_buttons.ok())
+            else:
+                debug.swipe_up()
             text += " "
             text += debug.read_layout().text_content()
     return text
@@ -378,5 +424,5 @@ def swipe_till_the_end(debug: "DebugLink", br: messages.ButtonRequest) -> None:
             debug.swipe_up()
 
 
-def is_core(client: "Client") -> bool:
-    return client.model is not models.T1B1
+def is_core(session: "Session") -> bool:
+    return session.model is not models.T1B1

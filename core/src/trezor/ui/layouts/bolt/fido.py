@@ -1,6 +1,7 @@
 import trezorui_api
 from trezor import ui
 from trezor.enums import ButtonRequestType
+from trezor.ui.layouts import show_error_and_raise
 
 from ..common import interact
 
@@ -27,11 +28,9 @@ async def confirm_fido(
         from trezor import io
 
         confirm.touch_event(io.TOUCH_START, 220, 220)
-        if confirm.paint():
-            ui.refresh()
+        confirm.paint()
         msg = confirm.touch_event(io.TOUCH_END, 220, 220)
-        if confirm.paint():
-            ui.refresh()
+        confirm.paint()
         assert msg is trezorui_api.LayoutState.DONE
         retval = confirm.return_value()
         assert isinstance(retval, int)
@@ -60,3 +59,10 @@ async def confirm_fido_reset() -> bool:
         )
     )
     return (await confirm.get_result()) is trezorui_api.CONFIRMED
+
+
+async def credential_warning(br_name: str, content: str) -> None:
+    await show_error_and_raise(
+        br_name=br_name,
+        content=content,
+    )

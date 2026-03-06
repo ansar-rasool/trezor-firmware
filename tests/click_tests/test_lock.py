@@ -19,10 +19,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from trezorlib import models
+from trezorlib import messages, models
 from trezorlib.debuglink import LayoutType
-
-from .. import common
 
 if TYPE_CHECKING:
     from ..device_handler import BackgroundDeviceHandler
@@ -31,9 +29,13 @@ if TYPE_CHECKING:
 PIN4 = "1234"
 
 
+@pytest.mark.models(skip="eckhart")
 @pytest.mark.setup_client(pin=PIN4)
 def test_hold_to_lock(device_handler: "BackgroundDeviceHandler"):
     debug = device_handler.debuglink()
+    session = device_handler.client.get_seedless_session()
+    session.call(messages.LockDevice())
+    session.refresh_features()
 
     short_duration = {
         models.T1B1: 500,
@@ -41,6 +43,7 @@ def test_hold_to_lock(device_handler: "BackgroundDeviceHandler"):
         models.T3B1: 500,
         models.T2T1: 1000,
         models.T3T1: 1000,
+        models.T3W1: 1000,
     }[debug.model]
     lock_duration = {
         models.T1B1: 1200,
@@ -48,6 +51,7 @@ def test_hold_to_lock(device_handler: "BackgroundDeviceHandler"):
         models.T3B1: 1200,
         models.T2T1: 3500,
         models.T3T1: 3500,
+        models.T3W1: 3500,
     }[debug.model]
 
     def hold(duration: int) -> None:
@@ -56,27 +60,29 @@ def test_hold_to_lock(device_handler: "BackgroundDeviceHandler"):
         elif debug.layout_type is LayoutType.Delizia:
             debug.click(debug.screen_buttons.tap_to_confirm(), hold_ms=duration)
         else:
-            debug.click((13, 37), hold_ms=duration)
+            debug.click(debug.screen_buttons.grid34(1, 1), hold_ms=duration)
 
     assert device_handler.features().unlocked is False
 
     # unlock with message
-    device_handler.run(common.get_test_address)
-
-    assert "PinKeyboard" in debug.read_layout().all_components()
-    debug.input("1234")
+    device_handler.get_session()
+    debug.synchronize_at("PinKeyboard")
+    debug.input(PIN4)
     assert device_handler.result()
 
+    session.refresh_features()
     assert device_handler.features().unlocked is True
 
     # short touch
     hold(short_duration)
 
     time.sleep(0.5)  # so that the homescreen appears again (hacky)
+    session.refresh_features()
     assert device_handler.features().unlocked is True
 
     # lock
     hold(lock_duration)
+    session.refresh_features()
     assert device_handler.features().unlocked is False
 
     # unlock by touching
@@ -90,8 +96,10 @@ def test_hold_to_lock(device_handler: "BackgroundDeviceHandler"):
     assert "PinKeyboard" in layout.all_components()
     debug.input("1234")
 
+    session.refresh_features()
     assert device_handler.features().unlocked is True
 
     # lock
     hold(lock_duration)
+    session.refresh_features()
     assert device_handler.features().unlocked is False

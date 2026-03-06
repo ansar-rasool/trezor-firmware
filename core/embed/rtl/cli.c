@@ -1,7 +1,7 @@
 #include <trezor_rtl.h>
 
 #include <rtl/cli.h>
-#include <rtl/mini_printf.h>
+#include <rtl/printf.h>
 
 #include <ctype.h>
 #include <stdarg.h>
@@ -29,7 +29,7 @@ void cli_set_commands(cli_t* cli, const cli_command_t* cmd_array,
 
 static void cli_vprintf(cli_t* cli, const char* format, va_list args) {
   char buffer[CLI_LINE_BUFFER_SIZE];
-  mini_vsnprintf(buffer, sizeof(buffer), format, args);
+  vsnprintf_(buffer, sizeof(buffer), format, args);
   cli->write(cli->callback_context, buffer, strlen(buffer));
 }
 
@@ -277,7 +277,7 @@ static int cli_readch(cli_t* cli) {
 
   for (;;) {
     char ch;
-    size_t len = cli->read(cli->callback_context, &ch, 1);
+    ssize_t len = cli->read(cli->callback_context, &ch, 1);
 
     if (len != 1) {
       return 0;
@@ -535,7 +535,7 @@ static bool cli_split_args(cli_t* cli) {
   return *cstr_skip_whitespace(buf) == '\0';
 }
 
-static void cli_process_command(cli_t* cli, const cli_command_t* cmd) {
+void cli_process_command(cli_t* cli, const cli_command_t* cmd) {
   cli->current_cmd = cmd;
   cli->final_status = false;
   cli->aborted = false;
@@ -551,18 +551,23 @@ static void cli_process_command(cli_t* cli, const cli_command_t* cmd) {
       cli_error(cli, CLI_ERROR_FATAL,
                 "Command handler didn't finish properly.");
     }
-  } else {
+  }
+
+  if (cli->interactive) {
     // Finalize the last command with an empty line
     cli_printf(cli, "\r\n");
+    // Print the prompt
+    cli_printf(cli, "> ");
   }
+  cli_clear_line(cli);
 }
 
-void cli_process_io(cli_t* cli) {
+const cli_command_t* cli_process_io(cli_t* cli) {
   int res;
   do {
     int ch = cli_readch(cli);
     if (ch == 0) {
-      return;
+      return NULL;
     }
     res = cli_process_char(cli, ch);
   } while (res == 0);
@@ -605,15 +610,17 @@ void cli_process_io(cli_t* cli) {
   }
 
   // Find the command handler
-  const cli_command_t* cmd = cli_find_command(cli, cli->cmd_name);
+  const cli_command_t* found_cmd = cli_find_command(cli, cli->cmd_name);
 
-  if (cmd == NULL) {
+  if (found_cmd == NULL) {
     cli_error(cli, CLI_ERROR_INVALID_CMD, "Invalid command '%s', try 'help'.",
               cli->cmd_name);
     goto cleanup;
   }
 
-  cli_process_command(cli, cmd);
+  return found_cmd;
+
+  // cli_process_command(cli, cmd);
 
 cleanup:
   if (cli->interactive) {
@@ -621,6 +628,7 @@ cleanup:
     cli_printf(cli, "> ");
   }
   cli_clear_line(cli);
+  return NULL;
 }
 
 // Return position of the argument with the given name in
@@ -691,7 +699,14 @@ bool cli_nth_arg_uint32(cli_t* cli, int n, uint32_t* result) {
 
 bool cli_arg_uint32(cli_t* cli, const char* name, uint32_t* result) {
   const char* arg = cli_arg(cli, name);
-  return cstr_parse_uint32(arg, 0, result);
+
+  // pick only decimal or hexadecimal
+  int base = 10;
+  if (arg[0] == '0' && (arg[1] == 'x' || arg[1] == 'X')) {
+    base = 16;
+  }
+
+  return cstr_parse_uint32(arg, base, result);
 }
 
 bool cli_arg_hex(cli_t* cli, const char* name, uint8_t* dst, size_t dst_len,

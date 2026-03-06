@@ -17,14 +17,17 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#pragma GCC optimize( \
+    "no-stack-protector")  // applies to all functions in this file
+
 #include <trezor_bsp.h>
+#include <trezor_rtl.h>
 
 #include <sec/rng.h>
 
-#if KERNEL_MODE
+#include "rand.h"
 
-#pragma GCC optimize( \
-    "no-stack-protector")  // applies to all functions in this file
+#ifdef SECURE_MODE
 
 void rng_init(void) {
   // enable TRNG peripheral clock
@@ -34,7 +37,8 @@ void rng_init(void) {
   RNG->CR = RNG_CR_RNGEN;  // enable TRNG
 }
 
-uint32_t rng_read(const uint32_t previous, const uint32_t compare_previous) {
+static uint32_t rng_read_u32(const uint32_t previous,
+                             const uint32_t compare_previous) {
   uint32_t temp = previous;
   do {
     while ((RNG->SR & (RNG_SR_SECS | RNG_SR_CECS | RNG_SR_DRDY)) != RNG_SR_DRDY)
@@ -46,17 +50,36 @@ uint32_t rng_read(const uint32_t previous, const uint32_t compare_previous) {
   return temp;
 }
 
-uint32_t rng_get(void) {
+static uint32_t rng_get_u32(void) {
   // reason for keeping history: RM0090 section 24.3.1 FIPS continuous random
   // number generator test
   static uint32_t previous = 0, current = 0;
   if (previous == current) {
-    previous = rng_read(previous, 0);
+    previous = rng_read_u32(previous, 0);
   } else {
     previous = current;
   }
-  current = rng_read(previous, 1);
+  current = rng_read_u32(previous, 1);
   return current;
 }
 
-#endif  // KERNEL_MODE
+void rng_fill_buffer(void* buffer, size_t buffer_size) {
+  uint32_t* dst = (uint32_t*)buffer;
+  size_t remaining = buffer_size;
+
+  while (remaining >= sizeof(uint32_t)) {
+    *dst++ = rng_get_u32();
+    remaining -= sizeof(uint32_t);
+  }
+
+  if (remaining > 0) {
+    uint32_t r = rng_get_u32();
+    memcpy(dst, &r, remaining);
+  }
+}
+
+#endif  // SECURE_MODE
+
+// Implements random_buffer() function declared in crypto/rand.h
+// as a wrapper for rng_fill_buffer().
+void random_buffer(uint8_t* buf, size_t len) { rng_fill_buffer(buf, len); }

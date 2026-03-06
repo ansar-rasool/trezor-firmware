@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# pyright: reportArgumentType=false, reportAttributeAccessIssue=false, reportGeneralTypeIssues=false
 from __future__ import annotations
 
 import datetime
@@ -138,7 +139,6 @@ MAKO_FILTERS = {
 }
 
 ALTCOIN_PREFIXES = (
-    "binance",
     "cardano",
     "eos",
     "ethereum",
@@ -150,6 +150,7 @@ ALTCOIN_PREFIXES = (
     "solana",
     "stellar",
     "tezos",
+    "tron",
     "u2f",
 )
 

@@ -17,23 +17,23 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <trezor_model.h>
 #include <trezor_rtl.h>
 
 #include <gfx/gfx_bitblt.h>
 #include <io/display.h>
-#include <sec/entropy.h>
 #include <sec/random_delays.h>
 #include <sec/secret.h>
 #include <sec/secure_aes.h>
-#include <sys/applet.h>
 #include <sys/bootutils.h>
+#include <sys/coreapp.h>
 #include <sys/mpu.h>
+#include <sys/syscall_ipc.h>
 #include <sys/sysevent.h>
 #include <sys/system.h>
 #include <sys/systick.h>
-#include <util/bl_check.h>
 #include <util/board_capabilities.h>
-#include <util/image.h>
+#include <util/boot_image.h>
 #include <util/option_bytes.h>
 #include <util/rsod.h>
 #include <util/unit_properties.h>
@@ -54,16 +54,24 @@
 #include <io/haptic.h>
 #endif
 
+#ifdef USE_HASH_PROCESSOR
+#include <sec/hash_processor.h>
+#endif
+
 #ifdef USE_OPTIGA
-#include <sec/optiga_config.h>
+#include <sec/optiga_init.h>
+#endif
+
+#ifdef USE_BACKUP_RAM
+#include <sys/backup_ram.h>
 #endif
 
 #ifdef USE_TROPIC
 #include <sec/tropic.h>
 #endif
 
-#ifdef USE_POWERCTL
-#include <sys/powerctl.h>
+#ifdef USE_POWER_MANAGER
+#include <sys/power_manager.h>
 #endif
 
 #ifdef USE_PVD
@@ -78,8 +86,8 @@
 #include <io/rgb_led.h>
 #endif
 
-#ifdef SYSTEM_VIEW
-#include <sys/systemview.h>
+#ifdef USE_RTC
+#include <sys/rtc.h>
 #endif
 
 #ifdef USE_TAMPER
@@ -90,55 +98,59 @@
 #include <io/touch.h>
 #endif
 
-#ifdef USE_TRUSTZONE
-#include <sys/trustzone.h>
+#ifdef USE_USB
+#include <io/usb.h>
+#include <io/usb_config.h>
 #endif
 
 void drivers_init() {
-#ifdef USE_POWERCTL
-  powerctl_init();
+#ifdef SECURE_MODE
+  parse_boardloader_capabilities();
+  unit_properties_init();
+#ifdef USE_STORAGE_HWKEY
+  secure_aes_init();
 #endif
-
 #ifdef USE_TAMPER
   tamper_init();
+#if PRODUCTION
+  tamper_external_enable();
+#endif
+#endif
+  random_delays_init();
+#ifdef RDI
+  random_delays_start_rdi();
+#endif
+#ifdef USE_BACKUP_RAM
+  backup_ram_init();
+#endif
+#ifdef USE_HASH_PROCESSOR
+  hash_processor_init();
+#endif
+#endif  // SECURE_MODE
+
+#ifdef USE_RTC
+  rtc_init();
 #endif
 
-  random_delays_init();
+#ifdef USE_CONSUMPTION_MASK
+  consumption_mask_init();
+#endif
+
+#ifdef USE_POWER_MANAGER
+  pm_init(true);
+#endif
 
 #ifdef USE_PVD
   pvd_init();
 #endif
 
-#ifdef RDI
-  random_delays_start_rdi();
-#endif
-
-#ifdef SYSTEM_VIEW
-  enable_systemview();
-#endif
-
-#ifdef USE_HASH_PROCESSOR
-  hash_processor_init();
-#endif
-
   display_init(DISPLAY_JUMP_BEHAVIOR);
 
+#ifdef SECURE_MODE
 #ifdef USE_OEM_KEYS_CHECK
   check_oem_keys();
 #endif
 
-  parse_boardloader_capabilities();
-
-  unit_properties_init();
-
-#ifdef USE_STORAGE_HWKEY
-  secure_aes_init();
-#endif
-
-  entropy_init();
-
-#if PRODUCTION || BOOTLOADER_QA
-  check_and_replace_bootloader();
 #endif
 
 #ifdef USE_BUTTON
@@ -147,10 +159,6 @@ void drivers_init() {
 
 #ifdef USE_RGB_LED
   rgb_led_init();
-#endif
-
-#ifdef USE_CONSUMPTION_MASK
-  consumption_mask_init();
 #endif
 
 #ifdef USE_TOUCH
@@ -169,12 +177,17 @@ void drivers_init() {
   ble_init();
 #endif
 
+#ifdef SECURE_MODE
 #ifdef USE_OPTIGA
   optiga_init_and_configure();
 #endif
-
 #ifdef USE_TROPIC
   tropic_init();
+#endif
+#endif  // SECURE_MODE
+
+#ifdef USE_USB
+  usb_configure(NULL);
 #endif
 }
 
@@ -182,53 +195,28 @@ void drivers_init() {
 //
 // Returns when the coreapp task is terminated
 static void kernel_loop(applet_t *coreapp) {
+#if SECURE_MODE && USE_STORAGE_HWKEY
+  secure_aes_set_applet(coreapp);
+#endif
+
   do {
-    sysevents_t awaited = {0};
+    sysevents_t awaited = {
+        .read_ready = 1 << SYSHANDLE_SYSCALL,
+        .write_ready = 0,
+    };
+
     sysevents_t signalled = {0};
 
     sysevents_poll(&awaited, &signalled, ticks_timeout(100));
 
+    if (signalled.read_ready & (1 << SYSHANDLE_SYSCALL)) {
+      syscall_ipc_dequeue();
+    }
+
   } while (applet_is_alive(coreapp));
 }
 
-// defined in linker script
-extern uint32_t _codelen;
-
-#define KERNEL_SIZE (uint32_t) & _codelen
-
-// Initializes coreapp applet
-static void coreapp_init(applet_t *applet) {
-  const uint32_t CODE1_START = COREAPP_CODE_ALIGN(KERNEL_START + KERNEL_SIZE);
-
-#ifdef FIRMWARE_P1_START
-  const uint32_t CODE1_END = FIRMWARE_P1_START + FIRMWARE_P1_MAXSIZE;
-#else
-  const uint32_t CODE1_END = FIRMWARE_START + FIRMWARE_MAXSIZE;
-#endif
-
-  applet_header_t *coreapp_header = (applet_header_t *)CODE1_START;
-
-  applet_layout_t coreapp_layout = {
-      .data1.start = (uint32_t)AUX1_RAM_START,
-      .data1.size = (uint32_t)AUX1_RAM_SIZE,
-#ifdef AUX2_RAM_START
-      .data2.start = (uint32_t)AUX2_RAM_START,
-      .data2.size = (uint32_t)AUX2_RAM_SIZE,
-#endif
-      .code1.start = CODE1_START,
-      .code1.size = CODE1_END - CODE1_START,
-#ifdef FIRMWARE_P2_START
-      .code2.start = FIRMWARE_P2_START,
-      .code2.size = FIRMWARE_P2_MAXSIZE,
-#endif
-  };
-
-  applet_privileges_t coreapp_privileges = {
-      .assets_area_access = true,
-  };
-
-  applet_init(applet, coreapp_header, &coreapp_layout, &coreapp_privileges);
-}
+#ifndef USE_BOOTARGS_RSOD
 
 // Shows RSOD (Red Screen of Death)
 static void show_rsod(const systask_postmortem_t *pminfo) {
@@ -237,7 +225,7 @@ static void show_rsod(const systask_postmortem_t *pminfo) {
   coreapp_init(&coreapp);
 
   // Reset and run the coreapp in RSOD mode
-  if (applet_reset(&coreapp, 1, pminfo, sizeof(systask_postmortem_t))) {
+  if (coreapp_reset(&coreapp, 1, pminfo, sizeof(systask_postmortem_t))) {
     // Run the applet & wait for it to finish
     applet_run(&coreapp);
     // Loop until the coreapp is terminated
@@ -273,23 +261,24 @@ static void init_and_show_rsod(const systask_postmortem_t *pminfo) {
   reboot_or_halt_after_rsod();
 }
 
+#endif  // USE_BOOTARGS_RSOD
+
 // Kernel panic handler
 // (may be called from interrupt context)
 static void kernel_panic(const systask_postmortem_t *pminfo) {
   // Since the system state is unreliable, enter emergency mode
   // and show the RSOD.
+#ifndef USE_BOOTARGS_RSOD
   system_emergency_rescue(&init_and_show_rsod, pminfo);
-  // The previous function call never returns
+#else
+  reboot_with_rsod(pminfo);
+#endif  // USE_BOOTARGS_RSOD
+  // We never get here
 }
 
 int main(void) {
   // Initialize system's core services
   system_init(&kernel_panic);
-
-#ifdef USE_TRUSTZONE
-  // Configure unprivileged access for the coreapp
-  tz_init_kernel();
-#endif
 
   // Initialize hardware drivers
   drivers_init();
@@ -299,22 +288,26 @@ int main(void) {
   coreapp_init(&coreapp);
 
   // Reset and run the coreapp
-  if (!applet_reset(&coreapp, 0, NULL, 0)) {
+  if (!coreapp_reset(&coreapp, 0, NULL, 0)) {
     error_shutdown("Cannot start coreapp");
   }
 
   // Run the applet
   applet_run(&coreapp);
+
   // Loop until the coreapp is terminated
   kernel_loop(&coreapp);
   // Release the coreapp resources
   applet_stop(&coreapp);
 
+#ifndef USE_BOOTARGS_RSOD
   // Coreapp crashed, show RSOD
   show_rsod(&coreapp.task.pminfo);
-
   // Reboots or halts (if RSOD_INFINITE_LOOP is defined)
   reboot_or_halt_after_rsod();
+#else
+  reboot_with_rsod(&coreapp.task.pminfo);
+#endif  // USE_BOOTARGS_RSOD
 
   return 0;
 }

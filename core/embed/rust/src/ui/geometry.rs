@@ -30,6 +30,10 @@ const fn clamp(x: i16, min: i16, max: i16) -> i16 {
 /// Relative offset in 2D space, used for representing translation and
 /// dimensions of objects. Absolute positions on the screen are represented by
 /// the `Point` type.
+///
+/// Coordinate system orientation:
+/// * x-axis: negative values go left, positive values go right
+/// * y-axis: negative values go up, positive values go down
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Offset {
     pub x: i16,
@@ -278,6 +282,10 @@ impl Rect {
         let top_left = Point::new(p0.x - size.x, p0.y);
         Self::from_top_left_and_size(top_left, size)
     }
+    pub const fn from_top_center_and_size(p0: Point, size: Offset) -> Self {
+        let top_left = Point::new(p0.x - size.x / 2, p0.y);
+        Self::from_top_left_and_size(top_left, size)
+    }
 
     pub const fn from_bottom_left_and_size(p0: Point, size: Offset) -> Self {
         let top_left = Point::new(p0.x, p0.y - size.y);
@@ -466,6 +474,17 @@ impl Rect {
         (left, center, right)
     }
 
+    /// Split `Rect` into top, center and bottom, given the center one's
+    /// `height`. Center element is symmetric, top and bottom have the same
+    /// size. In case top and bottom cannot be the same size, bottom is 1px
+    /// wider.
+    pub const fn split_center_by_height(self, height: i16) -> (Self, Self, Self) {
+        let top_bottom_height = (self.height() - height) / 2;
+        let (top, center_bottom) = self.split_top(top_bottom_height);
+        let (center, bottom) = center_bottom.split_top(height);
+        (top, center, bottom)
+    }
+
     /// Calculates the intersection of two rectangles.
     ///
     /// If the rectangles do not intersect, an "empty" rectangle is returned.
@@ -531,6 +550,10 @@ impl Insets {
         }
     }
 
+    pub const fn zero() -> Self {
+        Self::new(0, 0, 0, 0)
+    }
+
     pub const fn uniform(d: i16) -> Self {
         Self::new(d, d, d, d)
     }
@@ -553,6 +576,10 @@ impl Insets {
 
     pub const fn sides(d: i16) -> Self {
         Self::new(0, d, 0, d)
+    }
+
+    pub const fn vertical(d: i16) -> Self {
+        Self::new(d, 0, d, 0)
     }
 }
 
@@ -674,6 +701,10 @@ impl Grid {
         let from = self.row_col(cells.from.0, cells.from.1);
         let to = self.row_col(cells.to.0, cells.to.1);
         from.union(to)
+    }
+
+    pub const fn cell_count(&self) -> usize {
+        self.rows * self.cols
     }
 }
 

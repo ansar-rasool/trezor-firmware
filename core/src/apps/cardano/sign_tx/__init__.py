@@ -7,14 +7,17 @@ if TYPE_CHECKING:
 
     from trezor.messages import CardanoSignTxFinished, CardanoSignTxInit
 
+    from apps.common.keychain import Keychain as Slip21Keychain
+
 
 @seed.with_keychain
 async def sign_tx(
-    msg: CardanoSignTxInit, keychain: seed.Keychain
+    msg: CardanoSignTxInit, keychain: seed.Keychain, slip21_keychain: Slip21Keychain
 ) -> CardanoSignTxFinished:
-    from trezor import log, wire
+    from trezor import TR, log, wire
     from trezor.enums import CardanoTxSigningMode
     from trezor.messages import CardanoSignTxFinished
+    from trezor.ui.layouts import show_continue_in_app
 
     from .signer import Signer
 
@@ -40,7 +43,7 @@ async def sign_tx(
     else:
         raise RuntimeError  # should be unreachable
 
-    signer = signer_type(msg, keychain)
+    signer = signer_type(msg, keychain, slip21_keychain)
 
     try:
         await signer.sign()
@@ -49,4 +52,5 @@ async def sign_tx(
             log.exception(__name__, e)
         raise wire.ProcessError("Signing failed")
 
+    show_continue_in_app(TR.send__transaction_signed)
     return CardanoSignTxFinished()

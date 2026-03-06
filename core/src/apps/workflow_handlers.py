@@ -56,15 +56,12 @@ def _find_message_handler_module(msg_type: int) -> str:
         return "apps.management.change_wipe_code"
     if msg_type == MessageType.GetNonce:
         return "apps.management.get_nonce"
+    if utils.USE_SERIAL_NUMBER and msg_type == MessageType.GetSerialNumber:
+        return "apps.management.get_serial_number"
     if msg_type == MessageType.RebootToBootloader:
         return "apps.management.reboot_to_bootloader"
 
-    if (
-        # pylint: disable-next=consider-using-in
-        utils.INTERNAL_MODEL == "T2B1"
-        or utils.INTERNAL_MODEL == "T3B1"
-        or utils.INTERNAL_MODEL == "T3T1"
-    ) and msg_type == MessageType.ShowDeviceTutorial:
+    if msg_type == MessageType.ShowDeviceTutorial:
         return "apps.management.show_tutorial"
 
     if utils.USE_BACKLIGHT and msg_type == MessageType.SetBrightness:
@@ -109,6 +106,16 @@ def _find_message_handler_module(msg_type: int) -> str:
         return "apps.misc.cipher_key_value"
     if msg_type == MessageType.GetFirmwareHash:
         return "apps.misc.get_firmware_hash"
+
+    # evolu
+    if msg_type == MessageType.EvoluGetNode:
+        return "apps.evolu.get_node"
+    if msg_type == MessageType.EvoluSignRegistrationRequest:
+        return "apps.evolu.sign_registration_request"
+    if msg_type == MessageType.EvoluGetDelegatedIdentityKey:
+        return "apps.evolu.get_delegated_identity_key"
+    if msg_type == MessageType.PaymentNotification:
+        return "apps.misc.payment_notification"
 
     if not utils.BITCOIN_ONLY:
         # When promoting the Nostr app to production-level
@@ -193,6 +200,8 @@ def _find_message_handler_module(msg_type: int) -> str:
             return "apps.cardano.sign_tx"
         if msg_type == MessageType.CardanoGetNativeScriptHash:
             return "apps.cardano.get_native_script_hash"
+        if msg_type == MessageType.CardanoSignMessageInit:
+            return "apps.cardano.sign_message"
 
         # tezos
         if msg_type == MessageType.TezosGetAddress:
@@ -208,14 +217,6 @@ def _find_message_handler_module(msg_type: int) -> str:
         if msg_type == MessageType.EosSignTx:
             return "apps.eos.sign_tx"
 
-        # binance
-        if msg_type == MessageType.BinanceGetAddress:
-            return "apps.binance.get_address"
-        if msg_type == MessageType.BinanceGetPublicKey:
-            return "apps.binance.get_public_key"
-        if msg_type == MessageType.BinanceSignTx:
-            return "apps.binance.sign_tx"
-
         # solana
         if msg_type == MessageType.SolanaGetPublicKey:
             return "apps.solana.get_public_key"
@@ -223,6 +224,10 @@ def _find_message_handler_module(msg_type: int) -> str:
             return "apps.solana.get_address"
         if msg_type == MessageType.SolanaSignTx:
             return "apps.solana.sign_tx"
+
+        # tron
+        if msg_type == MessageType.TronGetAddress:
+            return "apps.tron.get_address"
 
     raise ValueError
 

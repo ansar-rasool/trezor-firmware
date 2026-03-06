@@ -1,3 +1,19 @@
+# This file is part of the Trezor project.
+#
+# Copyright (C) SatoshiLabs and contributors
+#
+# This library is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Lesser General Public License version 3
+# as published by the Free Software Foundation.
+#
+# This library is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Lesser General Public License for more details.
+#
+# You should have received a copy of the License along with this library.
+# If not, see <https://www.gnu.org/licenses/lgpl-3.0.html>.
+
 import logging
 import tarfile
 import typing as t
@@ -14,7 +30,7 @@ from .tools import EnumAdapter
 LOG = logging.getLogger(__name__)
 
 FORMAT_MAGIC = b"trzd1"
-DEFS_BASE_URL = "https://data.trezor.io/firmware/eth-definitions/"
+DEFS_BASE_URL = "https://data.trezor.io/firmware/definitions/"
 
 DEFINITIONS_DEV_SIGS_REQUIRED = 1
 DEFINITIONS_DEV_PUBLIC_KEYS = [
@@ -79,13 +95,13 @@ class Source:
     def fetch_path(self, *components: str) -> t.Optional[bytes]:
         raise NotImplementedError
 
-    def get_network_by_slip44(self, slip44: int) -> t.Optional[bytes]:
-        return self.fetch_path("slip44", str(slip44), "network.dat")
+    def get_eth_network_by_slip44(self, slip44: int) -> t.Optional[bytes]:
+        return self.fetch_path("eth", "slip44", str(slip44), "network.dat")
 
-    def get_network(self, chain_id: int) -> t.Optional[bytes]:
-        return self.fetch_path("chain-id", str(chain_id), "network.dat")
+    def get_eth_network(self, chain_id: int) -> t.Optional[bytes]:
+        return self.fetch_path("eth", "chain-id", str(chain_id), "network.dat")
 
-    def get_token(self, chain_id: int, address: t.AnyStr) -> t.Optional[bytes]:
+    def get_eth_token(self, chain_id: int, address: t.AnyStr) -> t.Optional[bytes]:
         if isinstance(address, bytes):
             address_str = address.hex()
         elif address.startswith("0x"):
@@ -95,7 +111,12 @@ class Source:
 
         address_str = address_str.lower()
 
-        return self.fetch_path("chain-id", f"{chain_id}", f"token-{address_str}.dat")
+        return self.fetch_path(
+            "eth", "chain-id", f"{chain_id}", f"token-{address_str}.dat"
+        )
+
+    def get_solana_token(self, mint_account: str) -> t.Optional[bytes]:
+        return self.fetch_path("solana", "token", f"{mint_account}.dat")
 
 
 class NullSource(Source):

@@ -61,6 +61,11 @@ BT_GATT_SERVICE_DEFINE(
                            BT_GATT_PERM_READ_ENCRYPT, NULL, NULL, NULL),
     BT_GATT_CCC(service_ccc_cfg_changed,
                 BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+
+    BT_GATT_CHARACTERISTIC(BT_UUID_TRZ_NOTIFY, BT_GATT_CHRC_NOTIFY,
+                           BT_GATT_PERM_READ_ENCRYPT, NULL, NULL, NULL),
+    BT_GATT_CCC(service_ccc_cfg_changed,
+                BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
     BT_GATT_CHARACTERISTIC(BT_UUID_TRZ_RX,
                            BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
                            BT_GATT_PERM_READ_ENCRYPT |
@@ -86,5 +91,49 @@ int service_send(struct bt_conn *conn, trz_packet_t *data) {
     return bt_gatt_notify_cb(conn, &params);
   } else {
     return -EINVAL;
+  }
+}
+
+int service_notify(struct bt_conn *conn, uint8_t *data, size_t len) {
+  struct bt_gatt_notify_params params = {0};
+  const struct bt_gatt_attr *attr = &trz_svc.attrs[4];
+
+  uint8_t *buf = k_malloc(len);
+  memcpy(buf, data, len);
+
+  params.attr = attr;
+  params.data = buf;
+  params.len = len;
+  params.func = on_sent;
+  params.user_data = (void *)buf;
+
+  int result = 0;
+  if (conn && bt_gatt_is_subscribed(conn, attr, BT_GATT_CCC_NOTIFY)) {
+    result = bt_gatt_notify_cb(conn, &params);
+  } else {
+    result = -EINVAL;
+  }
+
+  if (result < 0) {
+    k_free(buf);
+  }
+
+  return result;
+}
+
+void service_send_busy(void) {
+  struct bt_conn *conn = connection_get_current();
+
+  trz_packet_t *buf = k_malloc(sizeof(*buf));
+
+  static const uint8_t busy_packet[] = {
+      0x3f, 0x23, 0x23, 0x00, 0x03, 0x00, 0x00, 0x00, 0x19, 0x08, 0x0f, 0x12,
+      0x15, 0x44, 0x65, 0x76, 0x69, 0x63, 0x65, 0x20, 0x6c, 0x6f, 0x63, 0x6b,
+      0x65, 0x64, 0x20, 0x6f, 0x72, 0x20, 0x62, 0x75, 0x73, 0x79};
+
+  if (buf) {
+    memcpy(buf->data, busy_packet, sizeof(busy_packet));
+    buf->len = BLE_TX_PACKET_SIZE;
+    service_send(conn, buf);
   }
 }

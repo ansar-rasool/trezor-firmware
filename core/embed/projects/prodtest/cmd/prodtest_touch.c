@@ -27,6 +27,8 @@
 #include <rtl/cli.h>
 #include <sys/systick.h>
 
+#include "../prodtest.h"
+
 static bool ensure_touch_init(cli_t* cli) {
   cli_trace(cli, "Initializing the touch controller...");
   if (sectrue != touch_init()) {
@@ -130,7 +132,7 @@ static void prodtest_touch_test(cli_t* cli) {
     }
   }
 
-  screen_prodtest_welcome();
+  prodtest_show_homescreen();
 }
 
 static void prodtest_touch_test_custom(cli_t* cli) {
@@ -213,7 +215,7 @@ static void prodtest_touch_test_custom(cli_t* cli) {
     }
   }
 
-  screen_prodtest_welcome();
+  prodtest_show_homescreen();
 }
 
 static void prodtest_touch_test_idle(cli_t* cli) {
@@ -257,7 +259,7 @@ static void prodtest_touch_test_idle(cli_t* cli) {
   cli_ok(cli, "");
 
 cleanup:
-  screen_prodtest_welcome();
+  prodtest_show_homescreen();
 }
 
 static void prodtest_touch_test_power(cli_t* cli) {
@@ -292,7 +294,7 @@ static void prodtest_touch_test_power(cli_t* cli) {
 
 cleanup:
   touch_power_set(false);
-  screen_prodtest_welcome();
+  prodtest_show_homescreen();
 }
 
 static void prodtest_touch_test_sensitivity(cli_t* cli) {
@@ -333,7 +335,7 @@ static void prodtest_touch_test_sensitivity(cli_t* cli) {
     }
   }
 
-  screen_prodtest_welcome();
+  prodtest_show_homescreen();
 }
 
 static void prodtest_touch_draw(cli_t* cli) {
@@ -351,7 +353,12 @@ static void prodtest_touch_draw(cli_t* cli) {
   uint32_t idx = 0;
 
   screen_prodtest_draw(events, 0);
+
+#ifdef TREZOR_MODEL_T3W1
+  display_set_backlight(85);
+#else
   display_set_backlight(150);
+#endif
 
   for (;;) {
     uint32_t evt = touch_get_event();
@@ -367,7 +374,7 @@ static void prodtest_touch_draw(cli_t* cli) {
     }
   }
 
-  screen_prodtest_welcome();
+  prodtest_show_homescreen();
 }
 
 // clang-format off

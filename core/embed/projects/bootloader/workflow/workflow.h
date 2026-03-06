@@ -21,9 +21,11 @@
 
 #include <trezor_types.h>
 
+#include <sys/sysevent.h>
 #include <util/image.h>
 
 #include "protob/protob.h"
+#include "rust_ui_bootloader.h"
 
 typedef enum {
   WF_ERROR_FATAL = 0,
@@ -33,6 +35,9 @@ typedef enum {
   WF_OK_FIRMWARE_INSTALLED = 0x04D9D07F,
   WF_OK_DEVICE_WIPED = 0x30DC3841,
   WF_OK_BOOTLOADER_UNLOCKED = 0x23FCBD03,
+  WF_OK_UI_ACTION = 0xAABBCCEE,
+  WF_OK_PAIRING_COMPLETED = 0xAABBCCEF,
+  WF_OK_PAIRING_FAILED = 0xAABBCCF0,
   WF_CANCELLED = 0x55667788,
 } workflow_result_t;
 
@@ -40,29 +45,44 @@ workflow_result_t workflow_firmware_update(protob_io_t *iface);
 
 workflow_result_t workflow_wipe_device(protob_io_t *iface);
 
-#ifdef USE_OPTIGA
+#ifdef LOCKABLE_BOOTLOADER
 workflow_result_t workflow_unlock_bootloader(protob_io_t *iface);
 #endif
 
 workflow_result_t workflow_ping(protob_io_t *iface);
 
-workflow_result_t workflow_initialize(protob_io_t *iface,
-                                      const vendor_header *const vhdr,
-                                      const image_header *const hdr);
+workflow_result_t workflow_initialize(protob_io_t *iface, const fw_info_t *fw);
 
 workflow_result_t workflow_get_features(protob_io_t *iface,
-                                        const vendor_header *const vhdr,
-                                        const image_header *const hdr);
+                                        const fw_info_t *fw);
 
-workflow_result_t workflow_bootloader(const vendor_header *const vhdr,
-                                      const image_header *const hdr,
-                                      secbool firmware_present);
+workflow_result_t workflow_menu(const fw_info_t *fw, protob_ios_t *ios);
+
+workflow_result_t workflow_bootloader(const fw_info_t *fw);
 
 workflow_result_t workflow_empty_device(void);
 
-workflow_result_t workflow_host_control(const vendor_header *const vhdr,
-                                        const image_header *const hdr,
-                                        void (*redraw_wait_screen)(void));
+workflow_result_t workflow_host_control(const fw_info_t *fw,
+                                        c_layout_t *wait_layout,
+                                        uint32_t *ui_action_result,
+                                        protob_ios_t *ios);
 
-workflow_result_t workflow_auto_update(const vendor_header *const vhdr,
-                                       const image_header *const hdr);
+workflow_result_t workflow_auto_update(const fw_info_t *fw);
+
+#ifdef USE_BLE
+
+bool wipe_bonds(protob_io_t *iface);
+
+workflow_result_t workflow_ble_pairing_request(const fw_info_t *fw);
+
+workflow_result_t workflow_wireless_setup(const fw_info_t *fw,
+                                          protob_ios_t *ios);
+#endif
+
+void workflow_ifaces_init(secbool usb21_landing, protob_ios_t *ios);
+
+void workflow_ifaces_deinit(protob_ios_t *ios);
+
+void workflow_ifaces_pause(protob_ios_t *ios);
+
+void workflow_ifaces_resume(protob_ios_t *ios);
