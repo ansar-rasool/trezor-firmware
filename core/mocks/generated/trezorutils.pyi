@@ -4,10 +4,20 @@ from buffer_types import *
 
 # upymod/modtrezorutils/modtrezorutils-meminfo.h
 def meminfo(filename: str | None) -> None:
-    """Dumps map of micropython GC arena to a file.
+    """
+    Dumps map of micropython GC arena to a file.
     The JSON file can be decoded by analyze-memory-dump.py
-     """
+    """
 from trezor import utils
+
+
+# upymod/modtrezorutils/modtrezorutils.c
+def telemetry_get() -> tuple[int, int, int, int] | None:
+    """
+    Retrieves the stored telemetry data. Returns a tuple
+    (min_temp_milli_c, max_temp_milli_c, battery_errors, battery_cycles)
+    or None if telemetry is not available.
+    """
 
 
 # upymod/modtrezorutils/modtrezorutils.c
@@ -266,6 +276,10 @@ USE_NRF: bool
 """Whether the hardware has a nRF chip."""
 USE_DBG_CONSOLE: bool
 """Whether a debug console is enabled."""
+USE_APP_LOADING: bool
+"""Whether the firmware supports loading 3rd-party applications."""
+USE_TELEMETRY: bool
+"""Whether a telemetry is supported."""
 MODEL: str
 """Model name."""
 MODEL_FULL_NAME: str

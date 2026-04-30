@@ -23,7 +23,7 @@ import time
 from typing import Iterable, List
 
 from ..log import DUMP_PACKETS
-from ..models import TREZORS, TrezorModel
+from ..models import ALL_MODELS, TrezorModel
 from . import UDEV_RULES_STR, DeviceIsBusy, Timeout, Transport, TransportException
 
 LOG = logging.getLogger(__name__)
@@ -80,7 +80,7 @@ class WebUsbTransport(Transport):
             atexit.register(cls.context.close)
 
         if models is None:
-            models = TREZORS
+            models = ALL_MODELS
         usb_ids = [id for model in models for id in model.usb_ids]
         devices: List["WebUsbTransport"] = []
         for dev in cls.context.getDeviceIterator(skip_on_error=True):
@@ -109,7 +109,7 @@ class WebUsbTransport(Transport):
     def get_path(self) -> str:
         return f"{self.PATH_PREFIX}:{dev_to_str(self.device)}"
 
-    def open(self) -> None:
+    def _open(self) -> None:
         self.handle = self.device.open()
         if self.handle is None:
             if sys.platform.startswith("linux"):
@@ -124,7 +124,7 @@ class WebUsbTransport(Transport):
         except usb1.USBErrorBusy as e:
             raise DeviceIsBusy(self.device) from e
 
-    def close(self) -> None:
+    def _close(self) -> None:
         if self.handle is not None:
             try:
                 self.handle.releaseInterface(self.interface)
@@ -134,10 +134,9 @@ class WebUsbTransport(Transport):
                 LOG.warning("Failed to close %s: %s", self.handle, e)
         self.handle = None
 
-    def write_chunk(self, chunk: bytes) -> None:
+    def write_chunk(self, chunk: bytes, /) -> None:
         assert self.handle is not None
-        if len(chunk) != WEBUSB_CHUNK_SIZE:
-            raise TransportException(f"Unexpected chunk size: {len(chunk)}")
+        _check_chunk_size(chunk)
         LOG.log(DUMP_PACKETS, f"writing packet: {chunk.hex()}")
         while True:
             try:
@@ -156,7 +155,7 @@ class WebUsbTransport(Transport):
                 )
             return
 
-    def read_chunk(self, timeout: float | None = None) -> bytes:
+    def read_chunk(self, *, timeout: float | None = None) -> bytes:
         assert self.handle is not None
         endpoint = 0x80 | self.endpoint
         start = time.time()
@@ -166,10 +165,13 @@ class WebUsbTransport(Transport):
                     endpoint, WEBUSB_CHUNK_SIZE, USB_COMM_TIMEOUT_MS
                 )
                 LOG.log(DUMP_PACKETS, f"read packet: {chunk.hex()}")
-                if len(chunk) != WEBUSB_CHUNK_SIZE:
-                    raise TransportException(f"Unexpected chunk size: {len(chunk)}")
-                return chunk
-            except usb1.USBErrorTimeout:
+                return _check_chunk_size(chunk)
+            except usb1.USBErrorTimeout as exc:
+                if exc.received:
+                    # `libusb1` may return the received data even in case of a timeout
+                    # https://github.com/vpelletier/python-libusb1/blob/292143c8f4465fdcb2c35ed40cdd7e4dd8d031e1/usb1/__init__.py#L1567
+                    return _check_chunk_size(exc.received)
+
                 if timeout is not None and time.time() - start > timeout:
                     raise Timeout(f"Timeout reading WebUSB packet ({timeout}s)")
             except Exception as e:
@@ -179,8 +181,14 @@ class WebUsbTransport(Transport):
         # For v1 protocol, find debug USB interface for the same serial number
         return self.__class__(self.device, debug=True)
 
-    def ping(self) -> bool:
+    def is_open(self) -> bool:
         return self.handle is not None
+
+
+def _check_chunk_size(chunk: bytes) -> bytes:
+    if len(chunk) != WEBUSB_CHUNK_SIZE:
+        raise TransportException(f"Unexpected chunk size: {len(chunk)}")
+    return chunk
 
 
 def is_vendor_class(dev: usb1.USBDevice) -> bool:

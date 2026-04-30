@@ -54,9 +54,11 @@ smp = []
 tropic = []
 serial_number = []
 storage = []
+telemetry = []
 translations = ["crypto"]
 secmon_layout = []
 dbg_console = []
+app_loading = []
 test = [
     "backlight",
     "button",

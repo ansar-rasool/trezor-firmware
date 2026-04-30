@@ -19,6 +19,8 @@
 
 #if defined(KERNEL) && defined(USE_SECMON_LAYOUT)
 
+#include <trezor_rtl.h>
+
 #include "smcall_invoke.h"
 #include "smcall_numbers.h"
 
@@ -39,7 +41,7 @@ void bootargs_get_args(boot_args_t *args) {
 // boot_image.h
 // =============================================================================
 
-#include <util/boot_image.h>
+#include <sec/boot_image.h>
 
 bool boot_image_check(const boot_image_t *image) {
   return (bool)smcall_invoke1((uint32_t)image, SMCALL_BOOT_IMAGE_CHECK);
@@ -53,7 +55,7 @@ void boot_image_replace(const boot_image_t *image) {
 // board_capabilities.h
 // =============================================================================
 
-#include <util/board_capabilities.h>
+#include <sec/board_capabilities.h>
 
 uint32_t get_board_name(void) { return smcall_invoke0(SMCALL_GET_BOARD_NAME); }
 
@@ -109,7 +111,7 @@ void reboot_with_rsod(const systask_postmortem_t *pminfo) {
 
 #ifdef USE_SUSPEND
 
-#include <sys/suspend_io.h>
+#include <sec/suspend_io.h>
 
 void suspend_cpu(void) { smcall_invoke0(SMCALL_SUSPEND_CPU); }
 
@@ -127,7 +129,7 @@ void resume_secure_drivers(void) {
 // unit_properties.h
 // =============================================================================
 
-#include <util/unit_properties.h>
+#include <sec/unit_properties.h>
 
 void unit_properties_get(unit_properties_t *props) {
   smcall_invoke1((uint32_t)props, SMCALL_UNIT_PROPERTIES_GET);
@@ -238,10 +240,10 @@ secbool storage_is_unlocked(void) {
 
 void storage_lock(void) { smcall_invoke0(SMCALL_STORAGE_LOCK); }
 
-secbool storage_unlock(const uint8_t *pin, size_t pin_len,
-                       const uint8_t *ext_salt) {
-  return (secbool)smcall_invoke3((uint32_t)pin, pin_len, (uint32_t)ext_salt,
-                                 SMCALL_STORAGE_UNLOCK);
+storage_unlock_result_t storage_unlock(const uint8_t *pin, size_t pin_len,
+                                       const uint8_t *ext_salt) {
+  return (storage_unlock_result_t)smcall_invoke3(
+      (uint32_t)pin, pin_len, (uint32_t)ext_salt, SMCALL_STORAGE_UNLOCK);
 }
 
 secbool storage_has_pin(void) {
@@ -255,14 +257,12 @@ uint32_t storage_get_pin_rem(void) {
   return smcall_invoke0(SMCALL_STORAGE_GET_PIN_REM);
 }
 
-secbool storage_change_pin(const uint8_t *oldpin, size_t oldpin_len,
-                           const uint8_t *newpin, size_t newpin_len,
-                           const uint8_t *old_ext_salt,
-                           const uint8_t *new_ext_salt) {
-  return (secbool)smcall_invoke6((uint32_t)oldpin, oldpin_len, (uint32_t)newpin,
-                                 newpin_len, (uint32_t)old_ext_salt,
-                                 (uint32_t)new_ext_salt,
-                                 SMCALL_STORAGE_CHANGE_PIN);
+storage_pin_change_result_t storage_change_pin(const uint8_t *newpin,
+                                               size_t newpin_len,
+                                               const uint8_t *new_ext_salt) {
+  return (storage_pin_change_result_t)smcall_invoke3(
+      (uint32_t)newpin, newpin_len, (uint32_t)new_ext_salt,
+      SMCALL_STORAGE_CHANGE_PIN);
 }
 
 void storage_ensure_not_wipe_code(const uint8_t *pin, size_t pin_len) {
@@ -313,7 +313,7 @@ secbool storage_next_counter(const uint16_t key, uint32_t *count) {
 // rng.h
 // =============================================================================
 
-#include <sec/rng.h>
+#include <sec/rng_strong.h>
 
 void rng_fill_buffer(void *buffer, size_t buffer_size) {
   smcall_invoke2((uint32_t)buffer, buffer_size, SMCALL_RNG_FILL_BUFFER);
@@ -328,7 +328,7 @@ bool rng_fill_buffer_strong(void *buffer, size_t buffer_size) {
 // fwutils.h
 // =============================================================================
 
-#include <util/fwutils.h>
+#include <sec/fwutils.h>
 
 secbool firmware_get_vendor(char *buff, size_t buff_size) {
   return smcall_invoke2((uint32_t)buff, buff_size, SMCALL_FIRMWARE_GET_VENDOR);
@@ -375,7 +375,7 @@ bool tropic_data_read(uint16_t udata_slot, uint8_t *data, uint16_t *size) {
 
 #ifdef USE_BACKUP_RAM
 
-#include <sys/backup_ram.h>
+#include <sec/backup_ram.h>
 
 uint16_t backup_ram_search(uint16_t min_key) {
   return (bool)smcall_invoke1(min_key, SMCALL_BACKUP_RAM_SEARCH);
@@ -403,6 +403,33 @@ secbool secret_validate_nrf_pairing(const uint8_t *message, size_t msg_len,
                                     const uint8_t *mac, size_t mac_len) {
   return (secbool)smcall_invoke4((uint32_t)message, msg_len, (uint32_t)mac,
                                  mac_len, SMCALL_SECRET_VALIDATE_NRF_PAIRING);
+}
+
+#endif
+
+#ifdef USE_TELEMETRY
+
+// =============================================================================
+// telemetry.h
+// =============================================================================
+
+#include <sec/telemetry.h>
+
+void telemetry_update_battery_temp(float temp_c) {
+  smcall_invoke1(float_to_u32(temp_c), SMCALL_TELEMETRY_UPDATE_BATT_TEMP);
+}
+
+void telemetry_update_battery_errors(telemetry_batt_errors_t errors) {
+  smcall_invoke1((uint32_t)errors.all, SMCALL_TELEMETRY_UPDATE_BATT_ERRORS);
+}
+
+void telemetry_update_battery_cycles(float battery_cycles_inc) {
+  smcall_invoke1(float_to_u32(battery_cycles_inc),
+                 SMCALL_TELEMETRY_UPDATE_BATT_CYCLES);
+}
+
+bool telemetry_get(telemetry_data_t *out) {
+  return (bool)smcall_invoke1((uint32_t)out, SMCALL_TELEMETRY_GET);
 }
 
 #endif

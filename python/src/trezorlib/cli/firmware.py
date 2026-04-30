@@ -17,7 +17,6 @@
 import os
 import sys
 import time
-from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -40,8 +39,7 @@ from ..models import TrezorModel
 from . import ChoiceType, with_session
 
 if TYPE_CHECKING:
-    from ..client import TrezorClient
-    from ..transport.session import Session
+    from ..client import Session, TrezorClient
     from . import TrezorConnection
 
 MODEL_CHOICE = ChoiceType(
@@ -614,7 +612,6 @@ def download(
 @click.option("-v", "--version", help="Which version to download")
 @click.option("-s", "--skip-check", is_flag=True, help="Do not validate firmware integrity")
 @click.option("-n", "--dry-run", is_flag=True, help="Perform all steps but do not actually upload the firmware")
-@click.option("-l", "--language", help="Language code, blob, or URL")
 @click.option("--bitcoin-only/--universal", is_flag=True, default=None, help="Download bitcoin-only or universal firmware (defaults to universal)")
 @click.option("--raw", is_flag=True, help="Push raw firmware data to Trezor")
 @click.option("--fingerprint", help="Expected firmware fingerprint in hex")
@@ -630,7 +627,6 @@ def update(
     raw: bool,
     dry_run: bool,
     bitcoin_only: Optional[bool],
-    language: Optional[str],
 ) -> None:
     """Upload new firmware to device.
 
@@ -644,27 +640,10 @@ def update(
     against data.trezor.io information, if available.
     """
     with obj.client_context() as client:
-        seedless_session = client.get_seedless_session()
+        seedless_session = client.get_session(passphrase=None)
         if sum(bool(x) for x in (filename, url, version)) > 1:
             click.echo("You can use only one of: filename, url, version.")
             sys.exit(1)
-
-        language_data = b""
-        if language is not None:
-            if client.features.bootloader_mode:
-                click.echo("Language data cannot be uploaded in bootloader mode.")
-                sys.exit(1)
-
-            assert language is not None
-            try:
-                language_data = Path(language).read_bytes()
-            except Exception:
-                try:
-                    language_data = requests.get(language).content
-                except Exception:
-                    raise click.ClickException(
-                        f"Failed to load translations from {language}"
-                    ) from None
 
         if filename:
             firmware_data = filename.read()
@@ -703,21 +682,16 @@ def update(
                     seedless_session,
                     boot_command=messages.BootCommand.INSTALL_UPGRADE,
                     firmware_header=firmware_data[:header_size],
-                    language_data=language_data,
                 )
             else:
-                if language_data:
-                    click.echo(
-                        "WARNING: Seamless installation not possible, language data will not be uploaded."
-                    )
                 device.reboot_to_bootloader(seedless_session)
 
+            obj.close()
             click.echo("Waiting for bootloader...")
             while True:
                 time.sleep(0.5)
                 try:
-                    # uncache previous transport to force re-connection attempt
-                    obj.get_transport(_clear_cache=True)
+                    obj.open()
                     break
                 except Exception:
                     pass
@@ -728,7 +702,7 @@ def update(
             sys.exit(1)
 
         upload_firmware_into_device(
-            session=client.get_seedless_session(), firmware_data=firmware_data
+            session=client.get_session(passphrase=None), firmware_data=firmware_data
         )
 
 

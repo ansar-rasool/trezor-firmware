@@ -4,13 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## 1.14.1 [18th March 2026]
+
+### Security
+- Enforce advanced recovery for mnemonics shorter than 24 words.
+
+### Changed
+- Allow using Ethereum mainnet addresses on all non-Ethereum networks. This enables access to networks like Hyperliquid that use conflicting chain IDs and cannot obtain official SLIP-44 registration.  [#5134]
+- Allow ETH staking operations regardless of source.  [#6358]
+
+### Security
+- Warn if Ethereum data is too long.
+
 ## 1.14.0 [21st January 2026]
 
 ### Added
 - Send BIP-380 descriptor in GetPublicKey response.  [#3576]
 
 ### Changed
-- Allow using Ethereum mainnet addresses on all non-Ethereum networks. This enables access to networks like Hyperliquid that use conflicting chain IDs and cannot obtain official SLIP-44 registration.  [#5134]
 - Deprecate ETH Holesky testnet and use Hoodi testnet instead.  [#5942]
 
 ### Fixed
@@ -673,3 +684,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 [#5204]: https://github.com/trezor/trezor-firmware/pull/5204
 [#5257]: https://github.com/trezor/trezor-firmware/pull/5257
 [#5942]: https://github.com/trezor/trezor-firmware/pull/5942
+[#6358]: https://github.com/trezor/trezor-firmware/pull/6358

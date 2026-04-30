@@ -20,19 +20,19 @@
 #include <trezor_model.h>
 #include <trezor_rtl.h>
 
+#include <sec/rsod_special.h>
 #include <sys/bootargs.h>
 #include <sys/bootutils.h>
+#include <sys/flash.h>
+#include <sys/flash_utils.h>
 #include <sys/systick.h>
-#include <util/flash.h>
-#include <util/flash_utils.h>
-#include <util/rsod_special.h>
 
 #if defined(LOCKABLE_BOOTLOADER) || USE_STORAGE_HWKEY
 #include <sec/secret.h>
 #endif
 
 #ifdef USE_BACKUP_RAM
-#include <sys/backup_ram.h>
+#include <sec/backup_ram.h>
 #endif
 
 #include "bootui.h"
@@ -70,6 +70,7 @@ typedef enum {
   UPLOAD_ERR_INVALID_SECMON_HEADER_SIG = -19,
   UPLOAD_ERR_INVALID_SECMON_MODEL = -20,
   UPLOAD_ERR_INVALID_SECMON_HASH = -21,
+  UPLOAD_ERR_INVALID_SECMON_VERSION = -23,
   UPLOAD_ERR_SECMON_TOO_BIG = -22,
 } upload_status_t;
 
@@ -287,6 +288,12 @@ static upload_status_t process_msg_FirmwareUpload(protob_io_t *iface,
         send_msg_failure(iface, FailureType_Failure_ProcessError,
                          "Invalid secmon signature");
         return UPLOAD_ERR_INVALID_SECMON_HEADER_SIG;
+      }
+
+      if (sectrue != check_secmon_min_version(secmon_hdr->monotonic)) {
+        send_msg_failure(iface, FailureType_Failure_ProcessError,
+                         "Secmon downgrade protection");
+        return UPLOAD_ERR_INVALID_SECMON_VERSION;
       }
 
       ctx->secmon_code_size = secmon_hdr->codelen;

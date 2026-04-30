@@ -2,7 +2,19 @@ from typing import *
 from buffer_types import *
 from trezor import utils
 from trezor.enums import ButtonRequestType, RecoveryType
+# Note: `PropertyType` / `StrPropertyType` are very much WIP.
+# Historical context: Initially all we had was
+# `tuple[str, str]`, `tuple[str | None, str | bytes | None, bool | None]`, etc.
+# which we unified under `PropertyType`.
+# We then later introduced `StrPropertyType` for cases where the value
+# cannot be `bytes` and started getting rid of `PropertyType` uses.
+# There are still a few instances where properties use `bytes`,
+# but we should probably get rid of all and drop `PropertyType` completely.
+# The next goal would be to replace the `bool` with something
+# that can encode actual types / rendering strategies.
+# See more details here: https://github.com/trezor/trezor-firmware/issues/5411
 PropertyType = tuple[str | None, StrOrBytes | None, bool | None]
+StrPropertyType = tuple[str | None, str | None, bool | None]
 T = TypeVar("T")
 
 
@@ -113,6 +125,7 @@ def confirm_action(
     description: str | None,
     subtitle: str | None = None,
     verb: str | None = None,
+    cancel: bool = True,
     verb_cancel: str | None = None,
     hold: bool = False,
     hold_danger: bool = False,
@@ -167,6 +180,7 @@ def confirm_value(
     page_counter: bool = False,
     prompt_screen: bool = False,
     cancel: bool = False,
+    back_button: bool = False,
     warning_footer: str | None = None,
     external_menu: bool = False,
 ) -> LayoutObj[UiResult]:
@@ -307,15 +321,21 @@ def confirm_summary(
     fee: str,
     fee_label: str,
     title: str | None = None,
-    account_items: Sequence[PropertyType] | None = None,
+    account_items: Iterable[StrPropertyType] | None = None,
     account_title: str | None = None,
-    extra_items: Sequence[PropertyType] | None = None,
+    extra_items: Iterable[StrPropertyType] | None = None,
     extra_title: str | None = None,
     verb_cancel: str | None = None,
     back_button: bool = False,
     external_menu: bool = False,
 ) -> LayoutObj[UiResult]:
-    """Confirm summary of a transaction."""
+    """Confirm summary of a transaction.
+    account_items and extra_items need to be:
+     * a list (on Eckhart and Caesar)
+     * an iterable (on Delizia)
+     * None / non-None on Bolt
+    TODO: get rid of account_items and extra_items for consistency!
+    """
 
 
 # rust/src/ui/api/firmware_micropython.rs
@@ -355,7 +375,6 @@ def flow_confirm_output(
     message: str,
     description: str | None,
     extra: str | None,
-    amount: str | None,
     chunkify: bool,
     text_mono: bool,
     account_title: str,
@@ -364,12 +383,6 @@ def flow_confirm_output(
     br_code: ButtonRequestType,
     br_name: str,
     address_item: PropertyType | None,
-    extra_item: PropertyType | None,
-    summary_items: Sequence[PropertyType] | None = None,
-    fee_items: Sequence[PropertyType] | None = None,
-    summary_title: str | None = None,
-    summary_br_code: ButtonRequestType | None = None,
-    summary_br_name: str | None = None,
     cancel_text: str | None = None,
 ) -> LayoutObj[UiResult]:
     """Confirm the recipient, (optionally) confirm the amount and (optionally) confirm the summary and present a Hold to Sign page."""
@@ -613,8 +626,7 @@ def show_group_share_success(
 def show_homescreen(
     *,
     label: str,
-    notification: str | None,
-    notification_level: int = 0,
+    notification: tuple[str, int] | None = None,
     lockable: bool,
     skip_first_paint: bool,
 ) -> LayoutObj[UiResult]:
@@ -666,9 +678,7 @@ def show_ble_pairing_code(
 
 
 # rust/src/ui/api/firmware_micropython.rs
-def wait_ble_host_confirmation(
-    *,
-) -> LayoutObj[UiResult]:
+def wait_ble_host_confirmation() -> LayoutObj[UiResult]:
     """Pairing device: third screen (waiting for host confirmation).
     Returns on BLEEvent::{PairingCanceled, Disconnected}."""
 
@@ -708,7 +718,7 @@ def show_info(
 def show_info_with_cancel(
     *,
     title: str,
-    items: Sequence[PropertyType],
+    items: list[StrPropertyType],
     horizontal: bool = False,
     chunkify: bool = False,
 ) -> LayoutObj[UiResult]:
@@ -761,6 +771,7 @@ def show_properties(
     *,
     title: str,
     value: Sequence[PropertyType] | str,
+    subtitle: str | None = None,
 ) -> LayoutObj[None]:
     """Show a list of key-value pairs, or a monospace string."""
 
@@ -838,6 +849,12 @@ def show_warning(
 
 
 # rust/src/ui/api/firmware_micropython.rs
+def confirm_cancel() -> LayoutObj[UiResult]:
+    """Ask the user to confirm the cancellation (or cancel the cancellation and go back to
+    the previous flow)"""
+
+
+# rust/src/ui/api/firmware_micropython.rs
 def tutorial() -> LayoutObj[UiResult]:
     """Show user how to interact with the device."""
 
@@ -860,6 +877,15 @@ class AttachType:
     SWIPE_DOWN: ClassVar[int]
     SWIPE_LEFT: ClassVar[int]
     SWIPE_RIGHT: ClassVar[int]
+
+
+# rust/src/ui/api/firmware_micropython.rs
+class NotificationLevel:
+    """Notification level determining the style of notification."""
+    ALERT: ClassVar[int]
+    WARNING: ClassVar[int]
+    INFO: ClassVar[int]
+    SUCCESS: ClassVar[int]
 
 
 # rust/src/ui/api/firmware_micropython.rs

@@ -4,7 +4,12 @@ from ubinascii import hexlify
 from trezor import loop, protobuf, workflow
 from trezor.wire import context, message_handler, protocol_common
 from trezor.wire.context import UnexpectedMessageException
-from trezor.wire.errors import ActionCancelled, DataError, SilentError
+from trezor.wire.errors import (
+    ActionCancelled,
+    DataError,
+    SilentError,
+    UnexpectedMessage,
+)
 from trezor.wire.protocol_common import Context, Message
 from trezor.wire.thp import ChannelState, get_enabled_pairing_methods, ui
 
@@ -86,7 +91,7 @@ class PairingContext(Context):
 
     async def read(
         self,
-        expected_types: Container[int],
+        expected_types: Container[int] | None,
         expected_type: type[protobuf.MessageType] | None = None,
     ) -> protobuf.MessageType:
         if __debug__:
@@ -102,7 +107,7 @@ class PairingContext(Context):
             )
 
         _, message = await self.channel_ctx.decrypt_message()
-        if message.type not in expected_types:
+        if not expected_types or message.type not in expected_types:
             from trezor.messages import Cancel
 
             if message.type == Cancel.MESSAGE_WIRE_TYPE:
@@ -188,7 +193,12 @@ async def handle_message(
     try:
         # Find a protobuf.MessageType subclass that describes this
         # message.  Raises if the type is not found.
-        req_type = protobuf.type_for_wire(pairing_ctx.message_type_enum_name, msg.type)
+        try:
+            req_type = protobuf.type_for_wire(
+                pairing_ctx.message_type_enum_name, msg.type
+            )
+        except KeyError:
+            raise UnexpectedMessage("Message unrecognized in pairing context")
 
         # Try to decode the message according to schema from
         # `req_type`. Raises if the message is malformed.

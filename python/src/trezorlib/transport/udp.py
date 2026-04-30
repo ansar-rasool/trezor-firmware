@@ -37,7 +37,7 @@ class UdpTransport(Transport):
     DEFAULT_HOST = "127.0.0.1"
     DEFAULT_PORT = 21324
     PATH_PREFIX = "udp"
-    ENABLED: bool = True
+    ENABLED = True
     CHUNK_SIZE = 64
 
     def __init__(self, device: str | None = None) -> None:
@@ -58,7 +58,7 @@ class UdpTransport(Transport):
         d = cls(path)
         try:
             d.open()
-            if d.ping():
+            if d.is_ready():
                 return d
             else:
                 raise TransportException(
@@ -72,7 +72,7 @@ class UdpTransport(Transport):
 
     @classmethod
     def enumerate(
-        cls, _models: Iterable["TrezorModel"] | None = None
+        cls, models: Iterable["TrezorModel"] | None = None
     ) -> Iterable["UdpTransport"]:
         default_path = f"{cls.DEFAULT_HOST}:{cls.DEFAULT_PORT}"
         try:
@@ -95,24 +95,24 @@ class UdpTransport(Transport):
     def get_path(self) -> str:
         return "{}:{}:{}".format(self.PATH_PREFIX, *self.device)
 
-    def open(self) -> None:
+    def _open(self) -> None:
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.connect(self.device)
         self.socket.settimeout(SOCKET_TIMEOUT)
 
-    def close(self) -> None:
+    def _close(self) -> None:
         if self.socket is not None:
             self.socket.close()
         self.socket = None
 
-    def write_chunk(self, chunk: bytes) -> None:
+    def write_chunk(self, chunk: bytes, /) -> None:
         assert self.socket is not None
         if len(chunk) != 64:
             raise TransportException("Unexpected data length")
         LOG.log(DUMP_PACKETS, f"sending packet: {chunk.hex()}")
         self.socket.sendall(chunk)
 
-    def read_chunk(self, timeout: float | None = None) -> bytes:
+    def read_chunk(self, *, timeout: float | None = None) -> bytes:
         assert self.socket is not None
         start = time.time()
         while True:
@@ -132,27 +132,33 @@ class UdpTransport(Transport):
         return UdpTransport(f"{host}:{port + 1}")
 
     def wait_until_ready(self, timeout: float = 10) -> None:
-        try:
-            self.open()
+        with self:
             start = time.monotonic()
             while True:
-                if self.ping():
+                if self.is_ready():
                     break
                 elapsed = time.monotonic() - start
                 if elapsed >= timeout:
                     raise Timeout("Timed out waiting for connection.")
 
                 time.sleep(0.05)
-        finally:
-            self.close()
 
-    def ping(self) -> bool:
+    def is_open(self) -> bool:
+        return self.socket is not None
+
+    def is_ready(self) -> bool:
         """Test if the device is listening."""
-        assert self.socket is not None
-        resp = None
+        if not self.is_open():
+            return False
+        assert self.socket is not None  # pyright fails otherwise
         try:
+            LOG.log(DUMP_PACKETS, f"PINGing {self.device}")
             self.socket.sendall(b"PINGPING")
             resp = self.socket.recv(8)
-        except Exception:
-            pass
+        except TimeoutError:
+            LOG.log(DUMP_PACKETS, f"Ping to {self.device} timed out")
+            return False
+        except Exception as e:
+            LOG.debug(f"Error while PINGing {self.device}: %s", e)
+            return False
         return resp == b"PONGPONG"

@@ -19,10 +19,10 @@
 
 #include <trezor_rtl.h>
 
-#include <rtl/logging.h>
 #include <rtl/printf.h>
 #include <rtl/strutils.h>
 #include <sys/dbg_console.h>
+#include <sys/logging.h>
 #include <sys/systick.h>
 
 #ifndef TREZOR_EMULATOR
@@ -254,6 +254,17 @@ void syslog_print_hex(const log_source_t* source, log_level_t level,
       syslog_write_chunk(byte_str, strlen(byte_str), last_chunk);
     }
   }
+}
+
+// declared in rtl/error_handling.h
+void syslog_tsh_error(ts_t status, const char* file, int line) {
+  log_source_t source = {
+      .name = "tsh",
+      .name_len = sizeof("tsh") - 1,
+  };
+
+  syslog_printf(&source, LOG_LEVEL_ERR, "%s at %s:%d", ts_string(status), file,
+                line);
 }
 
 #ifdef TREZOR_PRODTEST

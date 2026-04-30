@@ -22,7 +22,7 @@
 #include <string.h>
 
 #include <rtl/cli.h>
-#include <sec/rng.h>
+#include <sec/rng_strong.h>
 #include <sec/secret.h>
 #include <sec/secret_keys.h>
 
@@ -128,7 +128,8 @@ static void prodtest_secrets_init(cli_t* cli) {
   // Ensure that a session with Tropic is established so that we can include
   // randomness from the chip when generating the secrets. At this point in
   // provisioning the factory pairing key should still be valid.
-  if (tropic_custom_session_start(TROPIC_FACTORY_PAIRING_KEY_SLOT) != LT_OK) {
+  if (tropic_custom_session_start(cli, TROPIC_FACTORY_PAIRING_KEY_SLOT) !=
+      LT_OK) {
     cli_error(cli, CLI_ERROR, "`tropic_custom_session_start()` failed.");
     return;
   }

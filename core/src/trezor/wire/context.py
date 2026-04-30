@@ -7,10 +7,6 @@ context.
 To avoid the need to pass a context object around, the context is stored in a
 pseudo-global manner: any workflow handler can request access to the context via this
 module, and the appropriate context object will be used for it.
-
-Some workflows don't need a context to exist. This is supported by the `maybe_call`
-function, which will silently ignore the call if no context is available. Useful mainly
-for ButtonRequests. Of course, `context.wait()` transparently works in such situations.
 """
 
 from typing import TYPE_CHECKING
@@ -27,6 +23,8 @@ if TYPE_CHECKING:
 
     from storage.cache_common import DataCache
 
+    from .protocol_common import ContinueOnErrors
+
     Msg = TypeVar("Msg", bound=protobuf.MessageType)
     HandlerTask = Coroutine[Any, Any, protobuf.MessageType]
     Handler = Callable[["Context", Msg], HandlerTask]
@@ -34,6 +32,9 @@ if TYPE_CHECKING:
     LoadedMessageType = TypeVar("LoadedMessageType", bound=protobuf.MessageType)
 
     T = TypeVar("T")
+
+    if utils.USE_THP:
+        from trezor.wire.thp.channel import Channel
 
 
 class UnexpectedMessageException(Exception):
@@ -86,20 +87,6 @@ async def call_any(
     return await CURRENT_CONTEXT.read(expected_wire_types)
 
 
-async def maybe_call(
-    msg: protobuf.MessageType, expected_type: type[LoadedMessageType]
-) -> None:
-    """Send a message to the host and read but ignore the response.
-
-    If there is a context, the function still checks that the response is of the
-    requested type. If there is no context, the call is ignored.
-    """
-    if CURRENT_CONTEXT is None:
-        return
-
-    await call(msg, expected_type)
-
-
 def get_context() -> Context:
     """Get the current session context.
 
@@ -116,7 +103,18 @@ def get_context() -> Context:
     return CURRENT_CONTEXT
 
 
-def with_context(ctx: Context, workflow: loop.Task) -> Generator:
+if utils.USE_THP:
+
+    def get_channel_context() -> Channel:
+        from trezor.wire.thp.session_context import GenericSessionContext
+
+        ctx = get_context()
+        if not isinstance(ctx, GenericSessionContext):
+            raise TypeError("Current context is not a THP session context")
+        return ctx.channel
+
+
+def with_context(ctx: Context, workflow: loop.Task[T]) -> Generator[Any, Any, T]:
     """Run a workflow in a particular context.
 
     Stores the context in a closure and installs it into the global variable every time
@@ -164,7 +162,6 @@ def try_get_ctx_ids() -> tuple[AnyBytes, AnyBytes] | None:
 # ACCESS TO CACHE
 
 if TYPE_CHECKING:
-    T = TypeVar("T")
 
     @overload
     def cache_get(key: int) -> bytes | None:  # noqa: F811
@@ -225,3 +222,10 @@ def _get_cache_for_key(key: int) -> DataCache:
     if CURRENT_CONTEXT is None:
         raise NoWireContext
     return CURRENT_CONTEXT.cache
+
+
+def continue_on_errors(msg: str) -> ContinueOnErrors:
+    """Return a context manager that ignores I/O-related errors."""
+    from .protocol_common import ContinueOnErrors
+
+    return ContinueOnErrors(get_context(), msg)

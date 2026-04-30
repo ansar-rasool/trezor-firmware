@@ -71,27 +71,9 @@ class ProtobufMapping:
         protobuf.dump_message(buf, msg)
         return wire_type, buf.getvalue()
 
-    def encode_without_wire_type(self, msg: protobuf.MessageType) -> bytes:
-        """Serialize a Python protobuf class.
-
-        Returns the byte representation of the protobuf message.
-        """
-
-        buf = io.BytesIO()
-        protobuf.dump_message(buf, msg)
-        return buf.getvalue()
-
     def decode(self, msg_wire_type: int, msg_bytes: bytes) -> protobuf.MessageType:
         """Deserialize a protobuf message into a Python class."""
         cls = self.type_to_class[msg_wire_type]
-        buf = io.BytesIO(msg_bytes)
-        return protobuf.load_message(buf, cls)
-
-    def decode_without_wire_type(
-        self, message_type: type[MT], msg_bytes: bytes
-    ) -> protobuf.MessageType:
-        """Deserialize a protobuf message into a Python class."""
-        cls = message_type
         buf = io.BytesIO(msg_bytes)
         return protobuf.load_message(buf, cls)
 
@@ -110,12 +92,12 @@ class ProtobufMapping:
             msg_class = getattr(module, entry.name, None)
             if msg_class is None:
                 raise ValueError(
-                    f"Implementation of protobuf message '{entry.name}' is missing"
+                    f"Implementation of protobuf message '{entry.name}' is missing, {module}"
                 )
 
             if msg_class.MESSAGE_WIRE_TYPE != entry.value:
                 raise ValueError(
-                    f"Inconsistent wire type and MessageType record for '{entry.name}'"
+                    f"Inconsistent wire type and MessageType record for '{entry.name}': {entry.value} != {msg_class.MESSAGE_WIRE_TYPE}, {msg_class}"
                 )
 
             mapping.register(msg_class)

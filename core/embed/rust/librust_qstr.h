@@ -16,6 +16,7 @@ static void _librust_qstrs(void) {
   MP_QSTR_8;
   MP_QSTR_9;
   MP_QSTR_;
+  MP_QSTR_ALERT;
   MP_QSTR_ATTACHED;
   MP_QSTR_AttachType;
   MP_QSTR_BACK;
@@ -42,6 +43,7 @@ static void _librust_qstrs(void) {
   MP_QSTR_MsgDef;
   MP_QSTR_NONE;
   MP_QSTR_NORMAL;
+  MP_QSTR_NotificationLevel;
   MP_QSTR_PairDevice;
   MP_QSTR_RESUME;
   MP_QSTR_RX_PACKET_LEN;
@@ -51,6 +53,7 @@ static void _librust_qstrs(void) {
   MP_QSTR_RemovePin;
   MP_QSTR_RemoveWipeCode;
   MP_QSTR_ReviewFailedBackup;
+  MP_QSTR_SUCCESS;
   MP_QSTR_SWIPE_DOWN;
   MP_QSTR_SWIPE_LEFT;
   MP_QSTR_SWIPE_RIGHT;
@@ -71,6 +74,7 @@ static void _librust_qstrs(void) {
   MP_QSTR_TurnOff;
   MP_QSTR_UnpairAllDevices;
   MP_QSTR_UnpairDevice;
+  MP_QSTR_WARNING;
   MP_QSTR_WipeDevice;
   MP_QSTR___del__;
   MP_QSTR___dict__;
@@ -279,6 +283,7 @@ static void _librust_qstrs(void) {
   MP_QSTR_coinjoin_authorized;
   MP_QSTR_confirm_action;
   MP_QSTR_confirm_address;
+  MP_QSTR_confirm_cancel;
   MP_QSTR_confirm_coinjoin;
   MP_QSTR_confirm_emphasized;
   MP_QSTR_confirm_fido;
@@ -336,11 +341,9 @@ static void _librust_qstrs(void) {
   MP_QSTR_experimental_mode__title;
   MP_QSTR_external_menu;
   MP_QSTR_extra;
-  MP_QSTR_extra_item;
   MP_QSTR_extra_items;
   MP_QSTR_extra_title;
   MP_QSTR_fee;
-  MP_QSTR_fee_items;
   MP_QSTR_fee_label;
   MP_QSTR_fee_rate_amount;
   MP_QSTR_fingerprint;
@@ -477,7 +480,6 @@ static void _librust_qstrs(void) {
   MP_QSTR_more_info_callback;
   MP_QSTR_multiple_pages_texts;
   MP_QSTR_notification;
-  MP_QSTR_notification_level;
   MP_QSTR_page_count;
   MP_QSTR_page_counter;
   MP_QSTR_pages;
@@ -854,10 +856,6 @@ static void _librust_qstrs(void) {
   MP_QSTR_storage_msg__wrong_pin;
   MP_QSTR_subtext;
   MP_QSTR_subtitle;
-  MP_QSTR_summary_br_code;
-  MP_QSTR_summary_br_name;
-  MP_QSTR_summary_items;
-  MP_QSTR_summary_title;
   MP_QSTR_switch_off;
   MP_QSTR_text;
   MP_QSTR_text_check;
@@ -989,6 +987,7 @@ static void _librust_qstrs(void) {
   MP_QSTR_words__chain;
   MP_QSTR_words__comm_trouble;
   MP_QSTR_words__confirm;
+  MP_QSTR_words__confirm_all;
   MP_QSTR_words__confirm_fee;
   MP_QSTR_words__connect;
   MP_QSTR_words__connected;
@@ -1003,6 +1002,7 @@ static void _librust_qstrs(void) {
   MP_QSTR_words__enabled;
   MP_QSTR_words__error;
   MP_QSTR_words__fee;
+  MP_QSTR_words__fee_limit;
   MP_QSTR_words__forget;
   MP_QSTR_words__from;
   MP_QSTR_words__good_to_know;
@@ -1016,6 +1016,7 @@ static void _librust_qstrs(void) {
   MP_QSTR_words__name;
   MP_QSTR_words__no;
   MP_QSTR_words__not_recommended;
+  MP_QSTR_words__note;
   MP_QSTR_words__off;
   MP_QSTR_words__on;
   MP_QSTR_words__operation_cancelled;
@@ -1029,11 +1030,13 @@ static void _librust_qstrs(void) {
   MP_QSTR_words__receive;
   MP_QSTR_words__recipient;
   MP_QSTR_words__recovery_share;
+  MP_QSTR_words__resource;
   MP_QSTR_words__review;
   MP_QSTR_words__security;
   MP_QSTR_words__send;
   MP_QSTR_words__set;
   MP_QSTR_words__settings;
+  MP_QSTR_words__show_next;
   MP_QSTR_words__sign;
   MP_QSTR_words__signer;
   MP_QSTR_words__swap;
@@ -1235,6 +1238,8 @@ static void _librust_qstrs(void) {
   MP_QSTR_ethereum__approve_unlimited_template;
   MP_QSTR_ethereum__contract_address;
   MP_QSTR_ethereum__data_size_template;
+  MP_QSTR_ethereum__eip_7702;
+  MP_QSTR_ethereum__eip_7702_title;
   MP_QSTR_ethereum__gas_limit;
   MP_QSTR_ethereum__gas_price;
   MP_QSTR_ethereum__interaction_contract;

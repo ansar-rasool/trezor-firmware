@@ -29,7 +29,8 @@
 
 #include <io/display.h>
 #include <io/unix/sdl_display.h>
-#include <rtl/logging.h>
+#include <sys/logging.h>
+#include <sys/systask.h>
 
 #include <SDL.h>
 #include <SDL_image.h>
@@ -101,10 +102,6 @@ static display_driver_t g_display_driver = {
 int sdl_display_res_x = DISPLAY_RESX, sdl_display_res_y = DISPLAY_RESY;
 int sdl_touch_offset_x, sdl_touch_offset_y;
 
-static void display_exit_handler(void) {
-  display_deinit(DISPLAY_RESET_CONTENT);
-}
-
 bool display_init(display_content_mode_t mode) {
   display_driver_t *drv = &g_display_driver;
 
@@ -116,7 +113,6 @@ bool display_init(display_content_mode_t mode) {
     LOG_ERR("%s", SDL_GetError());
     error_shutdown("SDL_Init error");
   }
-  atexit(display_exit_handler);
 
   char *window_title = NULL;
   char *window_title_alloc = NULL;
@@ -406,7 +402,7 @@ static SDL_Rect screen_rect(void) {
   }
 }
 
-void display_refresh(void) {
+static void display_refresh_internal(void) {
   display_driver_t *drv = &g_display_driver;
 
   if (!drv->initialized) {
@@ -437,6 +433,23 @@ void display_refresh(void) {
 #endif
 
   SDL_RenderPresent(drv->renderer);
+}
+
+static void display_refresh_trampoline(uintptr_t arg1, uintptr_t arg2,
+                                       uintptr_t arg3) {
+  display_refresh_internal();
+  systask_yield_to((systask_t *)arg1);
+}
+
+void display_refresh(void) {
+  // Call SDL drawing function in the context of the kernel task
+  if (systask_active() == systask_kernel()) {
+    display_refresh_internal();
+  } else {
+    systask_push_call(systask_kernel(), (void *)display_refresh_trampoline,
+                      (uintptr_t)systask_active(), 0, 0);
+    systask_yield_to(systask_kernel());
+  }
 }
 
 #ifndef DISPLAY_MONO
@@ -577,7 +590,7 @@ void display_clear_save(void) {
 }
 
 #ifdef USE_POWER_MANAGER
-void display_draw_suspend_overlay(void) {
+static void display_draw_suspend_overlay_internal(void) {
   display_driver_t *drv = &g_display_driver;
 
   if (!drv->initialized) {
@@ -617,4 +630,24 @@ void display_draw_suspend_overlay(void) {
   SDL_DestroyTexture(overlay);
   SDL_SetRenderDrawColor(drv->renderer, 0, 0, 0, 255);
 }
+
+static void display_draw_suspend_overlay_trampoline(uintptr_t arg1,
+                                                    uintptr_t arg2,
+                                                    uintptr_t arg3) {
+  display_draw_suspend_overlay_internal();
+  systask_yield_to((systask_t *)arg1);
+}
+
+void display_draw_suspend_overlay(void) {
+  // Call SDL drawing function in the context of the kernel task
+  if (systask_active() == systask_kernel()) {
+    display_draw_suspend_overlay_internal();
+  } else {
+    systask_push_call(systask_kernel(),
+                      (void *)display_draw_suspend_overlay_trampoline,
+                      (uintptr_t)systask_active(), 0, 0);
+    systask_yield_to(systask_kernel());
+  }
+}
+
 #endif

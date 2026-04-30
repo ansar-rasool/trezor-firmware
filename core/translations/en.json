@@ -1,7 +1,7 @@
 {
   "header": {
     "language": "en-US",
-    "version": "2.10.0"
+    "version": "2.11.0"
   },
   "translations": {
     "addr_mismatch__contact_support_at": "Please contact Trezor support at",
@@ -83,17 +83,22 @@
     "backup__not_recommend": "We don't recommend to skip wallet backup creation.",
     "backup__recover_anytime": "You can use your backup to recover your wallet at any time.",
     "backup__title_backup_completed": {
-      "Bolt": "Wallet backup completed",
-      "Caesar": "Wallet backup completed",
+      "Bolt": "",
+      "Caesar": "",
       "Delizia": "Wallet backup completed",
       "Eckhart": "Wallet backup completed."
     },
-    "backup__title_backup_wallet": "Back up wallet",
+    "backup__title_backup_wallet": {
+      "Bolt": "",
+      "Caesar": "Back up wallet",
+      "Delizia": "",
+      "Eckhart": ""
+    },
     "backup__title_create_wallet_backup": "Create wallet backup",
     "backup__title_skip": "Skip backup",
     "backup__want_to_skip": "Are you sure you want to skip the backup?",
     "bitcoin__commitment_data": "Commitment data",
-    "bitcoin__confirm_locktime": "Confirm locktime",
+    "bitcoin__confirm_locktime": "Confirm Locktime",
     "bitcoin__create_proof_of_ownership": "Do you want to create a proof of ownership?",
     "bitcoin__high_mining_fee_template": "The mining fee of\n{0}\nis unexpectedly high.",
     "bitcoin__locktime_no_effect": "Locktime is set but will have no effect.",
@@ -101,7 +106,7 @@
     "bitcoin__locktime_set_to_blockheight": "Locktime set to blockheight",
     "bitcoin__lot_of_change_outputs": "A lot of change-outputs.",
     "bitcoin__multiple_accounts": "Multiple accounts",
-    "bitcoin__new_fee_rate": "New fee rate:",
+    "bitcoin__new_fee_rate": "New fee rate",
     "bitcoin__simple_send_of": "Simple send of",
     "bitcoin__ticket_amount": "Ticket amount",
     "bitcoin__title_confirm_details": "Confirm details",
@@ -312,23 +317,23 @@
     "cardano__addr_legacy": "Legacy",
     "cardano__addr_pointer": "Pointer",
     "cardano__addr_reward": "Reward",
-    "cardano__address_no_staking": "address - no staking rewards.",
+    "cardano__address_no_staking": "Address - no staking rewards.",
     "cardano__always_abstain": "Always Abstain",
     "cardano__always_no_confidence": "Always No Confidence",
-    "cardano__amount_burned_decimals_unknown": "Amount burned (decimals unknown):",
-    "cardano__amount_minted_decimals_unknown": "Amount minted (decimals unknown):",
-    "cardano__amount_sent_decimals_unknown": "Amount sent (decimals unknown):",
+    "cardano__amount_burned_decimals_unknown": "Amount burned (decimals unknown)",
+    "cardano__amount_minted_decimals_unknown": "Amount minted (decimals unknown)",
+    "cardano__amount_sent_decimals_unknown": "Amount sent (decimals unknown)",
     "cardano__anonymous_pool": "Pool has no metadata (anonymous pool)",
-    "cardano__asset_fingerprint": "Asset fingerprint:",
-    "cardano__auxiliary_data_hash": "Auxiliary data hash:",
+    "cardano__asset_fingerprint": "Asset fingerprint",
+    "cardano__auxiliary_data_hash": "Auxiliary data hash",
     "cardano__block": "Block",
     "cardano__catalyst": "Catalyst",
     "cardano__certificate": "Certificate",
     "cardano__change_output": "Change output",
     "cardano__check_all_items": "Check all items carefully.",
     "cardano__choose_level_of_details": "Choose level of details:",
-    "cardano__collateral_input_id": "Collateral input ID:",
-    "cardano__collateral_input_index": "Collateral input index:",
+    "cardano__collateral_input_id": "Collateral input ID",
+    "cardano__collateral_input_index": "Collateral input index",
     "cardano__collateral_output_contains_tokens": "The collateral return output contains tokens.",
     "cardano__collateral_return": "Collateral return",
     "cardano__confirm_message": "Confirm message",
@@ -340,59 +345,59 @@
     "cardano__confirming_transaction": "Confirming a transaction.",
     "cardano__cost": "Cost",
     "cardano__credential_mismatch": "Credential doesn't match payment credential.",
-    "cardano__datum_hash": "Datum hash:",
-    "cardano__delegating_to": "Delegating to:",
-    "cardano__delegating_to_key_hash": "Delegating to key hash:",
-    "cardano__delegating_to_script": "Delegating to script:",
-    "cardano__deposit": "Deposit:",
+    "cardano__datum_hash": "Datum hash",
+    "cardano__delegating_to": "Delegating to",
+    "cardano__delegating_to_key_hash": "Delegating to key hash",
+    "cardano__delegating_to_script": "Delegating to script",
+    "cardano__deposit": "Deposit",
     "cardano__empty_message": "Empty message",
-    "cardano__for_account_and_index_template": "for account {0} and index {1}:",
-    "cardano__for_account_template": "for account {0}:",
-    "cardano__for_key_hash": "for key hash:",
-    "cardano__for_script": "for script:",
+    "cardano__for_account_and_index_template": "For account {0} and index {1}",
+    "cardano__for_account_template": "For account {0}",
+    "cardano__for_key_hash": "For key hash",
+    "cardano__for_script": "For script",
     "cardano__inline_datum": "Inline datum",
-    "cardano__input_id": "Input ID:",
-    "cardano__input_index": "Input index:",
+    "cardano__input_id": "Input ID",
+    "cardano__input_index": "Input index",
     "cardano__intro_text_change": "The following address is a change address. Its",
     "cardano__intro_text_owned_by_device": "The following address is owned by this device. Its",
     "cardano__intro_text_registration_payment": "The vote key registration payment address is owned by this device. Its",
     "cardano__key_hash": "key hash",
     "cardano__margin": "Margin",
-    "cardano__message_hash": "Message hash:",
+    "cardano__message_hash": "Message hash",
     "cardano__message_hex": "Message hex",
     "cardano__message_text": "Message text",
     "cardano__multisig_path": "multi-sig path",
     "cardano__nested_scripts_template": "Contains {0} nested scripts.",
-    "cardano__network": "Network:",
+    "cardano__network": "Network",
     "cardano__no_output_tx": "Transaction has no outputs, network cannot be verified.",
-    "cardano__nonce": "Nonce:",
-    "cardano__other": "other",
+    "cardano__nonce": "Nonce",
+    "cardano__other": "Other",
     "cardano__path": "path",
     "cardano__pledge": "Pledge",
     "cardano__pointer": "pointer",
     "cardano__policy_id": "Policy ID",
-    "cardano__pool_metadata_hash": "Pool metadata hash:",
-    "cardano__pool_metadata_url": "Pool metadata url:",
-    "cardano__pool_owner": "Pool owner:",
-    "cardano__pool_reward_account": "Pool reward account:",
-    "cardano__reference_input_id": "Reference input ID:",
-    "cardano__reference_input_index": "Reference input index:",
+    "cardano__pool_metadata_hash": "Pool metadata hash",
+    "cardano__pool_metadata_url": "Pool metadata url",
+    "cardano__pool_owner": "Pool owner",
+    "cardano__pool_reward_account": "Pool reward account",
+    "cardano__reference_input_id": "Reference input ID",
+    "cardano__reference_input_index": "Reference input index",
     "cardano__reference_script": "Reference script",
     "cardano__required_signer": "Required signer",
-    "cardano__reward": "reward",
+    "cardano__reward": "Reward",
     "cardano__reward_address": "Address is a reward address.",
     "cardano__reward_eligibility_warning": "Warning: The address is not a payment address, it is not eligible for rewards.",
-    "cardano__rewards_go_to": "Rewards go to:",
+    "cardano__rewards_go_to": "Rewards go to",
     "cardano__script": "script",
     "cardano__script_all": "All",
     "cardano__script_any": "Any",
-    "cardano__script_data_hash": "Script data hash:",
-    "cardano__script_hash": "Script hash:",
+    "cardano__script_data_hash": "Script data hash",
+    "cardano__script_hash": "Script hash",
     "cardano__script_invalid_before": "Invalid before",
     "cardano__script_invalid_hereafter": "Invalid hereafter",
     "cardano__script_key": "Key",
     "cardano__script_n_of_k": "N of K",
-    "cardano__script_reward": "script reward",
+    "cardano__script_reward": "Script reward",
     "cardano__sending": "Sending",
     "cardano__show_simple": "Show Simple",
     "cardano__sign_message_hash_path_template": "Sign message hash with {0}",
@@ -401,31 +406,31 @@
     "cardano__stake_delegation": "Stake delegation",
     "cardano__stake_deregistration": "Stake key deregistration",
     "cardano__stake_pool_registration": "Stakepool registration",
-    "cardano__stake_pool_registration_pool_id": "Stake pool registration\nPool ID:",
+    "cardano__stake_pool_registration_pool_id": "Stake pool registration\nPool ID",
     "cardano__stake_registration": "Stake key registration",
     "cardano__staking_key_for_account": "Staking key for account",
-    "cardano__to_pool": "to pool:",
+    "cardano__to_pool": "To pool",
     "cardano__token_minting_path": "token minting path",
-    "cardano__total_collateral": "Total collateral:",
+    "cardano__total_collateral": "Total collateral",
     "cardano__transaction": "Transaction",
     "cardano__transaction_contains_minting_or_burning": "The transaction contains minting or burning of tokens.",
     "cardano__transaction_contains_script_address_no_datum": "The following transaction output contains a script address, but does not contain a datum.",
-    "cardano__transaction_id": "Transaction ID:",
+    "cardano__transaction_id": "Transaction ID",
     "cardano__transaction_no_collateral_input": "The transaction contains no collateral inputs. Plutus script will not be able to run.",
     "cardano__transaction_no_script_data_hash": "The transaction contains no script data hash. Plutus script will not be able to run.",
     "cardano__transaction_output_contains_tokens": "The following transaction output contains tokens.",
-    "cardano__ttl": "TTL:",
+    "cardano__ttl": "TTL",
     "cardano__unknown_collateral_amount": "Unknown collateral amount.",
     "cardano__unusual_path": "Path is unusual.",
-    "cardano__valid_since": "Valid since:",
+    "cardano__valid_since": "Valid since",
     "cardano__verify_script": "Verify script",
     "cardano__vote_delegation": "Vote delegation",
     "cardano__vote_key_registration": "Vote key registration (CIP-36)",
-    "cardano__vote_public_key": "Vote public key:",
-    "cardano__voting_purpose": "Voting purpose:",
+    "cardano__vote_public_key": "Vote public key",
+    "cardano__voting_purpose": "Voting purpose",
     "cardano__warning": "Warning",
-    "cardano__weight": "Weight:",
-    "cardano__withdrawal_for_address_template": "Confirm withdrawal for {0} address:",
+    "cardano__weight": "Weight",
+    "cardano__withdrawal_for_address_template": "Confirm withdrawal for {0} address",
     "cardano__x_of_y_signatures_template": "Requires {0} out of {1} signatures.",
     "coinjoin__access_account": "Access your coinjoin account?",
     "coinjoin__do_not_disconnect": "Do not disconnect your Trezor!",
@@ -460,7 +465,7 @@
       "Eckhart": ""
     },
     "eos__action_name": {
-      "Bolt": "Action Name:",
+      "Bolt": "Action Name",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
@@ -478,7 +483,7 @@
       "Eckhart": ""
     },
     "eos__bytes": {
-      "Bolt": "Bytes:",
+      "Bolt": "Bytes",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
@@ -490,31 +495,31 @@
       "Eckhart": ""
     },
     "eos__checksum": {
-      "Bolt": "Checksum:",
+      "Bolt": "Checksum",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "eos__code": {
-      "Bolt": "Code:",
+      "Bolt": "Code",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "eos__contract": {
-      "Bolt": "Contract:",
+      "Bolt": "Contract",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "eos__cpu": {
-      "Bolt": "CPU:",
+      "Bolt": "CPU",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "eos__creator": {
-      "Bolt": "Creator:",
+      "Bolt": "Creator",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
@@ -532,7 +537,7 @@
       "Eckhart": ""
     },
     "eos__from": {
-      "Bolt": "From:",
+      "Bolt": "From",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
@@ -550,13 +555,13 @@
       "Eckhart": ""
     },
     "eos__name": {
-      "Bolt": "Name:",
+      "Bolt": "Name",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "eos__net": {
-      "Bolt": "NET:",
+      "Bolt": "NET",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
@@ -568,37 +573,37 @@
       "Eckhart": ""
     },
     "eos__owner": {
-      "Bolt": "Owner:",
+      "Bolt": "Owner",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "eos__parent": {
-      "Bolt": "Parent:",
+      "Bolt": "Parent",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "eos__payer": {
-      "Bolt": "Payer:",
+      "Bolt": "Payer",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "eos__permission": {
-      "Bolt": "Permission:",
+      "Bolt": "Permission",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "eos__proxy": {
-      "Bolt": "Proxy:",
+      "Bolt": "Proxy",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "eos__receiver": {
-      "Bolt": "Receiver:",
+      "Bolt": "Receiver",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
@@ -610,7 +615,7 @@
       "Eckhart": ""
     },
     "eos__requirement": {
-      "Bolt": "Requirement:",
+      "Bolt": "Requirement",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
@@ -622,31 +627,31 @@
       "Eckhart": ""
     },
     "eos__sender": {
-      "Bolt": "Sender:",
+      "Bolt": "Sender",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "eos__threshold": {
-      "Bolt": "Threshold:",
+      "Bolt": "Threshold",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "eos__to": {
-      "Bolt": "To:",
+      "Bolt": "To",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "eos__transfer": {
-      "Bolt": "Transfer:",
+      "Bolt": "Transfer",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "eos__type": {
-      "Bolt": "Type:",
+      "Bolt": "Type",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
@@ -682,7 +687,7 @@
       "Eckhart": ""
     },
     "eos__voter": {
-      "Bolt": "Voter:",
+      "Bolt": "Voter",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
@@ -701,6 +706,13 @@
     "ethereum__approve_unlimited_template": "Approving unlimited amount of {0}",
     "ethereum__contract_address": "Provider contract address",
     "ethereum__data_size_template": "Size: {0} bytes",
+    "ethereum__eip_7702": {
+      "Bolt": "Authorize the following contract as an EIP-7702 on your account",
+      "Caesar": "Authorize the following contract as an EIP-7702 on your account",
+      "Delizia": "Authorize the following contract as an EIP-7702 on your account?",
+      "Eckhart": "Authorize the following contract as an EIP-7702 on your account?"
+    },
+    "ethereum__eip_7702_title": "Smart accounts",
     "ethereum__gas_limit": "Gas limit",
     "ethereum__gas_price": "Gas price",
     "ethereum__interaction_contract": {
@@ -894,9 +906,24 @@
     "instructions__hold_to_sign": "Hold to sign",
     "instructions__learn_more": "Learn more",
     "instructions__menu_to_continue": "Use menu to continue",
-    "instructions__shares_continue_with_x_template": "Continue with Share #{0}",
-    "instructions__shares_start_with_1": "Start with share #1",
-    "instructions__shares_start_with_x_template": "Start with Share #{0}",
+    "instructions__shares_continue_with_x_template": {
+      "Bolt": "",
+      "Caesar": "",
+      "Delizia": "Continue with Share #{0}",
+      "Eckhart": ""
+    },
+    "instructions__shares_start_with_1": {
+      "Bolt": "",
+      "Caesar": "",
+      "Delizia": "Start with share #1",
+      "Eckhart": "Start with share #1"
+    },
+    "instructions__shares_start_with_x_template": {
+      "Bolt": "",
+      "Caesar": "",
+      "Delizia": "",
+      "Eckhart": "Start with Share #{0}"
+    },
     "instructions__swipe_down": "Swipe down",
     "instructions__swipe_horizontally": "Swipe horizontally",
     "instructions__tap": "Tap",
@@ -904,8 +931,8 @@
     "instructions__tap_to_continue": "Tap to continue",
     "instructions__view_all_data": "View all data in the menu.",
     "joint__title": "Joint transaction",
-    "joint__to_the_total_amount": "To the total amount:",
-    "joint__you_are_contributing": "You are contributing:",
+    "joint__to_the_total_amount": "To the total amount",
+    "joint__you_are_contributing": "You are contributing",
     "language__change_to_template": "Change language to {0}?",
     "language__changed": "Language changed successfully",
     "language__progress": {
@@ -976,7 +1003,7 @@
     },
     "modify_fee__new_transaction_fee": {
       "Bolt": "New transaction fee:",
-      "Caesar": "New transaction fee:",
+      "Caesar": "",
       "Delizia": "New transaction fee:",
       "Eckhart": "New transaction fee"
     },
@@ -1132,7 +1159,7 @@
       "Eckhart": ""
     },
     "nem__description": {
-      "Bolt": "Description:",
+      "Bolt": "Description",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
@@ -1168,7 +1195,7 @@
       "Eckhart": ""
     },
     "nem__initial_supply": {
-      "Bolt": "Initial supply:",
+      "Bolt": "Initial supply",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
@@ -1180,13 +1207,13 @@
       "Eckhart": ""
     },
     "nem__levy_divisibility": {
-      "Bolt": "Levy divisibility:",
+      "Bolt": "Levy divisibility",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "nem__levy_fee": {
-      "Bolt": "Levy fee:",
+      "Bolt": "Levy fee",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
@@ -1198,25 +1225,25 @@
       "Eckhart": ""
     },
     "nem__levy_mosaic": {
-      "Bolt": "Levy mosaic:",
+      "Bolt": "Levy mosaic",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "nem__levy_namespace": {
-      "Bolt": "Levy namespace:",
+      "Bolt": "Levy namespace",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "nem__levy_recipient": {
-      "Bolt": "Levy recipient:",
+      "Bolt": "Levy recipient",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "nem__levy_type": {
-      "Bolt": "Levy type:",
+      "Bolt": "Levy type",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
@@ -1294,7 +1321,7 @@
       "Eckhart": ""
     },
     "nem__transferable": {
-      "Bolt": "Transferable?",
+      "Bolt": "Transferable",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
@@ -1343,11 +1370,21 @@
     "passphrase__turn_off": "Turn off passphrase protection?",
     "passphrase__turn_on": "Turn on passphrase protection?",
     "passphrase__wallet": "Passphrase wallet",
-    "pin__cancel_description": "Continue without PIN",
-    "pin__cancel_info": "Without a PIN, anyone can access this device.",
+    "pin__cancel_description": {
+      "Bolt": "",
+      "Caesar": "",
+      "Delizia": "Continue without PIN",
+      "Eckhart": ""
+    },
+    "pin__cancel_info": {
+      "Bolt": "",
+      "Caesar": "",
+      "Delizia": "Without a PIN, anyone can access this device.",
+      "Eckhart": "Without a PIN, anyone can access this device."
+    },
     "pin__cancel_setup": {
-      "Bolt": "Cancel PIN setup",
-      "Caesar": "Cancel PIN setup",
+      "Bolt": "",
+      "Caesar": "",
       "Delizia": "Cancel PIN setup",
       "Eckhart": "Cancel PIN setup?"
     },
@@ -1357,7 +1394,12 @@
     "pin__cursor_will_change": "Position of the cursor will change between entries for enhanced security.",
     "pin__diff_from_wipe_code": "The new PIN must be different from your wipe code.",
     "pin__disabled": "PIN protection\nturned off.",
-    "pin__enabled": "PIN protection\nturned on.",
+    "pin__enabled": {
+      "Bolt": "PIN protection\nturned on.",
+      "Caesar": "PIN protection\nturned on.",
+      "Delizia": "PIN protection\nturned on.",
+      "Eckhart": ""
+    },
     "pin__enter": "Enter PIN",
     "pin__enter_new": "Enter new PIN",
     "pin__entered_not_valid": "The PIN you have entered is not valid.",
@@ -1376,7 +1418,12 @@
     "pin__reenter_new": "Re-enter new PIN",
     "pin__reenter_to_confirm": "Please re-enter PIN to confirm.",
     "pin__remove": "Remove PIN",
-    "pin__setup_completed": "PIN setup completed.",
+    "pin__setup_completed": {
+      "Bolt": "",
+      "Caesar": "",
+      "Delizia": "",
+      "Eckhart": "PIN setup completed."
+    },
     "pin__should_be_long": "PIN should be 4-50 digits long.",
     "pin__title": "PIN code",
     "pin__title_check_pin": "Check PIN",
@@ -1448,7 +1495,7 @@
       "Bolt": "Group {0}",
       "Caesar": "Group {0}",
       "Delizia": "Group {0}",
-      "Eckhart": "Group #{0}"
+      "Eckhart": ""
     },
     "recovery__group_threshold_reached": "Group threshold reached.",
     "recovery__info_about_disconnect": "It's safe to disconnect your Trezor while recovering your wallet and continue later.",
@@ -1467,11 +1514,16 @@
       "Bolt": "Share already entered",
       "Caesar": "Share already entered",
       "Delizia": "Share already entered",
-      "Eckhart": "Share already entered."
+      "Eckhart": "Share already entered. Enter a different share."
     },
     "recovery__share_does_not_match": "Share doesn't match",
     "recovery__share_from_another_multi_share_backup": "You have entered a share from a different backup.",
-    "recovery__share_from_group_entered_template": "Share #{0} from Group #{1} entered.",
+    "recovery__share_from_group_entered_template": {
+      "Bolt": "",
+      "Caesar": "",
+      "Delizia": "",
+      "Eckhart": "Share #{0} from Group #{1} entered."
+    },
     "recovery__share_num_template": {
       "Bolt": "Share {0}",
       "Caesar": "Share {0}",
@@ -1506,7 +1558,7 @@
     },
     "recovery__x_more_items_starting_template_plural": {
       "Bolt": "{count} more {plural} starting",
-      "Caesar": "{count} more {plural} starting",
+      "Caesar": "",
       "Delizia": "{count} more {plural} starting",
       "Eckhart": "You need {count} more {plural} starting"
     },
@@ -1522,14 +1574,24 @@
       "Delizia": "{0} of {1} shares entered",
       "Eckhart": "{0} of {1} shares entered."
     },
-    "recovery__you_have_entered": "You have entered",
+    "recovery__you_have_entered": {
+      "Bolt": "You have entered",
+      "Caesar": "You have entered",
+      "Delizia": "You have entered",
+      "Eckhart": ""
+    },
     "regulatory__title": {
       "Bolt": "",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": "Regulatory"
     },
-    "reset__advanced_group_threshold_info": "The group threshold specifies the number of groups required to recover your wallet.",
+    "reset__advanced_group_threshold_info": {
+      "Bolt": "The group threshold specifies the number of groups required to recover your wallet.",
+      "Caesar": "",
+      "Delizia": "The group threshold specifies the number of groups required to recover your wallet.",
+      "Eckhart": "The group threshold specifies the number of groups required to recover your wallet."
+    },
     "reset__all_x_of_y_template": {
       "Bolt": "all {0} of {1} shares",
       "Caesar": "",
@@ -1553,23 +1615,48 @@
     "reset__cancel_create_wallet": "Cancel create wallet",
     "reset__check_backup_instructions": "Let's do a quick check of your backup.",
     "reset__check_backup_title": "Check backup",
-    "reset__check_group_share_title_template": "Check g{0} - share {1}",
+    "reset__check_group_share_title_template": {
+      "Bolt": "Check g{0} - share {1}",
+      "Caesar": "",
+      "Delizia": "Check g{0} - share {1}",
+      "Eckhart": "Check g{0} - share {1}"
+    },
     "reset__check_share_backup_template": "Let's do a quick check of Share #{0}.",
-    "reset__check_share_title_template": "Check share #{0}",
+    "reset__check_share_title_template": {
+      "Bolt": "Check share #{0}",
+      "Caesar": "",
+      "Delizia": "Check share #{0}",
+      "Eckhart": ""
+    },
     "reset__check_wallet_backup_title": "Check wallet backup",
     "reset__continue_with_next_share": "Continue with the next share.",
-    "reset__continue_with_share_template": "Continue with share #{0}.",
+    "reset__continue_with_share_template": {
+      "Bolt": "Continue with share #{0}.",
+      "Caesar": "Continue with share #{0}.",
+      "Delizia": "",
+      "Eckhart": ""
+    },
     "reset__create_x_of_y_multi_share_backup_template": "Do you want to create a {0} of {1} multi-share backup?",
     "reset__finished_verifying_group_template": "You have finished verifying your recovery shares for group {0}.",
     "reset__finished_verifying_shares": "You have finished verifying your recovery shares.",
     "reset__finished_verifying_wallet_backup": "You have finished verifying your wallet backup.",
-    "reset__group_description": "A group is made up of recovery shares.",
-    "reset__group_info": "Each group has a set number of shares and its own threshold. In the next steps you will set the numbers of shares and the thresholds.",
+    "reset__group_description": {
+      "Bolt": "A group is made up of recovery shares.",
+      "Caesar": "",
+      "Delizia": "A group is made up of recovery shares.",
+      "Eckhart": "A group is made up of recovery shares."
+    },
+    "reset__group_info": {
+      "Bolt": "Each group has a set number of shares and its own threshold. In the next steps you will set the numbers of shares and the thresholds.",
+      "Caesar": "",
+      "Delizia": "Each group has a set number of shares and its own threshold. In the next steps you will set the numbers of shares and the thresholds.",
+      "Eckhart": "Each group has a set number of shares and its own threshold. In the next steps you will set the numbers of shares and the thresholds."
+    },
     "reset__group_share_checked_successfully_template": "Group {0} - Share {1} checked successfully.",
     "reset__group_share_title_template": {
-      "Bolt": "Group {0} - share {1}",
-      "Caesar": "Group {0} - share {1}",
-      "Delizia": "Group {0} - share {1}",
+      "Bolt": "Group {0} - Share {1}",
+      "Caesar": "Group {0} - Share {1}",
+      "Delizia": "Group {0} - Share {1}",
       "Eckhart": "Group #{0} - Share #{1}"
     },
     "reset__incorrect_word_selected": {
@@ -1606,7 +1693,12 @@
     },
     "reset__never_make_digital_copy": "Never put your backup anywhere digital.",
     "reset__num_of_share_holders_template": "{0} people or locations will each hold one share.",
-    "reset__num_of_shares_advanced_info_template": "Each recovery share is a sequence of {0} words. Next you will choose the threshold number of shares needed to form Group {1}.",
+    "reset__num_of_shares_advanced_info_template": {
+      "Bolt": "Each recovery share is a sequence of {0} words. Next you will choose the threshold number of shares needed to form Group {1}.",
+      "Caesar": "",
+      "Delizia": "Each recovery share is a sequence of {0} words. Next you will choose the threshold number of shares needed to form Group {1}.",
+      "Eckhart": "Each recovery share is a sequence of {0} words. Next you will choose the threshold number of shares needed to form Group {1}."
+    },
     "reset__num_of_shares_basic_info_template": {
       "Bolt": "Each recovery share is a sequence of {0} words. Next you will choose how many shares you need to recover your wallet.",
       "Caesar": "",
@@ -1615,20 +1707,30 @@
     },
     "reset__num_of_shares_how_many": "How many wallet backup shares do you want to create?",
     "reset__num_of_shares_long_info_template": {
-      "Bolt": "Each backup share is a sequence of {0} words. Store each wordlist in a separate, safe location or share with trusted individuals. Collect as needed to recover your wallet.",
-      "Caesar": "Each backup share is a sequence of {0} words. Store each wordlist in a separate, safe location or share with trusted individuals. Collect as needed to recover your wallet.",
+      "Bolt": "",
+      "Caesar": "",
       "Delizia": "Each backup share is a sequence of {0} words. Store each wordlist in a separate, safe location or share with trusted individuals. Collect as needed to recover your wallet.",
       "Eckhart": "Each backup share is a sequence of {0} words.\nStore each wordlist in a separate, safe location or share with trusted individuals. Collect as needed to recover your wallet."
     },
     "reset__num_shares_for_group_template": "The required number of shares to form Group {0}.",
-    "reset__number_of_shares_info": "= total number of unique word lists used for wallet backup.",
+    "reset__number_of_shares_info": {
+      "Bolt": "",
+      "Caesar": "= total number of unique word lists used for wallet backup.",
+      "Delizia": "",
+      "Eckhart": ""
+    },
     "reset__one_share": {
       "Bolt": "1 share",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
-    "reset__only_one_share_will_be_created": "Only one share will be created.",
+    "reset__only_one_share_will_be_created": {
+      "Bolt": "Only one share will be created.",
+      "Caesar": "",
+      "Delizia": "",
+      "Eckhart": ""
+    },
     "reset__recovery_share_description": "A recovery share is a list of words you wrote down when setting up your Trezor.",
     "reset__recovery_share_number": "Your wallet backup consists of 1 to 16 shares.",
     "reset__recovery_share_title_template": "Recovery share #{0}",
@@ -1637,11 +1739,16 @@
     "reset__required_number_of_groups": "The required number of groups for recovery.",
     "reset__select_correct_word": "Select the correct word for each position.",
     "reset__select_threshold": "Select the minimum shares required to recover your wallet.",
-    "reset__select_word_from_share_template": "Select word #{0} from\nShare #{1}",
+    "reset__select_word_from_share_template": {
+      "Bolt": "",
+      "Caesar": "",
+      "Delizia": "",
+      "Eckhart": "Select word #{0} from\nShare #{1}"
+    },
     "reset__select_word_template": {
-      "Bolt": "Select {0} word",
-      "Caesar": "Select {0} word",
-      "Delizia": "Select {0} word",
+      "Bolt": "",
+      "Caesar": "",
+      "Delizia": "",
       "Eckhart": "Select word #{0} from your wallet backup"
     },
     "reset__select_word_x_of_y_template": "Select word {0} of {1}:",
@@ -1651,18 +1758,53 @@
       "Delizia": "",
       "Eckhart": ""
     },
-    "reset__share_checked_successfully_template": "Share #{0} checked successfully.",
-    "reset__share_completed_template": "Share #{0} completed",
+    "reset__share_checked_successfully_template": {
+      "Bolt": "Share #{0} checked successfully.",
+      "Caesar": "Share #{0} checked successfully.",
+      "Delizia": "",
+      "Eckhart": ""
+    },
+    "reset__share_completed_template": {
+      "Bolt": "",
+      "Caesar": "",
+      "Delizia": "Share #{0} completed",
+      "Eckhart": "Share #{0} completed"
+    },
     "reset__share_words_first": "Write down the first word from the backup.",
     "reset__share_words_title": "Standard backup",
-    "reset__slip39_checklist_more_info_threshold": "The threshold sets the minimum number of shares needed to recover your wallet.",
-    "reset__slip39_checklist_more_info_threshold_example_template": "If you set {0} out of {1} shares, you'll need {2} backup shares to recover your wallet.",
+    "reset__slip39_checklist_more_info_threshold": {
+      "Bolt": "",
+      "Caesar": "",
+      "Delizia": "The threshold sets the minimum number of shares needed to recover your wallet.",
+      "Eckhart": "The threshold sets the minimum number of shares needed to recover your wallet."
+    },
+    "reset__slip39_checklist_more_info_threshold_example_template": {
+      "Bolt": "",
+      "Caesar": "",
+      "Delizia": "If you set {0} out of {1} shares, you'll need {2} backup shares to recover your wallet.",
+      "Eckhart": "If you set {0} out of {1} shares, you'll need {2} backup shares to recover your wallet."
+    },
     "reset__slip39_checklist_num_groups": "Number of groups",
     "reset__slip39_checklist_num_groups_x_template": "Number of groups: {0}",
     "reset__slip39_checklist_num_shares": "Number of shares",
-    "reset__slip39_checklist_num_shares_x_template": "Number of shares: {0}",
-    "reset__slip39_checklist_set_num_groups": "Set number of groups",
-    "reset__slip39_checklist_set_num_shares": "Set number of shares",
+    "reset__slip39_checklist_num_shares_x_template": {
+      "Bolt": "",
+      "Caesar": "",
+      "Delizia": "Number of shares: {0}",
+      "Eckhart": "Number of shares: {0}"
+    },
+    "reset__slip39_checklist_set_num_groups": {
+      "Bolt": "Set number of groups",
+      "Caesar": "",
+      "Delizia": "Set number of groups",
+      "Eckhart": "Set number of groups"
+    },
+    "reset__slip39_checklist_set_num_shares": {
+      "Bolt": "Set number of shares",
+      "Caesar": "",
+      "Delizia": "Set number of shares",
+      "Eckhart": "Set number of shares"
+    },
     "reset__slip39_checklist_set_sizes": "Set sizes and thresholds",
     "reset__slip39_checklist_set_sizes_longer": "Set size and threshold for each group",
     "reset__slip39_checklist_set_threshold": {
@@ -1671,10 +1813,25 @@
       "Delizia": "Set threshold",
       "Eckhart": "Set recovery threshold"
     },
-    "reset__slip39_checklist_threshold_x_template": "Recovery threshold: {0}",
+    "reset__slip39_checklist_threshold_x_template": {
+      "Bolt": "",
+      "Caesar": "",
+      "Delizia": "Recovery threshold: {0}",
+      "Eckhart": "Recovery threshold: {0}"
+    },
     "reset__slip39_checklist_title": "Backup checklist",
-    "reset__slip39_checklist_write_down": "Write down and check all shares",
-    "reset__slip39_checklist_write_down_recovery": "Write down & check all wallet backup shares",
+    "reset__slip39_checklist_write_down": {
+      "Bolt": "Write down and check all shares",
+      "Caesar": "Write down and check all shares",
+      "Delizia": "",
+      "Eckhart": ""
+    },
+    "reset__slip39_checklist_write_down_recovery": {
+      "Bolt": "",
+      "Caesar": "",
+      "Delizia": "Write down & check all wallet backup shares",
+      "Eckhart": "Write down & check all wallet backup shares"
+    },
     "reset__the_threshold_sets_the_number_of_shares": {
       "Bolt": "The threshold sets the number of shares ",
       "Caesar": "",
@@ -1687,16 +1844,51 @@
       "Delizia": "The word is repeated",
       "Eckhart": "The word appears multiple times in the backup."
     },
-    "reset__threshold_info": "= minimum number of unique word lists used for recovery.",
+    "reset__threshold_info": {
+      "Bolt": "",
+      "Caesar": "= minimum number of unique word lists used for recovery.",
+      "Delizia": "",
+      "Eckhart": ""
+    },
     "reset__title_backup_is_done": "Backup is done",
     "reset__title_create_wallet": "Create wallet",
-    "reset__title_group_threshold": "Group threshold",
+    "reset__title_group_threshold": {
+      "Bolt": "",
+      "Caesar": "Group threshold",
+      "Delizia": "",
+      "Eckhart": ""
+    },
     "reset__title_number_of_groups": "Number of groups",
-    "reset__title_number_of_shares": "Number of shares",
-    "reset__title_set_group_threshold": "Set group threshold",
-    "reset__title_set_number_of_groups": "Set number of groups",
-    "reset__title_set_number_of_shares": "Set number of shares",
-    "reset__title_set_threshold": "Set threshold",
+    "reset__title_number_of_shares": {
+      "Bolt": "",
+      "Caesar": "Number of shares",
+      "Delizia": "",
+      "Eckhart": ""
+    },
+    "reset__title_set_group_threshold": {
+      "Bolt": "Set group threshold",
+      "Caesar": "",
+      "Delizia": "Set group threshold",
+      "Eckhart": "Set group threshold"
+    },
+    "reset__title_set_number_of_groups": {
+      "Bolt": "Set number of groups",
+      "Caesar": "",
+      "Delizia": "Set number of groups",
+      "Eckhart": "Set number of groups"
+    },
+    "reset__title_set_number_of_shares": {
+      "Bolt": "Set number of shares",
+      "Caesar": "",
+      "Delizia": "Set number of shares",
+      "Eckhart": "Set number of shares"
+    },
+    "reset__title_set_threshold": {
+      "Bolt": "Set threshold",
+      "Caesar": "",
+      "Delizia": "Set threshold",
+      "Eckhart": ""
+    },
     "reset__title_shamir_backup": "Multi-share backup",
     "reset__to_form_group_template": {
       "Bolt": "to form Group {0}.",
@@ -1710,8 +1902,18 @@
       "Delizia": "trezor.io/tos",
       "Eckhart": "More at trezor.io/tos"
     },
-    "reset__total_number_of_shares_in_group_template": "Set the total number of shares in Group {0}.",
-    "reset__use_your_backup": "Use your backup when you need to recover your wallet.",
+    "reset__total_number_of_shares_in_group_template": {
+      "Bolt": "Set the total number of shares in Group {0}.",
+      "Caesar": "",
+      "Delizia": "Set the total number of shares in Group {0}.",
+      "Eckhart": "Set the total number of shares in Group {0}."
+    },
+    "reset__use_your_backup": {
+      "Bolt": "Use your backup when you need to recover your wallet.",
+      "Caesar": "",
+      "Delizia": "",
+      "Eckhart": ""
+    },
     "reset__words_may_repeat": "Words may repeat.",
     "reset__words_written_down_template": "I wrote down all {0} words in order.",
     "reset__write_down_words_template": "Write the following {0} words in order on your wallet backup card.",
@@ -1877,7 +2079,7 @@
     "send__confirm_sending": "Sending amount",
     "send__from_multiple_accounts": "Sending from multiple accounts.",
     "send__incl_transaction_fee": "incl. Transaction fee",
-    "send__including_fee": "Including fee:",
+    "send__including_fee": "Including fee",
     "send__maximum_fee": "Maximum fee",
     "send__multisig_different_paths": "Using different paths for different XPUBs.",
     "send__receiving_to_multisig": "Receiving to a multisig address.",
@@ -1898,8 +2100,18 @@
     "send__you_are_contributing": "You are contributing:",
     "setting__adjust": "Adjust",
     "setting__apply": "Apply",
-    "share_words__words_in_order": " words in order.",
-    "share_words__wrote_down_all": "I wrote down all ",
+    "share_words__words_in_order": {
+      "Bolt": "",
+      "Caesar": " words in order.",
+      "Delizia": "",
+      "Eckhart": ""
+    },
+    "share_words__wrote_down_all": {
+      "Bolt": "",
+      "Caesar": "I wrote down all ",
+      "Delizia": "",
+      "Eckhart": ""
+    },
     "sign_message__bytes_template": "{0} Bytes",
     "sign_message__confirm_address": "Signing address",
     "sign_message__confirm_message": "Confirm message",
@@ -1956,7 +2168,7 @@
     "stellar__allow_trust": "Allow trust",
     "stellar__balance_id": "Balance ID",
     "stellar__bump_sequence": "Bump Sequence",
-    "stellar__buying": "Buying:",
+    "stellar__buying": "Buying",
     "stellar__claim_claimable_balance": "Claim Claimable Balance",
     "stellar__clear_data": "Clear data",
     "stellar__clear_flags": "Clear flags",
@@ -1973,15 +2185,15 @@
     "stellar__exchanges_require_memo": "Memo is not set.\nTypically needed when sending to exchanges.",
     "stellar__final_confirm": "Final confirm",
     "stellar__hash": "Hash",
-    "stellar__high": "High:",
+    "stellar__high": "High",
     "stellar__home_domain": "Home Domain",
     "stellar__inflation": "Inflation",
     "stellar__issuer_template": "{0} issuer",
-    "stellar__key": "Key:",
+    "stellar__key": "Key",
     "stellar__limit": "Limit",
-    "stellar__low": "Low:",
-    "stellar__master_weight": "Master Weight:",
-    "stellar__medium": "Medium:",
+    "stellar__low": "Low",
+    "stellar__master_weight": "Master Weight",
+    "stellar__medium": "Medium",
     "stellar__new_offer": "New Offer",
     "stellar__new_passive_offer": "New Passive Offer",
     "stellar__no_memo_set": "No memo set!",
@@ -1991,10 +2203,10 @@
     "stellar__pay": "Pay",
     "stellar__pay_at_most": "Pay at most",
     "stellar__preauth_transaction": "Pre-auth transaction",
-    "stellar__price_per_template": "Price per {0}:",
+    "stellar__price_per_template": "Price per {0}",
     "stellar__remove_signer": "Remove Signer",
     "stellar__revoke_trust": "Revoke trust",
-    "stellar__selling": "Selling:",
+    "stellar__selling": "Selling",
     "stellar__set_data": "Set data",
     "stellar__set_flags": "Set flags",
     "stellar__set_sequence_to_template": "Set sequence to {0}?",
@@ -2010,7 +2222,7 @@
     "stellar__update": "Update",
     "stellar__valid_from": "Valid from (UTC)",
     "stellar__valid_to": "Valid to (UTC)",
-    "stellar__value_sha256": "Value (SHA-256):",
+    "stellar__value_sha256": "Value (SHA-256)",
     "stellar__wanna_clean_value_key_template": "Do you want to clear value key {0}?",
     "storage_msg__processing": {
       "Bolt": "Processing",
@@ -2027,8 +2239,8 @@
     },
     "storage_msg__wrong_pin": "Wrong PIN",
     "tezos__baker_address": "Baker address",
-    "tezos__balance": "Balance:",
-    "tezos__ballot": "Ballot:",
+    "tezos__balance": "Balance",
+    "tezos__ballot": "Ballot",
     "tezos__confirm_delegation": "Confirm delegation",
     "tezos__confirm_origination": "Confirm origination",
     "tezos__delegator": "Delegator",
@@ -2259,6 +2471,7 @@
     "words__chain": "Chain",
     "words__comm_trouble": "Your Trezor is having trouble communicating with your connected device.",
     "words__confirm": "Confirm",
+    "words__confirm_all": "Confirm all",
     "words__confirm_fee": "Confirm fee",
     "words__connect": "Connect",
     "words__connected": "Connected",
@@ -2273,12 +2486,23 @@
     "words__enabled": "Enabled",
     "words__error": "Error",
     "words__fee": "Fee",
+    "words__fee_limit": "Fee limit",
     "words__forget": "Forget",
-    "words__from": "from",
+    "words__from": {
+      "Bolt": "from",
+      "Caesar": "from",
+      "Delizia": "from",
+      "Eckhart": ""
+    },
     "words__good_to_know": "Good to know",
     "words__important": "Important",
     "words__instructions": "Instructions",
-    "words__keep_it_safe": "Keep it safe!",
+    "words__keep_it_safe": {
+      "Bolt": "",
+      "Caesar": "Keep it safe!",
+      "Delizia": "",
+      "Eckhart": ""
+    },
     "words__know_what_your_doing": "Continue only if you know what you are doing!",
     "words__led": "LED",
     "words__manage": "Manage",
@@ -2286,6 +2510,7 @@
     "words__name": "Name",
     "words__no": "No",
     "words__not_recommended": "Not recommended!",
+    "words__note": "Note",
     "words__off": "OFF",
     "words__on": "ON",
     "words__operation_cancelled": "Operation cancelled",
@@ -2299,24 +2524,51 @@
     "words__receive": "Receive",
     "words__recipient": "Recipient",
     "words__recovery_share": "Recovery share",
+    "words__resource": "Resource",
     "words__review": "Review",
     "words__security": "Security",
     "words__send": "Send",
     "words__set": "Set",
     "words__settings": "Settings",
+    "words__show_next": "Show next",
     "words__sign": "Sign",
     "words__signer": "Signer",
     "words__swap": "Swap",
     "words__title_check": "Check",
     "words__title_done": "Done",
-    "words__title_group": "Group",
+    "words__title_group": {
+      "Bolt": "",
+      "Caesar": "Group",
+      "Delizia": "",
+      "Eckhart": ""
+    },
     "words__title_information": "Information",
-    "words__title_remember": "Remember",
-    "words__title_share": "Share",
-    "words__title_shares": "Shares",
+    "words__title_remember": {
+      "Bolt": "",
+      "Caesar": "Remember",
+      "Delizia": "",
+      "Eckhart": ""
+    },
+    "words__title_share": {
+      "Bolt": "",
+      "Caesar": "Share",
+      "Delizia": "",
+      "Eckhart": ""
+    },
+    "words__title_shares": {
+      "Bolt": "",
+      "Caesar": "Shares",
+      "Delizia": "",
+      "Eckhart": ""
+    },
     "words__title_success": "Success",
     "words__title_summary": "Summary",
-    "words__title_threshold": "Threshold",
+    "words__title_threshold": {
+      "Bolt": "",
+      "Caesar": "Threshold",
+      "Delizia": "",
+      "Eckhart": ""
+    },
     "words__token": "Token",
     "words__transaction_fee": "Transaction fee",
     "words__try_again": {

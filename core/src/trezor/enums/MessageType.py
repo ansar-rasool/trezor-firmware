@@ -96,6 +96,8 @@ BenchmarkListNames = 9100
 BenchmarkNames = 9101
 BenchmarkRun = 9102
 BenchmarkResult = 9103
+TelemetryGet = 1100
+Telemetry = 1101
 if __debug__:
     DebugLinkDecision = 100
     DebugLinkGetState = 101
@@ -270,3 +272,11 @@ if not utils.BITCOIN_ONLY:
     NostrEventSignature = 2004
     TronGetAddress = 2200
     TronAddress = 2201
+    TronSignTx = 2202
+    TronSignature = 2203
+    TronContractRequest = 2204
+    TronTransferContract = 2205
+    TronTriggerSmartContract = 2206
+    TronFreezeBalanceV2Contract = 2207
+    TronUnfreezeBalanceV2Contract = 2208
+    TronWithdrawUnfreeze = 2209

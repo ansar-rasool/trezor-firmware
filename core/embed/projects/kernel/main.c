@@ -20,11 +20,16 @@
 #include <trezor_model.h>
 #include <trezor_rtl.h>
 
-#include <gfx/gfx_bitblt.h>
 #include <io/display.h>
+#include <io/gfx_bitblt.h>
+#include <io/rsod.h>
+#include <sec/board_capabilities.h>
+#include <sec/boot_image.h>
+#include <sec/option_bytes.h>
 #include <sec/random_delays.h>
 #include <sec/secret.h>
 #include <sec/secure_aes.h>
+#include <sec/unit_properties.h>
 #include <sys/bootutils.h>
 #include <sys/coreapp.h>
 #include <sys/mpu.h>
@@ -32,11 +37,11 @@
 #include <sys/sysevent.h>
 #include <sys/system.h>
 #include <sys/systick.h>
-#include <util/board_capabilities.h>
-#include <util/boot_image.h>
-#include <util/option_bytes.h>
-#include <util/rsod.h>
-#include <util/unit_properties.h>
+
+#ifdef USE_APP_LOADING
+#include <io/app_cache.h>
+#include <io/app_loader.h>
+#endif
 
 #ifdef USE_BUTTON
 #include <io/button.h>
@@ -63,7 +68,7 @@
 #endif
 
 #ifdef USE_BACKUP_RAM
-#include <sys/backup_ram.h>
+#include <sec/backup_ram.h>
 #endif
 
 #ifdef USE_TROPIC
@@ -71,7 +76,7 @@
 #endif
 
 #ifdef USE_POWER_MANAGER
-#include <sys/power_manager.h>
+#include <io/power_manager.h>
 #endif
 
 #ifdef USE_PVD
@@ -91,7 +96,7 @@
 #endif
 
 #ifdef USE_TAMPER
-#include <sys/tamper.h>
+#include <sec/tamper.h>
 #endif
 
 #ifdef USE_TOUCH
@@ -104,6 +109,10 @@
 #endif
 
 void drivers_init() {
+  ts_t status;
+
+  UNUSED(status);
+
 #ifdef SECURE_MODE
   parse_boardloader_capabilities();
   unit_properties_init();
@@ -170,7 +179,8 @@ void drivers_init() {
 #endif
 
 #ifdef USE_HAPTIC
-  haptic_init();
+  status = haptic_init();
+  UNUSED(status);
 #endif
 
 #ifdef USE_BLE
@@ -188,6 +198,14 @@ void drivers_init() {
 
 #ifdef USE_USB
   usb_configure(NULL);
+#endif
+
+#ifdef USE_APP_LOADING
+  status = app_cache_init();
+  ensure_ok(status, "app_cache_init failed");
+
+  status = app_loader_init();
+  ensure_ok(status, "app_loader_init failed");
 #endif
 }
 
@@ -222,16 +240,15 @@ static void kernel_loop(applet_t *coreapp) {
 static void show_rsod(const systask_postmortem_t *pminfo) {
 #ifdef RSOD_IN_COREAPP
   applet_t coreapp;
-  coreapp_init(&coreapp);
 
   // Reset and run the coreapp in RSOD mode
-  if (coreapp_reset(&coreapp, 1, pminfo, sizeof(systask_postmortem_t))) {
+  if (coreapp_init(&coreapp, 1, pminfo, sizeof(systask_postmortem_t))) {
     // Run the applet & wait for it to finish
     applet_run(&coreapp);
     // Loop until the coreapp is terminated
     kernel_loop(&coreapp);
     // Release the coreapp resources
-    applet_stop(&coreapp);
+    applet_unload(&coreapp);
 
     if (coreapp.task.pminfo.reason == TASK_TERM_REASON_EXIT) {
       // RSOD was shown successfully
@@ -285,10 +302,9 @@ int main(void) {
 
   // Initialize coreapp task
   applet_t coreapp;
-  coreapp_init(&coreapp);
 
   // Reset and run the coreapp
-  if (!coreapp_reset(&coreapp, 0, NULL, 0)) {
+  if (!coreapp_init(&coreapp, 0, NULL, 0)) {
     error_shutdown("Cannot start coreapp");
   }
 
@@ -298,7 +314,7 @@ int main(void) {
   // Loop until the coreapp is terminated
   kernel_loop(&coreapp);
   // Release the coreapp resources
-  applet_stop(&coreapp);
+  applet_unload(&coreapp);
 
 #ifndef USE_BOOTARGS_RSOD
   // Coreapp crashed, show RSOD

@@ -99,6 +99,8 @@ trezor_message_impl! {
     BenchmarkNames => MessageType_BenchmarkNames,
     BenchmarkRun => MessageType_BenchmarkRun,
     BenchmarkResult => MessageType_BenchmarkResult,
+    TelemetryGet => MessageType_TelemetryGet,
+    Telemetry => MessageType_Telemetry,
 }
 
 #[cfg(feature = "bitcoin")]
@@ -312,6 +314,14 @@ trezor_message_impl! {
 trezor_message_impl! {
     TronGetAddress => MessageType_TronGetAddress,
     TronAddress => MessageType_TronAddress,
+    TronSignTx => MessageType_TronSignTx,
+    TronSignature => MessageType_TronSignature,
+    TronContractRequest => MessageType_TronContractRequest,
+    TronTransferContract => MessageType_TronTransferContract,
+    TronTriggerSmartContract => MessageType_TronTriggerSmartContract,
+    TronFreezeBalanceV2Contract => MessageType_TronFreezeBalanceV2Contract,
+    TronUnfreezeBalanceV2Contract => MessageType_TronUnfreezeBalanceV2Contract,
+    TronWithdrawUnfreeze => MessageType_TronWithdrawUnfreeze,
 }
 
 #[cfg(feature = "webauthn")]

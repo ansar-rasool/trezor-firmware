@@ -25,6 +25,7 @@ use crate::{
             obj::{LayoutMaybeTrace, LayoutObj, RootComponent},
             util::{ConfirmValueParams, ContentType, PropsList, RecoveryType, StrOrBytes},
         },
+        notification::Notification,
         ui_firmware::{
             FirmwareUI, MAX_CHECKLIST_ITEMS, MAX_GROUP_SHARE_LINES, MAX_MENU_ITEMS,
             MAX_PAIRED_DEVICES, MAX_WORD_QUIZ_ITEMS,
@@ -62,13 +63,14 @@ impl FirmwareUI for UIEckhart {
         description: Option<TString<'static>>,
         subtitle: Option<TString<'static>>,
         verb: Option<TString<'static>>,
+        cancel: bool,
         _verb_cancel: Option<TString<'static>>,
         hold: bool,
         hold_danger: bool,
         reverse: bool,
         _prompt_screen: bool,
         _prompt_title: Option<TString<'static>>,
-        _external_menu: bool, // TODO: will eventually replace the internal menu
+        external_menu: bool, // TODO: will eventually replace the internal menu
     ) -> Result<impl LayoutMaybeTrace, Error> {
         let paragraphs = {
             let action = action.unwrap_or("".into());
@@ -108,12 +110,19 @@ impl FirmwareUI for UIEckhart {
             }
         };
 
+        let mut header = Header::new(title);
+        if external_menu {
+            header = header.with_right_button(Button::with_icon(theme::ICON_MENU), HeaderMsg::Menu);
+        }
+
         let mut screen = TextScreen::new(paragraphs)
-            .with_header(Header::new(title))
-            .with_action_bar(ActionBar::new_double(
-                Button::with_icon(theme::ICON_CROSS),
-                right_button,
-            ));
+            .with_header(header)
+            .with_external_menu(external_menu)
+            .with_action_bar(if cancel {
+                ActionBar::new_double(Button::with_icon(theme::ICON_CROSS), right_button)
+            } else {
+                ActionBar::new_single(right_button)
+            });
         if let Some(subtitle) = subtitle {
             screen = screen.with_hint(Hint::new_instruction(subtitle, None));
         }
@@ -345,7 +354,7 @@ impl FirmwareUI for UIEckhart {
         extra_title: Option<TString<'static>>,
         verb_cancel: Option<TString<'static>>,
         back_button: bool,
-        _external_menu: bool, // TODO: will eventually replace the internal menu
+        external_menu: bool,
     ) -> Result<impl LayoutMaybeTrace, Error> {
         // collect available info
         let account_paragraphs = if let Some(items) = account_items {
@@ -371,6 +380,7 @@ impl FirmwareUI for UIEckhart {
             extra_paragraphs,
             verb_cancel,
             back_button,
+            external_menu,
         )?;
         Ok(flow)
     }
@@ -453,14 +463,18 @@ impl FirmwareUI for UIEckhart {
         page_counter: bool,
         _prompt_screen: bool,
         cancel: bool,
+        back_button: bool,
         warning_footer: Option<TString<'static>>,
         external_menu: bool,
-    ) -> Result<Gc<LayoutObj>, Error> {
+    ) -> Result<impl LayoutMaybeTrace, Error> {
         if info && external_menu {
             return Err(Error::NotImplementedError);
         }
+        if cancel && back_button {
+            return Err(Error::NotImplementedError);
+        }
 
-        let paragraphs = ConfirmValueParams {
+        let mut paragraphs = ConfirmValueParams {
             description: description.unwrap_or("".into()),
             extra: extra.unwrap_or("".into()),
             value: if value != Obj::const_none() {
@@ -475,12 +489,18 @@ impl FirmwareUI for UIEckhart {
             } else {
                 &theme::TEXT_MONO_MEDIUM_LIGHT
             },
-            description_font: &theme::TEXT_SMALL,
+            description_font: if subtitle.is_some() {
+                &theme::TEXT_SMALL_LIGHT
+            } else {
+                &theme::TEXT_SMALL
+            },
             extra_font: &theme::TEXT_SMALL,
         }
         .into_paragraphs()
-        .with_placement(LinearPlacement::vertical())
-        .with_spacing(theme::PROP_INNER_SPACING);
+        .with_placement(LinearPlacement::vertical());
+        if subtitle.is_none() {
+            paragraphs = paragraphs.with_spacing(theme::PROP_INNER_SPACING);
+        }
 
         let mut right_button = if hold {
             let verb = verb.unwrap_or(TR::buttons__hold_to_confirm.into());
@@ -509,6 +529,8 @@ impl FirmwareUI for UIEckhart {
 
         let action_bar = if cancel {
             ActionBar::new_double(Button::with_icon(theme::ICON_CROSS), right_button)
+        } else if back_button {
+            ActionBar::new_double(Button::with_icon(theme::ICON_CHEVRON_UP), right_button)
         } else {
             ActionBar::new_single(right_button)
         };
@@ -523,7 +545,17 @@ impl FirmwareUI for UIEckhart {
         } else if let Some(warning_footer) = warning_footer {
             screen = screen.with_hint(Hint::new_warning_caution(warning_footer));
         }
-        LayoutObj::new(screen)
+        let screen = screen.map(move |msg| match msg {
+            TextScreenMsg::Cancelled => Some(if back_button {
+                FlowMsg::Back
+            } else {
+                FlowMsg::Cancelled
+            }),
+            TextScreenMsg::Menu => Some(FlowMsg::Info),
+            TextScreenMsg::Confirmed => Some(FlowMsg::Confirmed),
+        });
+
+        flow::util::single_page(screen)
     }
 
     fn confirm_value_intro(
@@ -557,7 +589,7 @@ impl FirmwareUI for UIEckhart {
         verb_info: TString<'static>,
         _verb_cancel: Option<TString<'static>>,
         _external_menu: bool,
-    ) -> Result<impl LayoutMaybeTrace, Error> {
+    ) -> Result<Gc<LayoutObj>, Error> {
         let mut paragraphs = ParagraphVecShort::new();
 
         for para in IterBuf::new().try_iterate(items)? {
@@ -588,7 +620,7 @@ impl FirmwareUI for UIEckhart {
             Some(verb_info),
             None,
         )?;
-        Ok(flow)
+        LayoutObj::new_root(flow)
     }
 
     fn check_homescreen_format(image: BinaryData, _accept_toif: bool) -> bool {
@@ -645,7 +677,6 @@ impl FirmwareUI for UIEckhart {
         description: Option<TString<'static>>,
         extra: Option<TString<'static>>,
         message: TString<'static>,
-        amount: Option<TString<'static>>,
         chunkify: bool,
         text_mono: bool,
         account_title: TString<'static>,
@@ -654,12 +685,6 @@ impl FirmwareUI for UIEckhart {
         br_code: u16,
         br_name: TString<'static>,
         address_item: Option<Obj>,
-        extra_item: Option<Obj>,
-        summary_items: Option<Obj>,
-        fee_items: Option<Obj>,
-        summary_title: Option<TString<'static>>,
-        summary_br_code: Option<u16>,
-        summary_br_name: Option<TString<'static>>,
         cancel_text: Option<TString<'static>>,
     ) -> Result<impl LayoutMaybeTrace, Error> {
         let mut main_paragraphs = ParagraphVecShort::new();
@@ -732,64 +757,16 @@ impl FirmwareUI for UIEckhart {
             }
         };
 
-        let summary_paragraphs = if let Some(items) = summary_items {
-            Some(PropsList::new_styled(
-                items,
-                &theme::TEXT_SMALL_LIGHT,
-                &theme::TEXT_MONO_MEDIUM_LIGHT,
-                &theme::TEXT_MONO_MEDIUM_LIGHT,
-                theme::PROP_INNER_SPACING,
-                theme::PROPS_SPACING,
-            )?)
-        } else {
-            None
-        };
-
-        let fee_paragraphs = if let Some(items) = fee_items {
-            Some(PropsList::new_styled(
-                items,
-                &theme::TEXT_SMALL_LIGHT,
-                &theme::TEXT_MONO_MEDIUM_LIGHT,
-                &theme::TEXT_MONO_MEDIUM_LIGHT_DATA,
-                theme::PROP_INNER_SPACING,
-                theme::PROPS_SPACING,
-            )?)
-        } else {
-            None
-        };
-
-        let (extra_title, extra_paragraph) = if let Some(extra_item) = extra_item {
-            let [key, value, _is_data]: [Obj; 3] = util::iter_into_array(extra_item)?;
-            let paragraph = Paragraph::new(
-                &theme::TEXT_MONO_ADDRESS,
-                value.try_into().unwrap_or(TString::empty()),
-            );
-            (
-                Some(key.try_into().unwrap_or(TString::empty())),
-                Some(paragraph),
-            )
-        } else {
-            (None, None)
-        };
-
         let flow = flow::confirm_output::new_confirm_output(
             title,
             subtitle,
             main_paragraphs,
-            amount,
             br_name,
             br_code,
             account_title,
             account_paragraphs,
             address_title,
             address_paragraph,
-            summary_title,
-            summary_paragraphs,
-            summary_br_code,
-            summary_br_name,
-            extra_title,
-            extra_paragraph,
-            fee_paragraphs,
             cancel_text,
         )?;
         Ok(flow)
@@ -1183,14 +1160,12 @@ impl FirmwareUI for UIEckhart {
 
     fn show_homescreen(
         label: TString<'static>,
-        notification: Option<TString<'static>>,
-        notification_level: u8,
+        notification: Option<Notification>,
         lockable: bool,
     ) -> Result<impl LayoutMaybeTrace, Error> {
         let locked = false;
         let bootscreen = false;
         let coinjoin_authorized = false;
-        let notification = notification.map(|w| (w, notification_level));
         let layout = RootComponent::new(Homescreen::new(
             label,
             lockable,
@@ -1483,6 +1458,7 @@ impl FirmwareUI for UIEckhart {
 
     fn show_properties(
         title: TString<'static>,
+        subtitle: Option<TString<'static>>,
         value: Obj,
     ) -> Result<impl LayoutMaybeTrace, Error> {
         let mut vec = ParagraphVecShort::new();
@@ -1490,27 +1466,51 @@ impl FirmwareUI for UIEckhart {
             let text: TString = value.try_into()?;
             unwrap!(vec.push(Paragraph::new(&theme::TEXT_MONO_ADDRESS_CHUNKS, text)));
         } else {
+            let mut first_item_is_address: Option<bool> = None;
             for property in IterBuf::new().try_iterate(value)? {
                 let [header, text, _is_data]: [Obj; 3] = util::iter_into_array(property)?;
+
                 let header = header
                     .try_into_option::<TString>()?
                     .unwrap_or_else(TString::empty);
+                if first_item_is_address.is_none() {
+                    // TODO: should be based on the first item's "property type" (when we have it)
+                    first_item_is_address = Some(header.is_empty());
+                }
+                let mut header_paragraph = Paragraph::new(
+                    if subtitle.is_none() {
+                        &theme::TEXT_SMALL
+                    } else {
+                        // subtitle is already quite prominent
+                        &theme::TEXT_SMALL_LIGHT
+                    },
+                    if header != title {
+                        header
+                    } else {
+                        TString::empty()
+                    },
+                )
+                .no_break();
+                if !first_item_is_address.unwrap_or(false) {
+                    // normal spacing between property keys and values
+                    // unless the first property is an address,
+                    // in which case less space looks better
+                    header_paragraph =
+                        header_paragraph.with_bottom_padding(theme::PROP_INNER_SPACING);
+                }
+                unwrap!(vec.push(header_paragraph));
+
                 let text = text
                     .try_into_option::<TString>()?
                     .unwrap_or_else(TString::empty);
-
-                unwrap!(vec.push(Paragraph::new(&theme::TEXT_SMALL, header)));
-                let mut value_paragraph = Paragraph::new(
-                    if header.is_empty() {
-                        &theme::TEXT_MONO_ADDRESS_CHUNKS
-                    } else {
-                        &theme::TEXT_MONO_LIGHT
-                    },
-                    text,
-                );
-                if header.is_empty() {
-                    value_paragraph = value_paragraph.with_bottom_padding(20);
-                }
+                // TODO: should be based on the "property type"
+                let value_paragraph = if header.is_empty() {
+                    Paragraph::new(&theme::TEXT_MONO_ADDRESS_CHUNKS, text)
+                        .with_bottom_padding(theme::PROPS_SPACING_EXTRA)
+                } else {
+                    Paragraph::new(&theme::TEXT_MONO_LIGHT, text)
+                        .with_bottom_padding(theme::PROPS_SPACING)
+                };
                 unwrap!(vec.push(value_paragraph));
             }
         };
@@ -1519,7 +1519,8 @@ impl FirmwareUI for UIEckhart {
             vec.into_paragraphs()
                 .with_placement(LinearPlacement::vertical()),
         )
-        .with_header(Header::new(title).with_close_button());
+        .with_header(Header::new(title).with_close_button())
+        .with_subtitle(subtitle.unwrap_or(TString::empty()));
 
         let obj = RootComponent::new(screen);
         Ok(obj)
@@ -1666,6 +1667,28 @@ impl FirmwareUI for UIEckhart {
             .with_action_bar(action_bar);
         let layout = LayoutObj::new(screen)?;
         Ok(layout)
+    }
+
+    fn confirm_cancel() -> Result<impl LayoutMaybeTrace, Error> {
+        flow::util::single_page(
+            TextScreen::new(
+                Paragraph::new(&theme::TEXT_REGULAR, TR::send__cancel_sign)
+                    .into_paragraphs()
+                    .with_placement(LinearPlacement::vertical()),
+            )
+            .with_header(Header::new(TR::words__send.into()))
+            .with_action_bar(ActionBar::new_double(
+                Button::with_icon(theme::ICON_CHEVRON_LEFT),
+                Button::with_text(TR::buttons__cancel.into())
+                    .styled(theme::button_actionbar_danger())
+                    .with_gradient(Gradient::Alert),
+            ))
+            .map(|msg| match msg {
+                TextScreenMsg::Confirmed => Some(FlowMsg::Confirmed),
+                TextScreenMsg::Cancelled => Some(FlowMsg::Cancelled),
+                _ => None,
+            }),
+        )
     }
 
     fn tutorial() -> Result<impl LayoutMaybeTrace, Error> {

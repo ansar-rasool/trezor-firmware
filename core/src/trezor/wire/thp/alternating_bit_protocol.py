@@ -37,7 +37,14 @@ def is_sending_allowed(cache: ChannelCache) -> bool:
     Note: Sending a message in a channel before receipt of ACK message for the previously
     sent message (in the channel) is prohibited, as it can lead to desynchronization.
     """
-    return bool(cache.sync >> 7)
+    return bool(cache.sync & 0x80)
+
+
+def get_send_ack_bit(cache: ChannelCache) -> int:
+    """
+    Returns the sequential number (bit) of the last message successfully received on this channel.
+    """
+    return 1 - get_expected_receive_seq_bit(cache)
 
 
 def get_send_seq_bit(cache: ChannelCache) -> int:
@@ -92,3 +99,11 @@ def set_send_seq_bit_to_opposite(cache: ChannelCache) -> None:
     i.e. 1 -> 0 and 0 -> 1
     """
     _set_send_seq_bit(cache=cache, seq_bit=1 - get_send_seq_bit(cache))
+
+
+def is_ack_piggybacking_allowed(cache: ChannelCache) -> bool:
+    return bool(cache.sync & 0x10)
+
+
+def allow_ack_piggybacking(cache: ChannelCache) -> None:
+    cache.sync |= 0x10

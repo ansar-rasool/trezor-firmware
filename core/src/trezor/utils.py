@@ -21,6 +21,7 @@ from trezorutils import (  # noqa: F401
     NOTIFY_WIPE,
     SCM_REVISION,
     UI_LAYOUT,
+    USE_APP_LOADING,
     USE_BACKLIGHT,
     USE_BLE,
     USE_BUTTON,
@@ -32,6 +33,7 @@ from trezorutils import (  # noqa: F401
     USE_RGB_LED,
     USE_SD_CARD,
     USE_SERIAL_NUMBER,
+    USE_TELEMETRY,
     USE_THP,
     USE_TOUCH,
     USE_TROPIC,
@@ -55,6 +57,9 @@ from trezorutils import (  # noqa: F401
     unit_packaging,
     unit_production_date,
 )
+
+if USE_TELEMETRY:
+    from trezorutils import telemetry_get  # noqa: F401
 
 if USE_NRF:
     from trezorutils import nrf_get_version  # noqa: F401

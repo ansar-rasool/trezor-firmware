@@ -25,6 +25,7 @@ use crate::{
             obj::{LayoutMaybeTrace, LayoutObj, RootComponent},
             util::{ConfirmValueParams, PropsList, RecoveryType},
         },
+        notification::Notification,
         ui_firmware::{
             FirmwareUI, MAX_CHECKLIST_ITEMS, MAX_GROUP_SHARE_LINES, MAX_MENU_ITEMS,
             MAX_PAIRED_DEVICES, MAX_WORD_QUIZ_ITEMS,
@@ -51,6 +52,7 @@ impl FirmwareUI for UIBolt {
         description: Option<TString<'static>>,
         _subtitle: Option<TString<'static>>,
         verb: Option<TString<'static>>,
+        _cancel: bool,
         verb_cancel: Option<TString<'static>>,
         hold: bool,
         hold_danger: bool,
@@ -128,16 +130,19 @@ impl FirmwareUI for UIBolt {
         _page_counter: bool,
         _prompt_screen: bool,
         _cancel: bool,
+        _back_button: bool,
         _warning_footer: Option<TString<'static>>,
         _external_menu: bool,
-    ) -> Result<Gc<LayoutObj>, Error> {
-        ConfirmValue::new(title, value, description, verb, verb_cancel, hold)
+    ) -> Result<impl LayoutMaybeTrace, Error> {
+        let frame = ConfirmValue::new(title, value, description, verb, verb_cancel, hold)
             .with_text_mono(is_data)
             .with_subtitle(subtitle)
             .with_extra(extra)
             .with_chunkify(chunkify)
             .with_info_button(info)
-            .into_layout()
+            .into_frame()?;
+        let layout = RootComponent::new(frame);
+        Ok(layout)
     }
 
     fn confirm_value_intro(
@@ -491,7 +496,7 @@ impl FirmwareUI for UIBolt {
         verb_info: TString<'static>,
         _verb_cancel: Option<TString<'static>>,
         _external_menu: bool,
-    ) -> Result<impl LayoutMaybeTrace, Error> {
+    ) -> Result<Gc<LayoutObj>, Error> {
         let mut paragraphs = ParagraphVecShort::new();
 
         for para in IterBuf::new().try_iterate(items)? {
@@ -516,14 +521,22 @@ impl FirmwareUI for UIBolt {
         }
         .styled(theme::button_confirm());
 
-        let buttons = Button::cancel_info_confirm(confirm_button, verb_info);
-
-        let layout = RootComponent::new(Frame::left_aligned(
-            theme::label_title(),
-            title,
-            Dialog::new(paragraphs.into_paragraphs(), buttons),
-        ));
-        Ok(layout)
+        if verb_info.is_empty() {
+            // hide the info button if its verb is empty
+            let buttons = Button::cancel_confirm_text(None, Some(verb));
+            LayoutObj::new(Frame::left_aligned(
+                theme::label_title(),
+                title,
+                Dialog::new(paragraphs.into_paragraphs(), buttons),
+            ))
+        } else {
+            let buttons = Button::cancel_info_confirm(confirm_button, verb_info);
+            LayoutObj::new(Frame::left_aligned(
+                theme::label_title(),
+                title,
+                Dialog::new(paragraphs.into_paragraphs(), buttons),
+            ))
+        }
     }
 
     fn check_homescreen_format(image: BinaryData, _accept_toif: bool) -> bool {
@@ -580,7 +593,6 @@ impl FirmwareUI for UIBolt {
         _description: Option<TString<'static>>,
         _extra: Option<TString<'static>>,
         _message: TString<'static>,
-        _amount: Option<TString<'static>>,
         _chunkify: bool,
         _text_mono: bool,
         _account_title: TString<'static>,
@@ -589,12 +601,6 @@ impl FirmwareUI for UIBolt {
         _br_code: u16,
         _br_name: TString<'static>,
         _address_item: Option<Obj>,
-        _extra_item: Option<Obj>,
-        _summary_items: Option<Obj>,
-        _fee_items: Option<Obj>,
-        _summary_title: Option<TString<'static>>,
-        _summary_br_code: Option<u16>,
-        _summary_br_name: Option<TString<'static>>,
         _cancel_text: Option<TString<'static>>,
     ) -> Result<impl LayoutMaybeTrace, Error> {
         Err::<RootComponent<Empty, ModelUI>, Error>(Error::NotImplementedError)
@@ -920,11 +926,9 @@ impl FirmwareUI for UIBolt {
 
     fn show_homescreen(
         label: TString<'static>,
-        notification: Option<TString<'static>>,
-        notification_level: u8,
+        notification: Option<Notification>,
         lockable: bool,
     ) -> Result<impl LayoutMaybeTrace, Error> {
-        let notification = notification.map(|w| (w, notification_level));
         let layout = RootComponent::new(Homescreen::new(label, notification, lockable));
         Ok(layout)
     }
@@ -985,6 +989,7 @@ impl FirmwareUI for UIBolt {
             Some(description),
             None,
             None,
+            true,
             None,
             false,
             false,
@@ -1153,6 +1158,7 @@ impl FirmwareUI for UIBolt {
 
     fn show_properties(
         _title: TString<'static>,
+        _subtitle: Option<TString<'static>>,
         _value: Obj,
     ) -> Result<impl LayoutMaybeTrace, Error> {
         Err::<RootComponent<Empty, ModelUI>, Error>(Error::NotImplementedError)
@@ -1302,6 +1308,10 @@ impl FirmwareUI for UIBolt {
         )
     }
 
+    fn confirm_cancel() -> Result<impl LayoutMaybeTrace, Error> {
+        Err::<RootComponent<Empty, ModelUI>, Error>(Error::NotImplementedError)
+    }
+
     fn tutorial() -> Result<impl LayoutMaybeTrace, Error> {
         Err::<RootComponent<Empty, ModelUI>, Error>(Error::NotImplementedError)
     }
@@ -1435,7 +1445,7 @@ impl ConfirmValue {
         self
     }
 
-    fn into_layout(self) -> Result<Gc<LayoutObj>, Error> {
+    fn into_frame(self) -> Result<Frame<ButtonPage<Paragraphs<ConfirmValueParams>>>, Error> {
         let description = self.description.unwrap_or("".into());
         let extra = self.extra.unwrap_or("".into());
         let paragraphs = ConfirmValueParams {
@@ -1474,7 +1484,11 @@ impl ConfirmValue {
         if self.info_button {
             frame = frame.with_info_button();
         }
-        LayoutObj::new(frame)
+        Ok(frame)
+    }
+
+    fn into_layout(self) -> Result<Gc<LayoutObj>, Error> {
+        LayoutObj::new(self.into_frame()?)
     }
 }
 

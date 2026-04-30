@@ -26,6 +26,7 @@ fn build_dir() -> String {
 }
 
 const DEFAULT_BINDGEN_MACROS_COMMON: &[&str] = &[
+    "-I../projects/bootloader",
     "-I../projects/unix",
     "-I../../build/unix",
     "-I../../vendor/micropython/ports/unix",
@@ -35,24 +36,25 @@ const DEFAULT_BINDGEN_MACROS_COMMON: &[&str] = &[
     "-I../../vendor/micropython/lib/uzlib",
     "-I../../vendor/",
     "-I../rtl/inc",
-    "-I../gfx/inc",
+    "-I../io/gfx/inc",
     "-I../io/ble/inc",
     "-I../io/button/inc",
     "-I../io/display/inc",
     "-I../io/haptic/inc",
     "-I../io/nrf/inc",
     "-I../io/touch/inc",
+    "-I../io/power_manager/inc",
     "-I../io/rgb_led/inc",
+    "-I../io/suspend/inc",
+    "-I../io/translations/inc",
     "-I../io/usb/inc",
     "-I../sec/storage/inc",
     "-I../sys/dbg/inc",
+    "-I../sys/inc",
     "-I../sys/time/inc",
     "-I../sys/task/inc",
-    "-I../sys/power_manager/inc",
-    "-I../sys/suspend/inc",
     "-I../sys/irq/inc",
-    "-I../util/flash/inc",
-    "-I../util/translations/inc",
+    "-I../sys/flash/inc",
     "-I../models",
     "-DTREZOR_EMULATOR",
     "-DUSE_BUTTON",
@@ -65,6 +67,7 @@ const DEFAULT_BINDGEN_MACROS_COMMON: &[&str] = &[
     "-DUSE_HW_JPEG_DECODER",
     "-DUSE_STORAGE",
     "-DUSE_DBG_CONSOLE",
+    "-DBOOTLOADER",
 ];
 
 fn add_bindgen_macros<'a>(
@@ -355,6 +358,10 @@ fn generate_trezorhal_bindings() {
         .allowlist_function("translations_write")
         .allowlist_function("translations_erase")
         .allowlist_function("translations_area_bytesize")
+        .allowlist_type("storage_unlock_result_t")
+        .rustified_enum("storage_unlock_result_t")
+        .allowlist_type("storage_pin_change_result_t")
+        .rustified_enum("storage_pin_change_result_t")
         // display
         .allowlist_function("display_refresh")
         .allowlist_function("display_set_backlight")
@@ -480,6 +487,8 @@ fn generate_trezorhal_bindings() {
         .allowlist_function("pm_get_state")
         .allowlist_function("pm_suspend")
         .allowlist_function("pm_hibernate")
+        .allowlist_function("pm_charging_enable")
+        .allowlist_function("pm_charging_disable")
         // irq
         .allowlist_function("irq_lock_fn")
         .allowlist_function("irq_unlock_fn")
@@ -495,7 +504,9 @@ fn generate_trezorhal_bindings() {
         .allowlist_var("LOG_LEVEL_WARN")
         .allowlist_var("LOG_LEVEL_ERR")
         // c_layout
-        .allowlist_type("c_layout_t");
+        .allowlist_type("c_layout_t")
+        .allowlist_function("bootloader_process_ble")
+        .allowlist_function("bootloader_process_usb");
 
     // Write the bindings to a file in the OUR_DIR.
     bindings

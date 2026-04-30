@@ -21,8 +21,8 @@
 #include <trezor_model.h>
 #include <trezor_rtl.h>
 
-#include <sys/notify.h>
-#include <util/image.h>
+#include <io/notify.h>
+#include <sec/image.h>
 
 #include "bootui.h"
 #include "rust_ui_bootloader.h"
@@ -32,7 +32,6 @@
 workflow_result_t workflow_auto_update(const fw_info_t *fw) {
   ui_set_initial_setup(true);
 
-  workflow_result_t res = WF_CANCELLED;
   uint32_t ui_result = CONNECT_CANCEL;
 
   protob_ios_t ios;
@@ -40,10 +39,7 @@ workflow_result_t workflow_auto_update(const fw_info_t *fw) {
   workflow_ifaces_init(secfalse, &ios);
   notify_send(NOTIFY_UNLOCK);
 
-  c_layout_t layout;
-  memset(&layout, 0, sizeof(layout));
-  screen_connect(true, false, &layout);
-  res = workflow_host_control(fw, &layout, &ui_result, &ios);
+  workflow_result_t res = screen_connect(true, false, &ui_result);
 
   if (res == WF_OK_UI_ACTION && ui_result == CONNECT_CANCEL) {
     bootargs_set(BOOT_COMMAND_NONE, NULL, 0);

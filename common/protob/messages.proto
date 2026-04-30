@@ -352,10 +352,22 @@ enum MessageType {
     // Tron
     MessageType_TronGetAddress = 2200 [(wire_in) = true];
     MessageType_TronAddress = 2201 [(wire_out) = true];
+    MessageType_TronSignTx = 2202 [(wire_in) = true];
+    MessageType_TronSignature = 2203 [(wire_out) = true];
+    MessageType_TronContractRequest = 2204 [(wire_out) = true];
+    MessageType_TronTransferContract = 2205 [(wire_in) = true];
+    MessageType_TronTriggerSmartContract = 2206 [(wire_in) = true];
+    MessageType_TronFreezeBalanceV2Contract = 2207 [(wire_in) = true];
+    MessageType_TronUnfreezeBalanceV2Contract = 2208 [(wire_in) = true];
+    MessageType_TronWithdrawUnfreeze = 2209 [(wire_in) = true];
 
     // Benchmark
     MessageType_BenchmarkListNames = 9100 [(bitcoin_only) = true];
     MessageType_BenchmarkNames = 9101 [(bitcoin_only) = true];
     MessageType_BenchmarkRun = 9102 [(bitcoin_only) = true];
     MessageType_BenchmarkResult = 9103 [(bitcoin_only) = true];
+
+    // Telemetry
+    MessageType_TelemetryGet = 1100 [(bitcoin_only) = true, (wire_in) = true];
+    MessageType_Telemetry = 1101 [(bitcoin_only) = true, (wire_out) = true];
 }

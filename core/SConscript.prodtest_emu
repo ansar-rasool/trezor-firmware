@@ -31,6 +31,7 @@ FEATURES_WANTED = [
     "rgb_led",
     "sd_card",
     "secure_mode",
+    'telemetry',
     "tropic",
     "usb",
     "usb_iface_vcp",
@@ -127,25 +128,25 @@ CPPPATH_MOD += [
 ]
 
 SOURCE_MOD += [
-    'embed/gfx/bitblt/gfx_bitblt.c',
-    'embed/gfx/bitblt/gfx_bitblt_rgb565.c',
-    'embed/gfx/bitblt/gfx_bitblt_rgba8888.c',
-    'embed/gfx/bitblt/gfx_bitblt_mono8.c',
-    'embed/gfx/fonts/font_bitmap.c',
-    'embed/gfx/gfx_color.c',
-    'embed/gfx/gfx_draw.c',
-    'embed/gfx/terminal.c',
     'embed/io/display/display_utils.c',
-    'embed/util/image/boot_image.c',
-    'embed/util/image/image.c',
-    'embed/util/rsod/rsod.c',
-    'embed/util/rsod/rsod_special.c',
-    'embed/util/scm_revision/scm_revision.c',
+    'embed/io/gfx/bitblt/gfx_bitblt.c',
+    'embed/io/gfx/bitblt/gfx_bitblt_rgb565.c',
+    'embed/io/gfx/bitblt/gfx_bitblt_rgba8888.c',
+    'embed/io/gfx/bitblt/gfx_bitblt_mono8.c',
+    'embed/io/gfx/gfx_color.c',
+    'embed/io/gfx/gfx_draw.c',
+    'embed/io/gfx/rsod.c',
+    'embed/io/gfx/terminal/font_bitmap.c',
+    'embed/io/gfx/terminal/terminal.c',
     'embed/rtl/cli.c',
     'embed/rtl/error_handling.c',
     'embed/rtl/printf.c',
+    'embed/rtl/scm_revision.c',
     'embed/rtl/strutils.c',
     'embed/rtl/unit_test.c',
+    'embed/sec/image/boot_image.c',
+    'embed/sec/image/image.c',
+    'embed/sec/rsod/rsod_special.c',
     'vendor/micropython/lib/uzlib/adler32.c',
     'vendor/micropython/lib/uzlib/crc32.c',
     'vendor/micropython/lib/uzlib/tinflate.c',
@@ -170,6 +171,7 @@ SOURCE_PRODTEST = [
     'embed/projects/prodtest/cmd/prodtest_ble.c',
     'embed/projects/prodtest/cmd/prodtest_bootloader.c',
     'embed/projects/prodtest/cmd/prodtest_button.c',
+    'embed/projects/prodtest/cmd/prodtest_crc.c',
     'embed/projects/prodtest/cmd/prodtest_display.c',
     'embed/projects/prodtest/cmd/prodtest_prodtest.c',
     'embed/projects/prodtest/cmd/prodtest_backup_ram.c',
@@ -190,6 +192,7 @@ SOURCE_PRODTEST = [
     'embed/projects/prodtest/cmd/prodtest_tamper.c',
     'embed/projects/prodtest/cmd/prodtest_sbu.c',
     'embed/projects/prodtest/cmd/prodtest_secure_channel.c',
+    'embed/projects/prodtest/cmd/prodtest_telemetry.c',
     'embed/projects/prodtest/cmd/prodtest_touch.c',
     'embed/projects/prodtest/cmd/prodtest_tropic.c',
     'embed/projects/prodtest/cmd/secure_channel.c',
@@ -220,11 +223,10 @@ ALLPATHS = ['embed/rust',
            'embed/rtl/inc',
            'embed/models',
            'embed/projects/unix',
-           'embed/gfx/inc',
-           'embed/util/image/inc',
-           'embed/util/rsod/inc',
-           'embed/util/scm_revision/inc',
-           'embed/util/translations/inc',
+           'embed/io/gfx/inc',
+           'embed/io/translations/inc',
+           'embed/sec/image/inc',
+           'embed/sec/rsod/inc',
        ] + CPPPATH_MOD + PATH_HAL
 
 env.Replace(
@@ -303,14 +305,13 @@ obj_program += env.Object(source=SOURCE_MOD_CRYPTO, CCFLAGS='$CCFLAGS -ftrivial-
 obj_program += env.Object(source=SOURCE_PRODTEST)
 obj_program += env.Object(source=SOURCE_HAL)
 obj_program += env.Object(source=SOURCE_MLDSA)
+obj_program += [rust]
 
 program_elf = env.Command(
     target='prodtest.elf',
     source=obj_program,
     action=
     '$CC -o $TARGET $SOURCES $_LIBDIRFLAGS $_LIBFLAGS $LINKFLAGS')
-
-env.Depends(program_elf, rust)
 
 if CMAKELISTS != 0:
     env.Depends(program_elf, cmake_gen)

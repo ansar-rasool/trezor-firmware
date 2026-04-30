@@ -25,7 +25,7 @@
 
 #include <io/ble.h>
 #include <rtl/strutils.h>
-#include <sec/rng.h>
+#include <sys/rng.h>
 #include <sys/sysevent.h>
 #include <sys/systick.h>
 
@@ -204,6 +204,13 @@ bool ble_iface_start_pairing(void) {
   }
 
   return true;
+}
+
+wire_iface_t* ble_iface_get(void) {
+  if (!g_ble_iface.initialized) {
+    return NULL;
+  }
+  return &g_ble_iface;
 }
 
 #endif

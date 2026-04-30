@@ -64,6 +64,9 @@ def _find_message_handler_module(msg_type: int) -> str:
     if msg_type == MessageType.ShowDeviceTutorial:
         return "apps.management.show_tutorial"
 
+    if utils.USE_TELEMETRY and msg_type == MessageType.TelemetryGet:
+        return "apps.telemetry.get_telemetry"
+
     if utils.USE_BACKLIGHT and msg_type == MessageType.SetBrightness:
         return "apps.management.set_brightness"
 
@@ -127,6 +130,12 @@ def _find_message_handler_module(msg_type: int) -> str:
                 return "apps.nostr.get_pubkey"
             if msg_type == MessageType.NostrSignEvent:
                 return "apps.nostr.sign_event"
+
+        # tron
+        if msg_type == MessageType.TronGetAddress:
+            return "apps.tron.get_address"
+        if msg_type == MessageType.TronSignTx:
+            return "apps.tron.sign_tx"
 
         if msg_type == MessageType.SetU2FCounter:
             return "apps.management.set_u2f_counter"
@@ -224,10 +233,6 @@ def _find_message_handler_module(msg_type: int) -> str:
             return "apps.solana.get_address"
         if msg_type == MessageType.SolanaSignTx:
             return "apps.solana.sign_tx"
-
-        # tron
-        if msg_type == MessageType.TronGetAddress:
-            return "apps.tron.get_address"
 
     raise ValueError
 

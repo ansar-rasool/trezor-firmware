@@ -23,22 +23,22 @@
 
 #include <trezor_rtl.h>
 
-#include <gfx/dma2d_bitblt.h>
 #include <io/display.h>
+#include <io/dma2d_bitblt.h>
+#include <io/notify.h>
+#include <io/translations.h>
 #include <io/usb.h>
-#include <sec/rng.h>
+#include <sec/fwutils.h>
+#include <sec/rng_strong.h>
 #include <sec/secret.h>
 #include <sec/secret_keys.h>
+#include <sec/unit_properties.h>
 #include <sys/bootutils.h>
 #include <sys/irq.h>
-#include <sys/notify.h>
 #include <sys/sysevent.h>
 #include <sys/systask.h>
 #include <sys/system.h>
 #include <sys/systick.h>
-#include <util/fwutils.h>
-#include <util/translations.h>
-#include <util/unit_properties.h>
 
 #ifdef USE_BLE
 #include <io/ble.h>
@@ -57,7 +57,7 @@
 #endif
 
 #ifdef USE_HW_JPEG_DECODER
-#include <gfx/jpegdec.h>
+#include <io/jpegdec.h>
 #endif
 
 #ifdef USE_OPTIGA
@@ -65,7 +65,7 @@
 #endif
 
 #ifdef USE_POWER_MANAGER
-#include <sys/power_manager.h>
+#include <io/power_manager.h>
 #endif
 
 #ifdef USE_RGB_LED
@@ -80,8 +80,12 @@
 #include <io/touch.h>
 #endif
 
+#ifdef USE_TELEMETRY
+#include <sec/telemetry.h>
+#endif
+
 #if PRODUCTION || BOOTLOADER_QA
-#include <util/boot_image.h>
+#include <sec/boot_image.h>
 #endif
 
 #include "syscall_context.h"
@@ -204,6 +208,38 @@ __attribute((no_stack_protector)) void syscall_handler(uint32_t *args,
     } break;
 
 #endif
+
+#ifdef USE_IPC
+    case SYSCALL_IPC_REGISTER: {
+      systask_id_t origin = (systask_id_t)args[0];
+      void *buffer = (void *)args[1];
+      size_t size = (size_t)args[2];
+      args[0] = ipc_register__verified(origin, buffer, size);
+    } break;
+
+    case SYSCALL_IPC_UNREGISTER: {
+      systask_id_t origin = (systask_id_t)args[0];
+      ipc_unregister(origin);
+    } break;
+
+    case SYSCALL_IPC_TRY_RECEIVE: {
+      ipc_message_t *msg = (ipc_message_t *)args[0];
+      args[0] = ipc_try_receive__verified(msg);
+    } break;
+
+    case SYSCALL_IPC_FREE_MESSAGE: {
+      ipc_message_t *msg = (ipc_message_t *)args[0];
+      ipc_message_free__verified(msg);
+    } break;
+
+    case SYSCALL_IPC_SEND: {
+      systask_id_t remote = (systask_id_t)args[0];
+      uint32_t fn = (uint32_t)args[1];
+      const void *data = (const void *)args[2];
+      size_t data_size = (size_t)args[3];
+      args[0] = ipc_send__verified(remote, fn, data, data_size);
+    } break;
+#endif  // USE_IPC
 
     case SYSCALL_BOOT_IMAGE_CHECK: {
       const boot_image_t *image = (const boot_image_t *)args[0];
@@ -398,28 +434,27 @@ __attribute((no_stack_protector)) void syscall_handler(uint32_t *args,
 #ifdef USE_HAPTIC
     case SYSCALL_HAPTIC_SET_ENABLED: {
       bool enabled = (args[0] != 0);
-      haptic_set_enabled(enabled);
+      ts_t status = haptic_set_enabled(enabled);
+      args[0] = ts_code(status);
     } break;
 
     case SYSCALL_HAPTIC_GET_ENABLED: {
       args[0] = haptic_get_enabled();
     } break;
 
-    case SYSCALL_HAPTIC_TEST: {
-      uint16_t duration_ms = (uint16_t)args[0];
-      args[0] = haptic_test(duration_ms);
-    } break;
-
     case SYSCALL_HAPTIC_PLAY: {
       haptic_effect_t effect = (haptic_effect_t)args[0];
-      args[0] = haptic_play(effect);
+      ts_t status = haptic_play(effect);
+      args[0] = ts_code(status);
     } break;
 
     case SYSCALL_HAPTIC_PLAY_CUSTOM: {
       int8_t amplitude_pct = (int8_t)args[0];
       uint16_t duration_ms = (uint16_t)args[1];
-      args[0] = haptic_play_custom(amplitude_pct, duration_ms);
+      ts_t status = haptic_play_custom(amplitude_pct, duration_ms);
+      args[0] = ts_code(status);
     } break;
+
 #endif
 
 #ifdef USE_OPTIGA
@@ -466,6 +501,13 @@ __attribute((no_stack_protector)) void syscall_handler(uint32_t *args,
       args[0] = secret_key_delegated_identity__verified(dest);
     } break;
 
+#ifdef USE_TELEMETRY
+    case SYSCALL_TELEMETRY_GET: {
+      telemetry_data_t *out = (telemetry_data_t *)args[0];
+      args[0] = telemetry_get__verified(out);
+    } break;
+#endif
+
     case SYSCALL_STORAGE_SETUP: {
       PIN_UI_WAIT_CALLBACK callback = (PIN_UI_WAIT_CALLBACK)args[0];
       storage_setup__verified(callback);
@@ -503,14 +545,10 @@ __attribute((no_stack_protector)) void syscall_handler(uint32_t *args,
     } break;
 
     case SYSCALL_STORAGE_CHANGE_PIN: {
-      const uint8_t *oldpin = (const uint8_t *)args[0];
-      size_t oldpin_len = args[1];
-      const uint8_t *newpin = (const uint8_t *)args[2];
-      size_t newpin_len = args[3];
-      const uint8_t *old_ext_salt = (const uint8_t *)args[4];
-      const uint8_t *new_ext_salt = (const uint8_t *)args[5];
-      args[0] = storage_change_pin__verified(
-          oldpin, oldpin_len, newpin, newpin_len, old_ext_salt, new_ext_salt);
+      const uint8_t *newpin = (const uint8_t *)args[0];
+      size_t newpin_len = args[1];
+      const uint8_t *new_ext_salt = (const uint8_t *)args[2];
+      args[0] = storage_change_pin__verified(newpin, newpin_len, new_ext_salt);
     } break;
 
     case SYSCALL_STORAGE_ENSURE_NOT_WIPE_CODE: {
@@ -758,6 +796,14 @@ __attribute((no_stack_protector)) void syscall_handler(uint32_t *args,
       args[0] = pm_hibernate();
     } break;
 
+    case SYSCALL_POWER_MANAGER_CHARGING_ENABLE: {
+      args[0] = pm_charging_enable();
+    } break;
+
+    case SYSCALL_POWER_MANAGER_CHARGING_DISABLE: {
+      args[0] = pm_charging_disable();
+    } break;
+
     case SYSCALL_POWER_MANAGER_GET_STATE: {
       pm_state_t *status = (pm_state_t *)args[0];
       args[0] = pm_get_state__verified(status);
@@ -888,6 +934,55 @@ __attribute((no_stack_protector)) void syscall_handler(uint32_t *args,
       uint16_t *size = (uint16_t *)args[2];
       args[0] = tropic_data_read__verified(udata_slot, data, size);
     } break;
+#endif
+
+#ifdef USE_APP_LOADING
+    case SYSCALL_APP_TASK_SPAWN: {
+      const app_hash_t *hash = (const app_hash_t *)args[0];
+      systask_id_t *task_id = (systask_id_t *)args[1];
+      ts_t status = app_task_spawn__verified(hash, task_id);
+      args[0] = ts_code(status);
+    } break;
+
+    case SYSCALL_APP_TASK_IS_RUNNING: {
+      systask_id_t task_id = (systask_id_t)args[0];
+      args[0] = app_task_is_running(task_id);
+    } break;
+
+    case SYSCALL_APP_TASK_GET_PMINFO: {
+      systask_id_t task_id = (systask_id_t)args[0];
+      systask_postmortem_t *pminfo = (systask_postmortem_t *)args[1];
+      ts_t status = app_task_get_pminfo__verified(task_id, pminfo);
+      args[0] = ts_code(status);
+    } break;
+
+    case SYSCALL_APP_TASK_UNLOAD: {
+      systask_id_t task_id = (systask_id_t)args[0];
+      app_task_unload(task_id);
+    } break;
+
+    case SYSCALL_APP_CACHE_CREATE_IMAGE: {
+      const app_hash_t *hash = (const app_hash_t *)args[0];
+      size_t image_size = (size_t)args[1];
+      args[0] = (uintptr_t)app_cache_create_image__verified(hash, image_size);
+    } break;
+
+    case SYSCALL_APP_CACHE_WRITE_IMAGE: {
+      app_cache_handle_t handle = (app_cache_handle_t)args[0];
+      uintptr_t offset = (uintptr_t)args[1];
+      const void *data = (const void *)args[2];
+      size_t size = (size_t)args[3];
+      ts_t status = app_cache_write_image__verified(handle, offset, data, size);
+      args[0] = ts_code(status);
+    } break;
+
+    case SYSCALL_APP_CACHE_FINALIZE_IMAGE: {
+      app_cache_handle_t handle = (app_cache_handle_t)args[0];
+      bool accept = (bool)args[1];
+      ts_t status = app_cache_finalize_image(handle, accept);
+      args[0] = ts_code(status);
+    } break;
+
 #endif
 
     default:

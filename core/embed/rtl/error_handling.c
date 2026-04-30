@@ -19,9 +19,6 @@
 
 #include <trezor_rtl.h>
 
-#include <sys/bootutils.h>
-#include <sys/system.h>
-
 #ifndef TREZOR_EMULATOR
 // Stack check guard value set in startup code.
 // This is used if stack protection is enabled.
@@ -51,6 +48,13 @@ const char *ts_string(ts_t status) {
     return "EIO";
   } else if (ts_eq(status, TS_EBADMSG)) {
     return "EBADMSG";
+  } else if (ts_eq(status, TS_EACCES)) {
+    return "EACCES";
+    // Trezor-specific error codes
+  } else if (ts_eq(status, TS_ENOINIT)) {
+    return "ENOINIT";
+  } else if (ts_eq(status, TS_ENOEN)) {
+    return "ENOEN";
   } else {
     return "?ERROR";
   }

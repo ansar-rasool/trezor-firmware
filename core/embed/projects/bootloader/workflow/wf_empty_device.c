@@ -20,18 +20,18 @@
 #include <trezor_model.h>
 #include <trezor_rtl.h>
 
-#include <sys/notify.h>
+#include <io/notify.h>
+#include <sec/image.h>
+#include <sys/flash_utils.h>
 #include <sys/systick.h>
 #include <sys/types.h>
-#include <util/flash_utils.h>
-#include <util/image.h>
 
 #ifdef USE_STORAGE_HWKEY
 #include <sec/secret.h>
 #endif
 
 #ifdef USE_BACKUP_RAM
-#include <sys/backup_ram.h>
+#include <sec/backup_ram.h>
 #endif
 
 #ifdef USE_BLE
@@ -68,10 +68,7 @@ workflow_result_t workflow_empty_device(void) {
   uint32_t ui_result = WELCOME_CANCEL;
   while (res == WF_CANCELLED ||
          (res == WF_OK_UI_ACTION && ui_result == WELCOME_CANCEL)) {
-    c_layout_t layout;
-    memset(&layout, 0, sizeof(layout));
-    screen_welcome(&layout);
-    res = workflow_host_control(NULL, &layout, &ui_result, &ios);
+    res = screen_welcome(&ui_result);
 #ifdef USE_BLE
     if (res == WF_OK_UI_ACTION && ui_result == WELCOME_PAIRING_MODE) {
       res = workflow_wireless_setup(NULL, &ios);

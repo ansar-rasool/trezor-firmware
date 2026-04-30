@@ -8,6 +8,7 @@ on:
   push:
     branches:
       - 'release/**'
+      - 'secfix/**'
 
 
 # cancel any previous runs on the same PR
@@ -111,25 +112,47 @@ jobs:
       fail-fast: false
       matrix:
         model: [T1B1, T2T1, T2B1, T3B1, T3T1, T3W1]
+    env:
+      REF: ${{ github.head_ref || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - run: git checkout ${{ github.head_ref || github.ref_name }}
-      - run: ./build-docker.sh --models ${{ matrix.model }} --targets bootloader,firmware,prodtest ${{ github.head_ref || github.ref_name }}
+
+      - run: git checkout ${REF}
+
+      - run: mkdir _artifacts/
+
+      - name: Build prodtest & bootloader
+        run: |
+          ./build-docker.sh --models ${{ matrix.model }} --targets 'prodtest,bootloader' --skip-bitcoinonly ${REF}
+          cd build/ && cp -v --recursive --parents * ../_artifacts/
+
+      - name: Build secmon
+        if: ${{ matrix.model == 'T3W1' }}
+        run: |
+          ./build-docker.sh --no-init --models ${{ matrix.model }} --targets 'secmon' --skip-bitcoinonly ${REF}
+          cd build/ && cp -v --recursive --parents * ../_artifacts/
+
+      - name: Build firmware
+        # T3W1 requires a signed secmon.
+        run: |
+          ./build-docker.sh --no-init --models ${{ matrix.model }} --targets 'firmware' ${REF}
+          cd build/ && cp -v --recursive --parents * ../_artifacts/
+
       - name: Show fingerprints
         run: |
-          for file in build/*/*/*.fingerprint; do
-            if [ -f "$file" ]; then
-              origfile="${file%.fingerprint}"
-              fingerprint=$(tr -d '\n' < $file)
-              echo "\`$fingerprint\` $origfile" >> $GITHUB_STEP_SUMMARY
-            fi
+          tree _artifacts
+          for file in _artifacts/*/*/*.fingerprint
+          do
+            echo "\`$(tr -d '\n' < $file)\` ${file%.fingerprint}" >> $GITHUB_STEP_SUMMARY
           done
           cat $GITHUB_STEP_SUMMARY
+        if: always()
+
       - uses: actions/upload-artifact@v4
         with:
           name: reproducible-${{ matrix.model }}
           path: |
-            build/*/*/*.bin
+            _artifacts/
           retention-days: 7

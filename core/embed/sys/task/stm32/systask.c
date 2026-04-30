@@ -46,7 +46,7 @@
 #define STK_FRAME_RET_ADDR 6
 #define STK_FRAME_XPSR 7
 
-// Task manager state
+// Task scheduler state
 typedef struct {
   // Error handler called when a kernel task terminates
   systask_error_handler_t error_handler;
@@ -61,7 +61,6 @@ typedef struct {
 
 } systask_scheduler_t;
 
-// Global task manager state
 static systask_scheduler_t g_systask_scheduler = {
     // This static initialization is required for exception handling
     // to function correctly before the scheduler is initialized.
@@ -181,6 +180,8 @@ bool systask_init(systask_t* task, uint32_t stack_base, uint32_t stack_size,
   task->applet = applet;
   task->sb_addr = sb_addr;
 
+  task->initialized = true;
+
   // Notify all event sources about the task creation
   sysevents_notify_task_created(task);
 
@@ -188,6 +189,15 @@ bool systask_init(systask_t* task, uint32_t stack_base, uint32_t stack_size,
 }
 
 systask_id_t systask_id(const systask_t* task) { return task->id; }
+
+#ifdef KERNEL
+void systask_set_mpu(systask_t* task) {
+  if (task->applet != NULL) {
+    applet_t* applet = (applet_t*)task->applet;
+    mpu_set_active_applet(&applet->layout);
+  }
+}
+#endif  // KERNEL
 
 uint32_t* systask_push_data(systask_t* task, const void* data, size_t size) {
   if (task->sp < task->sp_lim) {
@@ -215,13 +225,10 @@ uint32_t* systask_push_data(systask_t* task, const void* data, size_t size) {
 
 void systask_pop_data(systask_t* task, size_t size) { task->sp += size; }
 
-bool systask_push_call(systask_t* task, void* entrypoint, uint32_t arg1,
-                       uint32_t arg2, uint32_t arg3) {
+bool systask_push_call(systask_t* task, void* entrypoint, uintptr_t arg1,
+                       uintptr_t arg2, uintptr_t arg3) {
 #ifdef KERNEL
-  if (task->applet != NULL) {
-    applet_t* applet = (applet_t*)task->applet;
-    mpu_set_active_applet(&applet->layout);
-  }
+  systask_set_mpu(task);
 #endif
 
   uint32_t original_sp = task->sp;
@@ -272,8 +279,9 @@ cleanup:
   return false;
 }
 
-uint32_t systask_invoke_callback(systask_t* task, uint32_t arg1, uint32_t arg2,
-                                 uint32_t arg3, void* callback) {
+uint32_t systask_invoke_callback(systask_t* task, uintptr_t arg1,
+                                 uintptr_t arg2, uintptr_t arg3,
+                                 void* callback) {
   uint32_t original_sp = task->sp;
   if (!systask_push_call(task, callback, arg1, arg2, arg3)) {
     // There is not enough space on the unprivileged stack
@@ -314,10 +322,7 @@ void systask_set_r0r1(systask_t* task, uint32_t r0, uint32_t r1) {
   }
 
 #ifdef KERNEL
-  if (task->applet != NULL) {
-    applet_t* applet = (applet_t*)task->applet;
-    mpu_set_active_applet(&applet->layout);
-  }
+  systask_set_mpu(task);
 #endif
 
   stack[STK_FRAME_R0] = r0;
@@ -359,7 +364,9 @@ static void systask_kill(systask_t* task) {
   }
 }
 
-bool systask_is_alive(const systask_t* task) { return !task->killed; }
+bool systask_is_alive(const systask_t* task) {
+  return task->initialized && !task->killed;
+}
 
 void systask_exit(systask_t* task, int exit_code) {
   systask_scheduler_t* scheduler = &g_systask_scheduler;
@@ -483,7 +490,14 @@ static uint32_t get_return_addr(bool secure, bool privileged, uint32_t sp) {
   }
 #endif
 
-  return *ret_addr;
+  // We checked that ret_addr is valid, but kernel/secmon need not
+  // to have access to the entire memory region where the stack resides =>
+  // MPU temporarily to read the return address.
+  mpu_mode_t mode = mpu_reconfig(MPU_MODE_DISABLED);
+  uint32_t addr = *ret_addr;
+  mpu_restore(mode);
+
+  return addr;
 }
 
 // Terminate active task from fault/exception handler
@@ -570,10 +584,7 @@ __attribute((no_stack_protector, used)) static uint32_t scheduler_pendsv(
 
   if (prev_task->tls_size != 0) {
 #ifdef KERNEL
-    if (prev_task->applet != NULL) {
-      applet_t* applet = (applet_t*)prev_task->applet;
-      mpu_set_active_applet(&applet->layout);
-    }
+    systask_set_mpu(prev_task);
 #endif
 
     // Save the TLS of the previous task
@@ -599,10 +610,7 @@ __attribute((no_stack_protector, used)) static uint32_t scheduler_pendsv(
   mpu_reconfig(next_task->mpu_mode);
 
 #ifdef KERNEL
-  if (next_task->applet != NULL) {
-    applet_t* applet = (applet_t*)next_task->applet;
-    mpu_set_active_applet(&applet->layout);
-  }
+  systask_set_mpu(next_task);
 
   if (next_task->tls_size != 0) {
     // Restore the TLS of the next task

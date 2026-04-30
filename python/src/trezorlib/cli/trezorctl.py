@@ -16,21 +16,28 @@
 # You should have received a copy of the License along with this library.
 # If not, see <https://www.gnu.org/licenses/lgpl-3.0.html>.
 
+from __future__ import annotations
+
 import importlib.metadata
 import json
 import logging
 import os
 import time
-from typing import TYPE_CHECKING, Any, Callable, Iterable, Optional, TypeVar, cast
+from pathlib import Path
+from typing import Any, Callable, Optional, TypeVar, cast
 
 import click
 
 from .. import log, messages, protobuf
+from ..client import TrezorClient
 from ..transport import DeviceIsBusy, enumerate_devices
-from ..transport.session import Session
+from ..transport.ble import BleTransport
 from ..transport.udp import UdpTransport
 from . import (
+    ENV_TREZOR_SESSION_ID,
     AliasedGroup,
+    PassphraseSource,
+    SessionIdentifier,
     TrezorConnection,
     benchmark,
     ble,
@@ -51,15 +58,13 @@ from . import (
     settings,
     solana,
     stellar,
+    telemetry,
     tezos,
     tron,
-    with_session,
+    with_client,
 )
 
 F = TypeVar("F", bound=Callable)
-
-if TYPE_CHECKING:
-    from ..transport import Transport
 
 LOG = logging.getLogger(__name__)
 
@@ -151,6 +156,13 @@ class TrezorctlGroup(AliasedGroup):
         else:
             return super().result_callback()
 
+    def invoke(self, ctx: click.Context) -> Any:
+        try:
+            return super().invoke(ctx)
+        finally:
+            if ctx.obj is not None:
+                ctx.obj.close()
+
 
 def configure_logging(verbose: int) -> None:
     if verbose:
@@ -174,7 +186,6 @@ def configure_logging(verbose: int) -> None:
     "--ble/--no-ble",
     help="Enable/disable support for Bluetooth Low Energy.",
     is_flag=True,
-    default=(os.environ.get("TREZOR_BLE") == "1"),
 )
 @click.option("-v", "--verbose", count=True, help="Show communication messages.")
 @click.option(
@@ -195,44 +206,50 @@ def configure_logging(verbose: int) -> None:
 @click.option(
     "-s",
     "--session-id",
-    metavar="HEX",
-    help="Resume given session ID.",
-    default=os.environ.get("TREZOR_SESSION_ID"),
+    "session_str",
+    metavar="DATA",
+    help="Resume given session.",
+    default=ENV_TREZOR_SESSION_ID,
 )
 @click.option(
     "-r",
     "--record",
+    type=click.Path(file_okay=False, dir_okay=True, path_type=Path),
     help="Record screen changes into a specified directory.",
 )
 @click.version_option(package_name="trezor")
 @click.pass_context
 def cli_main(
     ctx: click.Context,
-    path: str,
-    ble: bool,
+    path: str | None,
+    ble: bool | None,
     verbose: int,
     is_json: bool,
     passphrase_on_host: bool,
     script: bool,
-    session_id: Optional[str],
-    record: Optional[str],
+    session_str: str | None,
+    record: Path | None,
 ) -> None:
     configure_logging(verbose)
 
-    bytes_session_id: Optional[bytes] = None
-    if session_id is not None:
-        try:
-            bytes_session_id = bytes.fromhex(session_id)
-        except ValueError:
-            raise click.ClickException(f"Not a valid session id: {session_id}")
+    # if BLE was explicitly enabled, raise an error if it's not available
+    if ble and not BleTransport.ENABLED:
+        raise click.ClickException("BLE support is unavailable")
+
+    BleTransport.ENABLED = ble or (os.environ.get("TREZOR_BLE") == "1")
+
+    if passphrase_on_host:
+        passphrase_source = PassphraseSource.PROMPT
+    else:
+        passphrase_source = PassphraseSource.AUTO
 
     ctx.obj = TrezorConnection(
-        path, bytes_session_id, passphrase_on_host, script, ble_enabled=ble
+        path=path,
+        session_str=session_str,
+        passphrase_source=passphrase_source,
+        script=script,
+        record_dir=record,
     )
-
-    # Optionally record the screen into a specified directory.
-    if record:
-        debug.record_screen_from_connection(ctx.obj, record)
 
 
 # Creating a cli function that has the right types for future usage
@@ -267,19 +284,6 @@ def print_result(res: Any, is_json: bool, script: bool, **kwargs: Any) -> None:
             click.echo(res)
 
 
-@cli.set_result_callback()
-@click.pass_obj
-def stop_recording_action(obj: TrezorConnection, *args: Any, **kwargs: Any) -> None:
-    """Stop recording screen changes when the recording was started by `cli_main`.
-
-    (When user used the `-r / --record` option of `trezorctl` command.)
-
-    It allows for isolating screen directories only for specific actions/commands.
-    """
-    if kwargs.get("record"):
-        debug.record_screen_from_connection(obj, None)
-
-
 def format_device_name(features: messages.Features) -> str:
     model = features.model or "1"
     if features.bootloader_mode:
@@ -297,21 +301,21 @@ def format_device_name(features: messages.Features) -> str:
 @cli.command(name="list")
 @click.option("-n", "no_resolve", is_flag=True, help="Do not resolve Trezor names")
 @click.pass_obj
-def list_devices(
-    obj: TrezorConnection, no_resolve: bool
-) -> Optional[Iterable["Transport"]]:
+def list_devices(obj: TrezorConnection, no_resolve: bool) -> None:
     """List connected Trezor devices."""
     if no_resolve:
-        for d in enumerate_devices(ble_enabled=obj.ble_enabled):
+        for d in enumerate_devices():
             click.echo(d.get_path())
         return
 
-    from . import get_client
+    from ..client import AppManifest, get_client
 
-    for transport in enumerate_devices(ble_enabled=obj.ble_enabled):
+    app = AppManifest(app_name="trezorctl")
+
+    for transport in enumerate_devices():
         try:
             transport.open()
-            client = get_client(transport)
+            client = get_client(app, transport)
             description = format_device_name(client.features)
         except DeviceIsBusy:
             description = "Device is in use by another process"
@@ -320,7 +324,6 @@ def list_devices(
         finally:
             transport.close()
         click.echo(f"{transport.get_path()} - {description}")
-    return None
 
 
 @cli.command()
@@ -337,10 +340,10 @@ def version() -> str:
 @cli.command()
 @click.argument("message")
 @click.option("-b", "--button-protection", is_flag=True)
-@with_session(seedless=True)
-def ping(session: "Session", message: str, button_protection: bool) -> str:
+@with_client
+def ping(client: TrezorClient, message: str, button_protection: bool) -> str:
     """Send ping message."""
-    return session.ping(message, button_protection)
+    return client.ping(message, button_protection)
 
 
 @cli.command()
@@ -353,35 +356,40 @@ def get_session(obj: TrezorConnection, derive_cardano: bool = False) -> str:
     `trezorctl -s SESSION_ID`, or set it to an environment variable `TREZOR_SESSION_ID`,
     to avoid having to enter passphrase for subsequent commands.
     """
-    # make sure session is not resumed
-    obj.session_id = None
+    if obj.features.bootloader_mode:
+        raise click.ClickException("Bootloader mode does not support sessions.")
+    if obj.features.model == "1" and obj.version < (1, 9, 0):
+        raise click.ClickException("Upgrade your firmware to enable session support.")
 
+    session = obj.get_new_session(derive_cardano=derive_cardano, randomize_id=True)
+    return SessionIdentifier.from_session(session).to_session_str()
+
+
+@cli.command()
+@click.pass_obj
+def clear_session(obj: TrezorConnection) -> None:
+    """Clear current session and lock the device.
+
+    Clears cached passphrase from the current session previously obtained
+    with `trezorctl get-session`.
+
+    Additionally, locks the device with PIN, if configured.
+    """
+    if obj.session is not None:
+        try:
+            session = obj.get_session()
+            session.close()
+        except Exception:
+            LOG.debug("Failed to clear session.", exc_info=True)
     with obj.client_context() as client:
-        if client.features.model == "1" and client.version < (1, 9, 0):
-            raise click.ClickException(
-                "Upgrade your firmware to enable session support."
-            )
-
-        session = client.get_session(derive_cardano=derive_cardano)
-        if session.id is None:
-            raise click.ClickException("Passphrase not enabled or firmware too old.")
-        else:
-            return session.id.hex()
+        client.lock()
 
 
 @cli.command()
-@with_session(must_resume=True, empty_passphrase=True)
-def clear_session(session: "Session") -> None:
-    """Clear session (remove cached PIN, passphrase, etc.)."""
-    session.call(messages.LockDevice())
-    session.end()
-
-
-@cli.command()
-@with_session(seedless=True)
-def get_features(session: "Session") -> messages.Features:
+@with_client
+def get_features(client: TrezorClient) -> messages.Features:
     """Retrieve device features and settings."""
-    return session.features
+    return client.features
 
 
 @cli.command()
@@ -436,6 +444,7 @@ cli.add_command(ripple.cli)
 cli.add_command(settings.cli)
 cli.add_command(solana.cli)
 cli.add_command(stellar.cli)
+cli.add_command(telemetry.cli)
 cli.add_command(tezos.cli)
 cli.add_command(tron.cli)
 

@@ -27,7 +27,7 @@ from .. import btc, messages, protobuf, tools
 from . import ChoiceType, with_session
 
 if TYPE_CHECKING:
-    from ..transport.session import Session
+    from ..client import Session
 
 PURPOSE_BIP44 = 44
 PURPOSE_BIP48 = 48
@@ -499,8 +499,3 @@ def verify_message(
     return btc.verify_message(
         session, coin, address, signature_bytes, message, chunkify=chunkify
     )
-
-
-#
-# deprecated interactive signing
-# ALL BELOW is legacy code and will be dropped

@@ -67,9 +67,11 @@ async def load_device(msg: LoadDevice) -> Success:
         no_backup=msg.no_backup is True,
         allow_derivation_fail=msg.skip_checksum is True,
     )
+    if msg.unfinished_backup is not None:
+        storage_device.set_unfinished_backup(bool(msg.unfinished_backup))
     storage_device.set_passphrase_enabled(bool(msg.passphrase_protection))
     storage_device.set_label(msg.label or "")
     if msg.pin:
-        config.change_pin("", msg.pin, None, None)
+        config.change_pin(msg.pin, None)
 
     return Success(message="Device loaded")

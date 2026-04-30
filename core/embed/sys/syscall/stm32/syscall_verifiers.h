@@ -59,7 +59,7 @@ ssize_t dbg_console_write__verified(const void *data, size_t data_size);
 // ---------------------------------------------------------------------
 #ifdef USE_DBG_CONSOLE
 
-#include <rtl/logging.h>
+#include <sys/logging.h>
 
 bool syslog_start_record__verified(const log_source_t *source,
                                    log_level_t level);
@@ -69,7 +69,24 @@ ssize_t syslog_write_chunk__verified(const char *text, size_t text_len,
 
 bool syslog_set_filter__verified(const char *module_name, log_level_t level);
 
-#endif
+#endif  // USE_DBG_CONSOLE
+
+// ---------------------------------------------------------------------
+
+#ifdef USE_IPC
+
+#include <sys/ipc.h>
+
+bool ipc_register__verified(systask_id_t origin, void *buffer, size_t size);
+
+bool ipc_try_receive__verified(ipc_message_t *msg);
+
+void ipc_message_free__verified(ipc_message_t *msg);
+
+bool ipc_send__verified(systask_id_t remote, uint32_t fn, const void *data,
+                        size_t data_size);
+
+#endif  // USE_IPC
 
 // ---------------------------------------------------------------------
 #include <sys/bootutils.h>
@@ -78,7 +95,7 @@ void reboot_and_upgrade__verified(const uint8_t hash[32]);
 
 // ---------------------------------------------------------------------
 
-#include <util/boot_image.h>
+#include <sec/boot_image.h>
 
 bool boot_image_check__verified(const boot_image_t *image);
 
@@ -118,7 +135,7 @@ secbool __wur sdcard_write_blocks__verified(const uint32_t *src,
 #endif  // USE_SD_CARD
 
 // ---------------------------------------------------------------------
-#include <util/unit_properties.h>
+#include <sec/unit_properties.h>
 
 void unit_properties_get__verified(unit_properties_t *props);
 
@@ -151,17 +168,24 @@ secbool secret_key_delegated_identity__verified(
     uint8_t dest[ECDSA_PRIVATE_KEY_SIZE]);
 
 // ---------------------------------------------------------------------
+#ifdef USE_TELEMETRY
+
+#include <sec/telemetry.h>
+bool telemetry_get__verified(telemetry_data_t *out);
+
+#endif
+
+// ---------------------------------------------------------------------
 #include <sec/storage.h>
 
 void storage_setup__verified(PIN_UI_WAIT_CALLBACK callback);
 
-secbool storage_unlock__verified(const uint8_t *pin, size_t pin_len,
-                                 const uint8_t *ext_salt);
+storage_unlock_result_t storage_unlock__verified(const uint8_t *pin,
+                                                 size_t pin_len,
+                                                 const uint8_t *ext_salt);
 
-secbool storage_change_pin__verified(const uint8_t *oldpin, size_t oldpin_len,
-                                     const uint8_t *newpin, size_t newpin_len,
-                                     const uint8_t *old_ext_salt,
-                                     const uint8_t *new_ext_salt);
+storage_pin_change_result_t storage_change_pin__verified(
+    const uint8_t *newpin, size_t newpin_len, const uint8_t *new_ext_salt);
 
 void storage_ensure_not_wipe_code__verified(const uint8_t *pin, size_t pin_len);
 
@@ -179,14 +203,14 @@ secbool storage_set__verified(const uint16_t key, const void *val,
 secbool storage_next_counter__verified(const uint16_t key, uint32_t *count);
 
 // ---------------------------------------------------------------------
-#include <sec/rng.h>
+#include <sec/rng_strong.h>
 
 void rng_fill_buffer__verified(void *buffer, size_t buffer_size);
 
 bool rng_fill_buffer_strong__verified(void *buffer, size_t buffer_size);
 
 // ---------------------------------------------------------------------
-#include <util/translations.h>
+#include <io/translations.h>
 
 bool translations_write__verified(const uint8_t *data, uint32_t offset,
                                   uint32_t len);
@@ -194,7 +218,7 @@ bool translations_write__verified(const uint8_t *data, uint32_t offset,
 const uint8_t *translations_read__verified(uint32_t *len, uint32_t offset);
 
 // ---------------------------------------------------------------------
-#include <util/fwutils.h>
+#include <sec/fwutils.h>
 
 int firmware_hash_start__verified(const uint8_t *challenge,
                                   size_t challenge_len);
@@ -242,7 +266,7 @@ bool nrf_update__verified(const uint8_t *data, size_t len);
 
 #ifdef USE_POWER_MANAGER
 
-#include <sys/power_manager.h>
+#include <io/power_manager.h>
 
 pm_status_t pm_get_state__verified(pm_state_t *status);
 
@@ -255,7 +279,7 @@ pm_status_t pm_suspend__verified(wakeup_flags_t *wakeup_reason);
 // ---------------------------------------------------------------------
 #ifdef USE_HW_JPEG_DECODER
 
-#include <gfx/jpegdec.h>
+#include <io/jpegdec.h>
 
 jpegdec_state_t jpegdec_process__verified(jpegdec_input_t *input);
 
@@ -271,7 +295,7 @@ bool jpegdec_get_slice_mono8__verified(void *mono8, jpegdec_slice_t *slice);
 // ---------------------------------------------------------------------
 #ifdef USE_DMA2D
 
-#include <gfx/dma2d_bitblt.h>
+#include <io/dma2d_bitblt.h>
 
 bool dma2d_rgb565_fill__verified(const gfx_bitblt_t *bb);
 
@@ -319,6 +343,24 @@ bool tropic_ecc_sign__verified(uint16_t key_slot_index, const uint8_t *dig,
 
 bool tropic_data_read__verified(uint16_t udata_slot, uint8_t *data,
                                 uint16_t *size);
+
+#endif
+
+#ifdef USE_APP_LOADING
+
+#include <io/app_loader.h>
+
+ts_t app_task_spawn__verified(const app_hash_t *hash, systask_id_t *task_id);
+
+ts_t app_task_get_pminfo__verified(systask_id_t task_id,
+                                   systask_postmortem_t *pminfo);
+
+app_cache_handle_t app_cache_create_image__verified(const app_hash_t *hash,
+                                                    size_t image_size);
+
+ts_t app_cache_write_image__verified(app_cache_handle_t handle,
+                                     uintptr_t offset, const void *data,
+                                     size_t data_size);
 
 #endif
 

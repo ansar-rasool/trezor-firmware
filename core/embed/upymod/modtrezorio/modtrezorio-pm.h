@@ -17,7 +17,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <sys/power_manager.h>
+#include <io/power_manager.h>
 
 /// package: trezorio.pm
 
@@ -34,13 +34,17 @@
 /// EVENT_CHARGING_STATUS_CHANGED: int
 /// EVENT_USB_CONNECTED_CHANGED: int
 /// EVENT_WIRELESS_CONNECTED_CHANGED: int
+/// EVENT_NTC_CONNECTED_CHANGED: int
+/// EVENT_CHARGING_LIMITED_CHANGED: int
+/// EVENT_BATTERY_OCV_JUMP_DETECTED: int
+/// EVENT_BATTERY_TEMP_JUMP_DETECTED: int
 /// EVENT_SOC_UPDATED: int
 
 /// def soc() -> int:
-///    """
-///    Returns the state of charge (SoC) in percent (0-100). Raises RuntimeError
-///    on failure.
-///    """
+///     """
+///     Returns the state of charge (SoC) in percent (0-100). Raises
+///     RuntimeError on failure.
+///     """
 STATIC mp_obj_t mod_trezorio_pm_soc() {
   pm_state_t state = {0};
   pm_status_t res = pm_get_state(&state);
@@ -141,7 +145,14 @@ STATIC const mp_rom_map_elem_t mod_trezorio_pm_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_EVENT_CHARGING_STATUS_CHANGED), MP_ROM_INT(1 << 1)},
     {MP_ROM_QSTR(MP_QSTR_EVENT_USB_CONNECTED_CHANGED), MP_ROM_INT(1 << 2)},
     {MP_ROM_QSTR(MP_QSTR_EVENT_WIRELESS_CONNECTED_CHANGED), MP_ROM_INT(1 << 3)},
-    {MP_ROM_QSTR(MP_QSTR_EVENT_SOC_UPDATED), MP_ROM_INT(1 << 4)},
+    {MP_ROM_QSTR(MP_QSTR_EVENT_NTC_CONNECTED_CHANGED), MP_ROM_INT(1 << 4)},
+    {MP_ROM_QSTR(MP_QSTR_EVENT_CHARGING_LIMITED_CHANGED), MP_ROM_INT(1 << 5)},
+    {MP_ROM_QSTR(MP_QSTR_EVENT_TEMP_CONTROL_ACTIVE_CHANGED),
+     MP_ROM_INT(1 << 6)},
+    {MP_ROM_QSTR(MP_QSTR_EVENT_BATTERY_CONNECTED_CHANGED), MP_ROM_INT(1 << 7)},
+    {MP_ROM_QSTR(MP_QSTR_EVENT_BATTERY_OCV_JUMP_DETECTED), MP_ROM_INT(1 << 8)},
+    {MP_ROM_QSTR(MP_QSTR_EVENT_BATTERY_TEMP_JUMP_UPDATED), MP_ROM_INT(1 << 9)},
+    {MP_ROM_QSTR(MP_QSTR_EVENT_SOC_UPDATED), MP_ROM_INT(1 << 10)},
 };
 STATIC MP_DEFINE_CONST_DICT(mod_trezorio_pm_globals,
                             mod_trezorio_pm_globals_table);

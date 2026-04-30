@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import atexit
 import logging
+import sys
 import typing as t
 from dataclasses import dataclass
 from multiprocessing import Pipe, Process
@@ -51,9 +52,12 @@ TREZOR_CHARACTERISTIC_TX = "8c000003-a59b-4d58-a9ad-073df69fa1b1"
 SCAN_INTERVAL_SECONDS = 3
 SHUTDOWN_TIMEOUT_SECONDS = 10
 
+SHOULD_WRITE_WITH_RESPONSE = sys.platform == "darwin"
+
 
 class BleTransport(Transport):
-    ENABLED = True
+
+    ENABLED = BLEAK_IMPORTED
     PATH_PREFIX = "ble"
     CHUNK_SIZE = 244
 
@@ -97,13 +101,16 @@ class BleTransport(Transport):
         else:
             raise TransportException(f"No BLE device: {path}")
 
-    def open(self) -> None:
+    def _open(self) -> None:
         self.ble_proxy().connect(self.device)
 
-    def close(self) -> None:
+    def _close(self) -> None:
         # would be a logical place to call self.ble_proxy().disconnect()
         # instead we rely on atexit handler to avoid reconnecting
         pass
+
+    def is_open(self) -> bool:
+        return self.ble_proxy().is_connected(self.device)
 
     def write_chunk(self, chunk: bytes) -> None:
         LOG.log(DUMP_PACKETS, f"sending packet: {chunk.hex()}")
@@ -121,6 +128,9 @@ class BleTransport(Transport):
         if cls._ble is None:
             cls._ble = BleProxy()
         return cls._ble
+
+    def is_ready(self) -> bool:
+        return self._ble is not None
 
 
 class BleProxy:
@@ -286,6 +296,12 @@ class BleAsync:
         except BleakError:
             LOG.error("BLE pairing failed - make sure to open system pairing dialog")
             raise
+        except NotImplementedError:
+            # expected on macOS
+            if sys.platform != "darwin":
+                LOG.warning(
+                    "Failed to initiate pairing. You may need to pair the device manually."
+                )
 
         queue = asyncio.Queue()
 
@@ -298,6 +314,12 @@ class BleAsync:
         periph.client = client
         periph.queue = queue
         LOG.info(f"Connected to {client.address}")
+
+    async def is_connected(self, address: str) -> bool:
+        periph = self.devices.get(address)
+        if not periph:
+            return False
+        return bool(periph.client)
 
     async def disconnect(self, address: str) -> None:
         periph = self.devices.get(address)
@@ -327,7 +349,7 @@ class BleAsync:
     async def write(self, address: str, chunk: bytes) -> None:
         periph = self.devices[address]
         await periph.client.write_gatt_char(
-            TREZOR_CHARACTERISTIC_RX, chunk, response=False
+            TREZOR_CHARACTERISTIC_RX, chunk, response=SHOULD_WRITE_WITH_RESPONSE
         )
 
     async def shutdown(self) -> None:

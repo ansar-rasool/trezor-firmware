@@ -262,8 +262,9 @@ access_violation:
   apptask_access_violation();
 }
 
-secbool storage_unlock__verified(const uint8_t *pin, size_t pin_len,
-                                 const uint8_t *ext_salt) {
+storage_unlock_result_t storage_unlock__verified(const uint8_t *pin,
+                                                 size_t pin_len,
+                                                 const uint8_t *ext_salt) {
   if (!probe_read_access(pin, pin_len)) {
     goto access_violation;
   }
@@ -276,22 +277,12 @@ secbool storage_unlock__verified(const uint8_t *pin, size_t pin_len,
 
 access_violation:
   apptask_access_violation();
-  return secfalse;
+  return UNLOCK_ACCESS_VIOLATION;
 }
 
-secbool storage_change_pin__verified(const uint8_t *oldpin, size_t oldpin_len,
-                                     const uint8_t *newpin, size_t newpin_len,
-                                     const uint8_t *old_ext_salt,
-                                     const uint8_t *new_ext_salt) {
-  if (!probe_read_access(oldpin, oldpin_len)) {
-    goto access_violation;
-  }
-
+storage_pin_change_result_t storage_change_pin__verified(
+    const uint8_t *newpin, size_t newpin_len, const uint8_t *new_ext_salt) {
   if (!probe_read_access(newpin, newpin_len)) {
-    goto access_violation;
-  }
-
-  if (!probe_read_access(old_ext_salt, EXTERNAL_SALT_SIZE)) {
     goto access_violation;
   }
 
@@ -299,12 +290,11 @@ secbool storage_change_pin__verified(const uint8_t *oldpin, size_t oldpin_len,
     goto access_violation;
   }
 
-  return storage_change_pin(oldpin, oldpin_len, newpin, newpin_len,
-                            old_ext_salt, new_ext_salt);
+  return storage_change_pin(newpin, newpin_len, new_ext_salt);
 
 access_violation:
   apptask_access_violation();
-  return secfalse;
+  return PIN_CHANGE_ACCESS_VIOLATION;
 }
 
 void storage_ensure_not_wipe_code__verified(const uint8_t *pin,
@@ -388,7 +378,7 @@ access_violation:
 
 // ---------------------------------------------------------------------
 
-#include <sec/rng.h>
+#include <sec/rng_strong.h>
 
 void rng_fill_buffer__verified(void *buffer, size_t buffer_size) {
   if (!probe_write_access(buffer, buffer_size)) {
@@ -498,7 +488,7 @@ access_violation:
 
 bool tropic_data_read__verified(uint16_t udata_slot, uint8_t *data,
                                 uint16_t *size) {
-  if (!probe_write_access(data, R_MEM_DATA_SIZE_MAX)) {
+  if (!probe_write_access(data, TROPIC_SLOT_MAX_SIZE_V1)) {
     goto access_violation;
   }
 
@@ -525,6 +515,10 @@ bool backup_ram_read__verified(uint16_t key, void *buffer, size_t buffer_size,
     goto access_violation;
   }
 
+  if (!backup_ram_kernel_accessible(key)) {
+    goto access_violation;
+  }
+
   return backup_ram_read(key, buffer, buffer_size, data_size);
 access_violation:
   apptask_access_violation();
@@ -534,6 +528,10 @@ access_violation:
 bool backup_ram_write__verified(uint16_t key, backup_ram_item_type_t type,
                                 const void *data, size_t data_size) {
   if (!probe_read_access(data, data_size)) {
+    goto access_violation;
+  }
+
+  if (!backup_ram_kernel_accessible(key)) {
     goto access_violation;
   }
 
@@ -565,5 +563,21 @@ access_violation:
 }
 
 #endif
+
+#ifdef USE_TELEMETRY
+#include <sec/telemetry.h>
+
+bool telemetry_get__verified(telemetry_data_t *out) {
+  if (out != NULL && !probe_write_access(out, sizeof(*out))) {
+    goto access_violation;
+  }
+
+  return telemetry_get(out);
+
+access_violation:
+  apptask_access_violation();
+  return false;
+}
+#endif  // USE_TELEMETRY
 
 #endif  // SECMON

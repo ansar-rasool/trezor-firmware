@@ -14,13 +14,15 @@
 # You should have received a copy of the License along with this library.
 # If not, see <https://www.gnu.org/licenses/lgpl-3.0.html>.
 
+from __future__ import annotations
+
+import typing as t
 from itertools import product
 
 import pytest
 
-from trezorlib import ethereum, exceptions, messages, models
-from trezorlib.debuglink import SessionDebugWrapper as Session
-from trezorlib.debuglink import TrezorClientDebugLink as Client
+from trezorlib import device, ethereum, exceptions, messages, models
+from trezorlib.debuglink import DebugSession as Session
 from trezorlib.debuglink import message_filters
 from trezorlib.exceptions import TrezorFailure
 from trezorlib.tools import parse_path, unharden
@@ -29,13 +31,14 @@ from ...common import parametrize_using_common_fixtures
 from ...definitions import encode_eth_network
 from ...input_flows import (
     InputFlowConfirmAllWarnings,
-    InputFlowEthereumSignTxDataGoBack,
-    InputFlowEthereumSignTxDataScrollDown,
-    InputFlowEthereumSignTxDataSkip,
+    InputFlowEthereumSignTxData,
     InputFlowEthereumSignTxGoBackFromSummary,
     InputFlowEthereumSignTxShowFeeInfo,
     InputFlowEthereumSignTxStaking,
 )
+
+if t.TYPE_CHECKING:
+    from trezorlib.debuglink import ExpectedResponse
 
 TO_ADDR = "0x1d1c328764a41bda0492b66baa30c4a339ff85ef"
 
@@ -68,10 +71,16 @@ def make_defs(parameters: dict) -> messages.EthereumDefinitions:
 @pytest.mark.parametrize("chunkify", (True, False))
 def test_signtx(session: Session, chunkify: bool, parameters: dict, result: dict):
     input_flow = (
-        InputFlowConfirmAllWarnings(session.client).get()
-        if not session.client.debug.legacy_debug
+        InputFlowConfirmAllWarnings(session).get()
+        if not session.debug.legacy_debug
         else None
     )
+
+    if not parameters.get("safety_checks", True):
+        device.apply_settings(
+            session, safety_checks=messages.SafetyCheckLevel.PromptTemporarily
+        )
+
     _do_test_signtx(session, parameters, result, input_flow, chunkify=chunkify)
 
 
@@ -82,7 +91,7 @@ def _do_test_signtx(
     input_flow=None,
     chunkify: bool = False,
 ):
-    with session.client as client:
+    with session.test_ctx as client:
         if input_flow:
             client.watch_layout()
             client.set_input_flow(input_flow)
@@ -171,7 +180,7 @@ example_input_data_too_long_value = {
 
 @pytest.mark.models("core", reason="T1 does not support input flows")
 def test_signtx_fee_info(session: Session):
-    input_flow = InputFlowEthereumSignTxShowFeeInfo(session.client).get()
+    input_flow = InputFlowEthereumSignTxShowFeeInfo(session).get()
     _do_test_signtx(
         session,
         example_input_data["parameters"],
@@ -182,7 +191,7 @@ def test_signtx_fee_info(session: Session):
 
 @pytest.mark.models("core")
 def test_signtx_go_back_from_summary(session: Session):
-    input_flow = InputFlowEthereumSignTxGoBackFromSummary(session.client).get()
+    input_flow = InputFlowEthereumSignTxGoBackFromSummary(session).get()
     _do_test_signtx(
         session,
         example_input_data["parameters"],
@@ -196,9 +205,9 @@ def test_signtx_go_back_from_summary(session: Session):
 def test_signtx_eip1559(
     session: Session, chunkify: bool, parameters: dict, result: dict
 ):
-    with session.client as client:
-        if not session.client.debug.legacy_debug:
-            client.set_input_flow(InputFlowConfirmAllWarnings(session.client).get())
+    with session.test_ctx as client:
+        if not session.debug.legacy_debug:
+            client.set_input_flow(InputFlowConfirmAllWarnings(session).get())
         sig_v, sig_r, sig_s = ethereum.sign_tx_eip1559(
             session,
             n=parse_path(parameters["path"]),
@@ -263,43 +272,46 @@ def test_sanity_checks(session: Session):
         )
 
 
+# ≤5 pages of data are shown on T1B1.
+# Otherwise, a warning is shown and the rest of the data is skipped.
+LEGACY_MAX_DATA_PAGES = 5
+
+
 def test_data_streaming(session: Session):
     """Only verifying the expected responses, the signatures are
     checked in vectorized function above.
     """
-    with session.client as client:
-        client.set_expected_responses(
-            [
-                messages.ButtonRequest(code=messages.ButtonRequestType.SignTx),
-                messages.ButtonRequest(code=messages.ButtonRequestType.SignTx),
-                messages.ButtonRequest(code=messages.ButtonRequestType.SignTx),
-                message_filters.EthereumTxRequest(
-                    data_length=1_024,
-                    signature_r=None,
-                    signature_s=None,
-                    signature_v=None,
-                ),
-                message_filters.EthereumTxRequest(
-                    data_length=1_024,
-                    signature_r=None,
-                    signature_s=None,
-                    signature_v=None,
-                ),
-                message_filters.EthereumTxRequest(
-                    data_length=1_024,
-                    signature_r=None,
-                    signature_s=None,
-                    signature_v=None,
-                ),
-                message_filters.EthereumTxRequest(
-                    data_length=3,
-                    signature_r=None,
-                    signature_s=None,
-                    signature_v=None,
-                ),
-                message_filters.EthereumTxRequest(data_length=None),
+    with session.test_ctx as client:
+        flow = InputFlowEthereumSignTxData(client, scroll=False, cancel=False)
+        flow.confirm_tx = client.ui.default_input_flow()
+        client.set_input_flow(flow.get())
+        is_legacy = client.model in models.LEGACY_MODELS
+
+        br_sign_tx = messages.ButtonRequest(code=messages.ButtonRequestType.SignTx)
+        br_protect = messages.ButtonRequest(code=messages.ButtonRequestType.ProtectCall)
+
+        expected_responses: list[ExpectedResponse] = [br_sign_tx]
+        if is_legacy:
+            expected_responses += [br_sign_tx] * LEGACY_MAX_DATA_PAGES + [
+                br_protect,
+                br_sign_tx,
             ]
+
+        expected_responses.extend(
+            message_filters.EthereumTxRequest(
+                data_length=data_length,
+                signature_r=None,
+                signature_s=None,
+                signature_v=None,
+            )
+            for data_length in (1_024, 1_024, 1_024, 3)
         )
+
+        if not is_legacy:
+            expected_responses += [br_sign_tx, br_sign_tx]
+
+        expected_responses += [message_filters.EthereumTxRequest(data_length=None)]
+        client.set_expected_responses(expected_responses)
 
         ethereum.sign_tx(
             session,
@@ -396,7 +408,7 @@ def test_signtx_eip1559_access_list(
     access_list,
     expected_sig: tuple[int, str, str] | None,
 ):
-    with session.client:
+    with session.test_ctx:
         sig_v, sig_r, sig_s = ethereum.sign_tx_eip1559(
             session,
             n=parse_path("m/44h/60h/0h/0/100"),
@@ -475,28 +487,12 @@ def test_sanity_checks_eip1559(session: Session):
         )
 
 
-def input_flow_data_skip(client: Client, cancel: bool = False):
-    return InputFlowEthereumSignTxDataSkip(client, cancel).get()
-
-
-def input_flow_data_scroll_down(client: Client, cancel: bool = False):
-    return InputFlowEthereumSignTxDataScrollDown(client, cancel).get()
-
-
-def input_flow_data_go_back(client: Client, cancel: bool = False):
-    return InputFlowEthereumSignTxDataGoBack(client, cancel).get()
-
-
 HEXDATA = "0123456789abcd000023456789abcd010003456789abcd020000456789abcd030000056789abcd040000006789abcd050000000789abcd060000000089abcd070000000009abcd080000000000abcd090000000001abcd0a0000000011abcd0b0000000111abcd0c0000001111abcd0d0000011111abcd0e0000111111abcd0f0000000002abcd100000000022abcd110000000222abcd120000002222abcd130000022222abcd140000222222abcd15"
 
 
-@pytest.mark.parametrize(
-    "flow", (input_flow_data_skip, input_flow_data_scroll_down, input_flow_data_go_back)
-)
+@pytest.mark.parametrize("scroll", [True, False])
 @pytest.mark.models("core")
-def test_signtx_data_pagination(session: Session, flow):
-    client = session.client
-
+def test_signtx_data_pagination(session: Session, scroll: bool):
     def _sign_tx_call():
         ethereum.sign_tx(
             session,
@@ -511,16 +507,19 @@ def test_signtx_data_pagination(session: Session, flow):
             data=bytes.fromhex(HEXDATA),
         )
 
-    with client:
+    # test pagination
+    flow = InputFlowEthereumSignTxData(session, scroll=scroll, cancel=False)
+    with session.test_ctx as client:
         client.watch_layout()
-        client.set_input_flow(flow(session.client))
+        client.set_input_flow(flow.get())
         _sign_tx_call()
 
-    if flow is not input_flow_data_scroll_down:
-        with client, pytest.raises(exceptions.Cancelled):
-            client.watch_layout()
-            client.set_input_flow(flow(session.client, cancel=True))
-            _sign_tx_call()
+    # test cancellation
+    flow = InputFlowEthereumSignTxData(session, scroll=scroll, cancel=True)
+    with client, pytest.raises(exceptions.Cancelled):
+        client.watch_layout()
+        client.set_input_flow(flow.get())
+        _sign_tx_call()
 
 
 @parametrize_using_common_fixtures("ethereum/sign_tx_staking.json")
@@ -530,14 +529,22 @@ def test_signtx_staking(
 ):
     input_flow = None
     if session.model is not models.T1B1:
-        input_flow = InputFlowEthereumSignTxStaking(session.client).get()
+        input_flow = InputFlowEthereumSignTxStaking(session).get()
     _do_test_signtx(
         session, parameters, result, input_flow=input_flow, chunkify=chunkify
     )
 
 
-@parametrize_using_common_fixtures("ethereum/sign_tx_staking_data_error.json")
-def test_signtx_staking_bad_inputs(session: Session, parameters: dict, result: dict):
+@parametrize_using_common_fixtures(
+    "ethereum/sign_tx_staking_data_error.json",
+    "ethereum/sign_tx_error.json",
+)
+def test_signtx_error(session: Session, parameters: dict, result: dict):
+    if not parameters.get("safety_checks", True):
+        device.apply_settings(
+            session, safety_checks=messages.SafetyCheckLevel.PromptTemporarily
+        )
+
     # result not needed
     with pytest.raises(TrezorFailure, match=r"DataError"):
         ethereum.sign_tx(
@@ -558,7 +565,7 @@ def test_signtx_staking_bad_inputs(session: Session, parameters: dict, result: d
 
 @parametrize_using_common_fixtures("ethereum/sign_tx_staking_eip1559.json")
 def test_signtx_staking_eip1559(session: Session, parameters: dict, result: dict):
-    with session.client:
+    with session.test_ctx:
         sig_v, sig_r, sig_s = ethereum.sign_tx_eip1559(
             session,
             n=parse_path(parameters["path"]),

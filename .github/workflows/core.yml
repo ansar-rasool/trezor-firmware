@@ -13,6 +13,7 @@ on:
   push:
     branches:
       - 'release/**'
+      - 'secfix/**'
 
 # cancel any previous runs on the same PR
 concurrency:
@@ -40,7 +41,7 @@ jobs:
       - id: set_vars
         name: Set variables
         run: |
-          echo test_lang=${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'translations') && '[\"en\", \"cs\", \"fr\", \"de\", \"es\", \"pt\"]' || '[\"en\"]' }} >> $GITHUB_OUTPUT
+          echo test_lang=${{ (github.event_name == 'schedule' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'translations'))) && '[\"en\", \"cs\", \"fr\", \"de\", \"es\", \"pt\"]' || '[\"en\"]' }} >> $GITHUB_OUTPUT
           # TODO: fix ASAN tests on nightly CI runs (#5143)
           echo asan=${{ '[\"noasan\"]' }} >> $GITHUB_OUTPUT
           cat $GITHUB_OUTPUT
@@ -51,7 +52,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        model: ${{ fromJSON(startsWith(github.ref, 'refs/heads/release/') && '["T2B1", "T2T1", "T3B1", "T3T1", "T3W1"]' || '["T2T1", "T3B1", "T3T1", "T3W1"]') }}
+        model: ${{ fromJSON(github.event_name == 'push' && '["T2B1", "T2T1", "T3B1", "T3T1", "T3W1"]' || '["T2T1", "T3B1", "T3T1", "T3W1"]') }}
         coins: [universal, btconly]
         type: ${{ fromJSON(github.event_name == 'schedule' && '["normal", "debuglink", "production"]' || '["normal", "debuglink"]') }}
         include:
@@ -138,7 +139,7 @@ jobs:
       - run: nix-shell --run "uv run make -C core build_bootloader_emu"
         if: matrix.coins == 'universal' && matrix.asan == 'noasan'
       - run: nix-shell --run "uv run make -C core build_unix_frozen"
-      - run: nix-shell --arg fullDeps true --run "cd vendor/ts-tvl/model_configs/example_config && poetry env use 3.12 && poetry install && poetry run model_server tcp -c example_config.yml &"
+      - run: nix-shell --arg fullDeps true --run "cd vendor/ts-tvl && poetry env use 3.12 && poetry install && poetry run model_server tcp -c ../../tests/tropic_model/config.yml > ../../tests/trezor-tropic-model.log 2>&1 &"
       - run: nix-shell --run "uv run make -C core test_emu_sanity"
       - run: cp core/build/unix/trezor-emu-core core/build/unix/trezor-emu-core-${{ matrix.model }}-${{ matrix.coins }}
       - uses: actions/upload-artifact@v4
@@ -208,7 +209,7 @@ jobs:
           submodules: recursive
       - uses: ./.github/actions/environment
       - run: nix-shell --run "uv run make -C core build_unix"
-      - run: nix-shell --arg fullDeps true --run "cd vendor/ts-tvl/model_configs/example_config && poetry env use 3.12 && poetry install && poetry run model_server tcp -c example_config.yml &"
+      - run: nix-shell --arg fullDeps true --run "cd vendor/ts-tvl && poetry env use 3.12 && poetry install && poetry run model_server tcp -c ../../tests/tropic_model/config.yml > ../../tests/trezor-tropic-model.log 2>&1 &"
       - run: nix-shell --run "uv run make -C core test"
       - run: nix-shell --run "uv run make -C core test_emu_sanity"  # sanity check non-frozen emulator
 
@@ -301,8 +302,7 @@ jobs:
       - uses: ./.github/actions/environment
       - name: Start Tropic model
         if: ${{ env.TREZOR_MODEL == 'T3W1' && env.ACTIONS_DO_UI_TEST != 'true' }}  # ACTIONS_DO_UI_TEST refers to the test_emu_ui_multicore below which uses --control-emulators and starts tvl internally
-        run: |
-          nix-shell --arg fullDeps true --run "cd vendor/ts-tvl && poetry env use 3.12 && poetry install && poetry run model_server tcp -c ../../tests/tropic_model/config.yml > ../../tests/trezor-tropic-model.log 2>&1 &"
+        run: nix-shell --arg fullDeps true --run "cd vendor/ts-tvl && poetry env use 3.12 && poetry install && poetry run model_server tcp -c ../../tests/tropic_model/config.yml > ../../tests/trezor-tropic-model.log 2>&1 &"
       - run: nix-shell --run "uv run make -C core ${{ env.ACTIONS_DO_UI_TEST == 'true' && 'test_emu_ui_multicore' || 'test_emu' }}"
       - run: tail -v -n50 tests/trezor*.log || true
         if: failure()
@@ -400,7 +400,7 @@ jobs:
           path: core/build
       - run: chmod +x core/build/unix/trezor-emu-core*
       - uses: ./.github/actions/environment
-      - run: nix-shell --run "tests/download_emulators.sh"
+      - run: nix-shell --run "tests/download_emulators.sh ${{ matrix.model }}"
       - run: nix-shell --run "uv run pytest tests/upgrade_tests"
       - uses: actions/upload-artifact@v4
         with:
@@ -721,7 +721,7 @@ jobs:
 
   core_upload_emu:
     name: Upload emulator binaries
-    if: github.event_name == 'schedule'
+    if: github.event_name == 'schedule' && github.repository == 'trezor/trezor-firmware'
     runs-on: ubuntu-latest
     needs:
       - core_emu
@@ -744,7 +744,7 @@ jobs:
   core_upload_emu_branch:
     name: Upload emulator binaries for the current branch
     # Not building it for nightly CI
-    if: github.event_name != 'schedule'
+    if: github.event_name != 'schedule' && github.repository == 'trezor/trezor-firmware'
     runs-on: ubuntu-latest
     needs:
       # Do not include ARM, they are only built on nightly

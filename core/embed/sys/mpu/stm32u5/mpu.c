@@ -30,8 +30,6 @@
 #include <rtl/sizedefs.h>
 #include <sys/irq.h>
 #include <sys/mpu.h>
-#include <util/flash.h>
-#include <util/image.h>
 
 #include "stm32u5xx_ll_cortex.h"
 
@@ -40,6 +38,7 @@
 #define MPUX_TYPE_SRAM 1
 #define MPUX_TYPE_PERIPHERAL 2
 #define MPUX_TYPE_FLASH_DATA 3
+#define MPUX_TYPE_SRAM_CODE 4
 
 const static struct {
   uint32_t xn;    // executable
@@ -70,6 +69,12 @@ const static struct {
         .xn = LL_MPU_INSTRUCTION_ACCESS_DISABLE,
         .attr = LL_MPU_ATTRIBUTES_NUMBER3,
         .sh = LL_MPU_ACCESS_NOT_SHAREABLE,
+    },
+    // 4 - SRAM CODE
+    {
+        .xn = LL_MPU_INSTRUCTION_ACCESS_ENABLE,
+        .attr = LL_MPU_ATTRIBUTES_NUMBER1,
+        .sh = LL_MPU_ACCESS_INNER_SHAREABLE,
     },
 };
 
@@ -128,9 +133,21 @@ static void mpu_set_attributes(void) {
   MPU->MAIR0 |= 0x44 << 24;
 }
 
-#define STORAGE_SIZE (NORCOW_SECTOR_SIZE * NORCOW_SECTOR_COUNT)
+#define STORAGE_SIZE (STORAGE_1_MAXSIZE + STORAGE_2_MAXSIZE)
+_Static_assert(STORAGE_1_START + STORAGE_1_MAXSIZE == STORAGE_2_START,
+               "storage regions not contiguous");
+
 _Static_assert(NORCOW_SECTOR_SIZE == STORAGE_1_MAXSIZE, "norcow misconfigured");
 _Static_assert(NORCOW_SECTOR_SIZE == STORAGE_2_MAXSIZE, "norcow misconfigured");
+
+static inline bool is_flash_address(uint32_t addr) {
+  if ((addr >> 24) == (FLASH_BASE_NS >> 24)) {
+    return true;
+  } else if ((addr >> 24) == (FLASH_BASE_S >> 24)) {
+    return true;
+  }
+  return false;
+}
 
 // PERIPH_SIZE covers both secure and non-secure peripherals
 // 0x40000000 to 0x4FFFFFFF (256M) and
@@ -178,7 +195,7 @@ extern uint32_t _kernel_flash_end;
 #define KERNEL_START FIRMWARE_START
 #endif
 
-#define KERNEL_END COREAPP_CODE_ALIGN((uint32_t) & _kernel_flash_end)
+#define KERNEL_END ALIGN_UP((uint32_t) & _kernel_flash_end, COREAPP_ALIGNMENT)
 #define KERNEL_SIZE (KERNEL_END - KERNEL_START)
 #endif  // KERNEL
 
@@ -315,7 +332,7 @@ mpu_mode_t mpu_get_mode(void) {
   return drv->mode;
 }
 
-void mpu_set_active_applet(applet_layout_t* layout) {
+void mpu_set_active_applet(const applet_layout_t* layout) {
   mpu_driver_t* drv = &g_mpu_driver;
 
   if (!drv->initialized) {
@@ -326,12 +343,14 @@ void mpu_set_active_applet(applet_layout_t* layout) {
 
   mpu_disable();
 
-  drv->app_tls = layout->tls;
-
   if (layout != NULL) {
     // clang-format off
     if (layout->code1.start != 0 && layout->code1.size != 0) {
-      SET_REGRUN( 2, layout->code1.start, layout->code1.size, FLASH_CODE, NO, YES );
+      if (is_flash_address(layout->code1.start)) {
+        SET_REGRUN( 2, layout->code1.start, layout->code1.size, FLASH_CODE, NO, YES );
+      } else {
+        SET_REGRUN( 2, layout->code1.start, layout->code1.size, SRAM_CODE, NO, YES );
+      }
     } else {
       DIS_REGION( 2 );
     }
@@ -343,7 +362,11 @@ void mpu_set_active_applet(applet_layout_t* layout) {
     }
 
     if (layout->code2.start != 0 && layout->code2.size != 0) {
-      SET_REGRUN( 4, layout->code2.start, layout->code2.size, FLASH_CODE, NO, YES );
+      if (is_flash_address(layout->code2.start)) {
+        SET_REGRUN( 4, layout->code2.start, layout->code2.size, FLASH_CODE, NO, YES );
+      } else {
+        SET_REGRUN( 4, layout->code2.start, layout->code2.size, SRAM_CODE, NO, YES );
+      }
     } else if (layout->data2.start != 0 && layout->data2.size != 0) {
       SET_REGRUN( 4, layout->data2.start, layout->data2.size, SRAM, YES, YES );
     } else {
@@ -359,7 +382,7 @@ void mpu_set_active_applet(applet_layout_t* layout) {
 
   // Remember the TLS area of the active applet
   // (used in region #7 in MPU_APP mode)
-  drv->app_tls = layout->tls;
+  drv->app_tls = layout ? layout->tls : (mpu_area_t){0};
 
   mpu_update_region7(drv->mode);
 

@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 import pytest
 
 from trezorlib import btc, device, messages
-from trezorlib.debuglink import SessionDebugWrapper as Session
+from trezorlib.debuglink import DebugSession as Session
 from trezorlib.exceptions import Cancelled, TrezorFailure
 from trezorlib.tools import H_, parse_path
 
@@ -28,6 +28,7 @@ from ...input_flows import (
     InputFlowLockTimeBlockHeight,
     InputFlowLockTimeDatetime,
     InputFlowSignTxBackFromAmount,
+    InputFlowSignTxCancelFromAmount,
     InputFlowSignTxHighFee,
     InputFlowSignTxInformation,
     InputFlowSignTxInformationCancel,
@@ -126,7 +127,7 @@ def test_one_one_fee(session: Session):
         script_type=messages.OutputScriptType.PAYTOADDRESS,
     )
 
-    with session.client as client:
+    with session.test_ctx as client:
         client.set_expected_responses(
             [
                 request_input(0),
@@ -157,7 +158,7 @@ def test_one_one_fee(session: Session):
     )
 
 
-@pytest.mark.models("t3w1")
+@pytest.mark.models("t3w1", "t3t1")
 def test_one_one_fee_back_from_amount(session: Session):
     # input tx: 0dac366fd8a67b2a89fbb0d31086e7acded7a5bbf9ef9daa935bc873229ef5b5
 
@@ -174,14 +175,16 @@ def test_one_one_fee_back_from_amount(session: Session):
         script_type=messages.OutputScriptType.PAYTOADDRESS,
     )
 
-    with session.client as client:
-        IF = InputFlowSignTxBackFromAmount(session.client)
+    with session.test_ctx as client:
+        IF = InputFlowSignTxBackFromAmount(session)
         client.set_input_flow(IF.get())
 
         client.set_expected_responses(
             [
                 request_input(0),
                 request_output(0),
+                messages.ButtonRequest(code=B.ConfirmOutput),
+                messages.ButtonRequest(code=B.ConfirmOutput),
                 messages.ButtonRequest(code=B.ConfirmOutput),
                 (is_core(session), messages.ButtonRequest(code=B.ConfirmOutput)),
                 messages.ButtonRequest(code=B.SignTx),
@@ -206,6 +209,32 @@ def test_one_one_fee_back_from_amount(session: Session):
         hash_link="https://btc1.trezor.io/api/tx/b893aeed4b12227b6f5348d7f6cb84ba2cda2ba70a41933a25f363b9d2fc2cf9",
         tx_hex="0100000001b5f59e2273c85b93aa9deff9bba5d7deace78610d3b0fb892a7ba6d86f36ac0d000000006b483045022100dd4dd136a70371bc9884c3c51fd52f4aed9ab8ee98f3ac7367bb19e6538096e702200c56be09c4359fc7eb494b4bdf8f2b72706b0575c4021373345b593e9661c7b6012103d7f3a07085bee09697cf03125d5c8760dfed65403dba787f1d1d8b1251af2cbeffffffff0148c40000000000001976a91419140511436e947448be994ab7fda9f98623e68e88ac00000000",
     )
+
+
+@pytest.mark.models(
+    "t3t1", "t3w1", reason="Cannot cancel from Amount screen on Bolt & Caesar"
+)
+def test_one_one_fee_cancel_from_amount(session: Session):
+    # input tx: 0dac366fd8a67b2a89fbb0d31086e7acded7a5bbf9ef9daa935bc873229ef5b5
+
+    inp1 = messages.TxInputType(
+        address_n=parse_path("m/44h/0h/5h/0/9"),  # 1H2CRJBrDMhkvCGZMW7T4oQwYbL8eVuh7p
+        amount=63_988,
+        prev_hash=TXHASH_0dac36,
+        prev_index=0,
+    )
+
+    out1 = messages.TxOutputType(
+        address="13Hbso8zgV5Wmqn3uA7h3QVtmPzs47wcJ7",
+        amount=50_248,
+        script_type=messages.OutputScriptType.PAYTOADDRESS,
+    )
+
+    with session.test_ctx as client, pytest.raises(Cancelled):
+        IF = InputFlowSignTxCancelFromAmount(client)
+        client.set_input_flow(IF.get())
+
+        btc.sign_tx(session, "Bitcoin", [inp1], [out1], prev_txes=TX_CACHE_MAINNET)
 
 
 def test_testnet_one_two_fee(session: Session):
@@ -230,7 +259,7 @@ def test_testnet_one_two_fee(session: Session):
         script_type=messages.OutputScriptType.PAYTOADDRESS,
     )
 
-    with session.client as client:
+    with session.test_ctx as client:
         client.set_expected_responses(
             [
                 request_input(0),
@@ -280,7 +309,7 @@ def test_testnet_fee_high_warning(session: Session):
         script_type=messages.OutputScriptType.PAYTOADDRESS,
     )
 
-    with session.client as client:
+    with session.test_ctx as client:
         client.set_expected_responses(
             [
                 request_input(0),
@@ -332,7 +361,7 @@ def test_one_two_fee(session: Session):
         script_type=messages.OutputScriptType.PAYTOADDRESS,
     )
 
-    with session.client as client:
+    with session.test_ctx as client:
         client.set_expected_responses(
             [
                 request_input(0),
@@ -394,7 +423,7 @@ def test_one_three_fee(session: Session, chunkify: bool):
         script_type=messages.OutputScriptType.PAYTOADDRESS,
     )
 
-    with session.client as client:
+    with session.test_ctx as client:
         client.set_expected_responses(
             [
                 request_input(0),
@@ -465,7 +494,7 @@ def test_two_two(session: Session):
         script_type=messages.OutputScriptType.PAYTOADDRESS,
     )
 
-    with session.client as client:
+    with session.test_ctx as client:
         client.set_expected_responses(
             [
                 request_input(0),
@@ -609,7 +638,7 @@ def test_lots_of_change(session: Session):
 
     request_change_outputs = [request_output(i + 1) for i in range(cnt)]
 
-    with session.client as client:
+    with session.test_ctx as client:
         client.set_expected_responses(
             [
                 request_input(0),
@@ -660,7 +689,7 @@ def test_fee_high_warning(session: Session):
         script_type=messages.OutputScriptType.PAYTOADDRESS,
     )
 
-    with session.client as client:
+    with session.test_ctx as client:
         client.set_expected_responses(
             [
                 request_input(0),
@@ -716,8 +745,8 @@ def test_fee_high_hardfail(session: Session):
     device.apply_settings(
         session, safety_checks=messages.SafetyCheckLevel.PromptTemporarily
     )
-    with session.client as client:
-        IF = InputFlowSignTxHighFee(session.client)
+    with session.test_ctx as client:
+        IF = InputFlowSignTxHighFee(session)
         client.set_input_flow(IF.get())
 
         _, serialized_tx = btc.sign_tx(
@@ -749,7 +778,7 @@ def test_fee_rate_overflow(session: Session):
         amount=100_000_000,
         script_type=messages.OutputScriptType.PAYTOADDRESS,
     )
-    with session.client as client:
+    with session.test_ctx as client:
         client.set_expected_responses(
             [
                 request_input(0),
@@ -789,7 +818,7 @@ def test_not_enough_funds(session: Session):
         script_type=messages.OutputScriptType.PAYTOADDRESS,
     )
 
-    with session.client as client:
+    with session.test_ctx as client:
         client.set_expected_responses(
             [
                 request_input(0),
@@ -819,7 +848,7 @@ def test_p2sh(session: Session):
         script_type=messages.OutputScriptType.PAYTOSCRIPTHASH,
     )
 
-    with session.client as client:
+    with session.test_ctx as client:
         client.set_expected_responses(
             [
                 request_input(0),
@@ -878,8 +907,6 @@ def test_testnet_big_amount(session: Session):
 
 def test_attack_change_outputs(session: Session):
     # input tx: ac4ca0e7827a1228f44449cb57b4b9a809a667ca044dc43bb124627fed4bc10a
-    client = session.client
-
     inp1 = messages.TxInputType(
         address_n=parse_path("m/44h/0h/0h/0/55"),  # 14nw9rFTWGUncHZjSqpPSJQaptWW7iRRB8
         amount=10_000,
@@ -907,7 +934,7 @@ def test_attack_change_outputs(session: Session):
     )
 
     # Test if the transaction can be signed normally
-    with client:
+    with session.test_ctx as client:
         client.set_expected_responses(
             [
                 request_input(0),
@@ -964,7 +991,7 @@ def test_attack_change_outputs(session: Session):
         return msg
 
     with (
-        client,
+        session.test_ctx as client,
         pytest.raises(TrezorFailure, match="Transaction has changed during signing"),
     ):
         # Set up attack processors
@@ -1020,7 +1047,7 @@ def test_attack_modify_change_address(session: Session):
         return msg
 
     with (
-        session.client as client,
+        session.test_ctx as client,
         pytest.raises(TrezorFailure, match="Transaction has changed during signing"),
     ):
         # Set up attack processors
@@ -1078,7 +1105,7 @@ def test_attack_change_input_address(session: Session):
         return msg
 
     # Now run the attack, must trigger the exception
-    with session.client as client:
+    with session.test_ctx as client:
         client.set_filter(messages.TxAck, attack_processor)
         client.set_expected_responses(
             [
@@ -1129,7 +1156,7 @@ def test_spend_coinbase(session: Session):
         script_type=messages.OutputScriptType.PAYTOADDRESS,
     )
 
-    with session.client as client:
+    with session.test_ctx as client:
         client.set_expected_responses(
             [
                 request_input(0),
@@ -1187,7 +1214,7 @@ def test_two_changes(session: Session):
         script_type=messages.OutputScriptType.PAYTOADDRESS,
     )
 
-    with session.client as client:
+    with session.test_ctx as client:
         client.set_expected_responses(
             [
                 request_input(0),
@@ -1246,7 +1273,7 @@ def test_change_on_main_chain_allowed(session: Session):
         script_type=messages.OutputScriptType.PAYTOADDRESS,
     )
 
-    with session.client as client:
+    with session.test_ctx as client:
         client.set_expected_responses(
             [
                 request_input(0),
@@ -1514,7 +1541,7 @@ def test_lock_time(session: Session, lock_time: int, sequence: int):
         script_type=messages.OutputScriptType.PAYTOADDRESS,
     )
 
-    with session.client as client:
+    with session.test_ctx as client:
         client.set_expected_responses(
             [
                 request_input(0),
@@ -1563,8 +1590,8 @@ def test_lock_time_blockheight(session: Session):
         script_type=messages.OutputScriptType.PAYTOADDRESS,
     )
 
-    with session.client as client:
-        IF = InputFlowLockTimeBlockHeight(session.client, "499999999")
+    with session.test_ctx as client:
+        IF = InputFlowLockTimeBlockHeight(session, "499999999")
         client.set_input_flow(IF.get())
 
         btc.sign_tx(
@@ -1602,8 +1629,8 @@ def test_lock_time_datetime(session: Session, lock_time_str: str):
     lock_time_utc = lock_time_naive.replace(tzinfo=timezone.utc)
     lock_time_timestamp = int(lock_time_utc.timestamp())
 
-    with session.client as client:
-        IF = InputFlowLockTimeDatetime(session.client, lock_time_str)
+    with session.test_ctx as client:
+        IF = InputFlowLockTimeDatetime(session, lock_time_str)
         client.set_input_flow(IF.get())
 
         btc.sign_tx(
@@ -1634,8 +1661,8 @@ def test_information(session: Session):
         script_type=messages.OutputScriptType.PAYTOADDRESS,
     )
 
-    with session.client as client:
-        IF = InputFlowSignTxInformation(session.client)
+    with session.test_ctx as client:
+        IF = InputFlowSignTxInformation(session)
         client.set_input_flow(IF.get())
 
         btc.sign_tx(
@@ -1669,8 +1696,8 @@ def test_information_mixed(session: Session):
         script_type=messages.OutputScriptType.PAYTOADDRESS,
     )
 
-    with session.client as client:
-        IF = InputFlowSignTxInformationMixed(session.client)
+    with session.test_ctx as client:
+        IF = InputFlowSignTxInformationMixed(session)
         client.set_input_flow(IF.get())
 
         btc.sign_tx(
@@ -1700,8 +1727,8 @@ def test_information_cancel(session: Session):
         script_type=messages.OutputScriptType.PAYTOADDRESS,
     )
 
-    with session.client as client, pytest.raises(Cancelled):
-        IF = InputFlowSignTxInformationCancel(session.client)
+    with session.test_ctx as client, pytest.raises(Cancelled):
+        IF = InputFlowSignTxInformationCancel(session)
         client.set_input_flow(IF.get())
 
         btc.sign_tx(
@@ -1746,8 +1773,8 @@ def test_information_replacement(session: Session):
         orig_index=0,
     )
 
-    with session.client as client:
-        IF = InputFlowSignTxInformationReplacement(session.client)
+    with session.test_ctx as client:
+        IF = InputFlowSignTxInformationReplacement(session)
         client.set_input_flow(IF.get())
 
         btc.sign_tx(

@@ -22,9 +22,14 @@
 #ifdef USE_STORAGE
 #include <sec/storage.h>
 #endif
+#include <rtl/cli.h>
 #include <trezor_types.h>
 
 #include "ed25519-donna/ed25519.h"
+
+// Max size of data slot fixed to 444 B for backwards compatibility. From
+// Tropic's (RISCV) FW version >=2.0.0, 475 B can be utilized from each slot.
+#define TROPIC_SLOT_MAX_SIZE_V1 (444)
 
 // FIDO attestation key and certificate.
 #define TROPIC_FIDO_CERT_FIRST_SLOT 0
@@ -38,14 +43,19 @@
 
 // Pairing key used by prodtest to inject the privileged and unprivileged
 // pairing keys.
-#define TROPIC_FACTORY_PAIRING_KEY_SLOT 0  // PAIRING_KEY_SLOT_INDEX_0
+#define TROPIC_FACTORY_PAIRING_KEY_SLOT 0  // TR01_PAIRING_KEY_SLOT_INDEX_0
 
 // Pairing key used by the HSM to inject the attestation FIDO key and generate
 // the device key, and by unofficial firwmare.
-#define TROPIC_UNPRIVILEGED_PAIRING_KEY_SLOT 1  // PAIRING_KEY_SLOT_INDEX_1
+#define TROPIC_UNPRIVILEGED_PAIRING_KEY_SLOT 1  // TR01_PAIRING_KEY_SLOT_INDEX_1
 
 // Pairing key used by official firmware.
-#define TROPIC_PRIVILEGED_PAIRING_KEY_SLOT 2  // PAIRING_KEY_SLOT_INDEX_2
+#define TROPIC_PRIVILEGED_PAIRING_KEY_SLOT 2  // TR01_PAIRING_KEY_SLOT_INDEX_2
+
+// Mac-and-destroy slots used in PIN verification
+#define TROPIC_FIRST_MAC_AND_DESTROY_SLOT_PRIVILEGED 0
+#define TROPIC_FIRST_MAC_AND_DESTROY_SLOT_UNPRIVILEGED 64
+#define TROPIC_MAC_AND_DESTROY_SLOT_COUNT 64
 
 #define TROPIC_MAC_AND_DESTROY_SIZE 32
 
@@ -65,15 +75,34 @@ void tropic_deinit(void);
 #include "libtropic.h"
 lt_handle_t* tropic_get_handle(void);
 
-lt_ret_t tropic_custom_session_start(pkey_index_t pairing_key_index);
+lt_ret_t tropic_custom_session_start(cli_t* cli,
+                                     lt_pkey_index_t pairing_key_index);
 
 lt_ret_t tropic_session_invalidate(void);
 
-bool tropic_wait_for_ready(void);
+bool tropic_wait_for_ready(cli_t* cli);
 
-bool tropic_get_pubkey(curve25519_key pubkey);
+bool tropic_get_pubkey(cli_t* cli, curve25519_key pubkey);
 
-bool tropic_get_cert_chain_ptr(uint8_t const** cert_chain, size_t* length);
+bool tropic_get_cert_chain_ptr(cli_t* cli, uint8_t const** cert_chain,
+                               size_t* length);
+
+lt_ret_t lt_ecc_key_erase_retry(lt_handle_t* tropic_handle,
+                                const lt_ecc_slot_t ecc_slot);
+
+lt_ret_t lt_r_mem_data_erase_retry(lt_handle_t* tropic_handle,
+                                   const uint16_t udata_slot);
+
+lt_ret_t lt_mac_and_destroy_retry(lt_handle_t* tropic_handle,
+                                  const lt_mac_and_destroy_slot_t slot,
+                                  const uint8_t* data_out, uint8_t* data_in);
+
+lt_ret_t lt_read_whole_R_config_retry(lt_handle_t* tropic_handle,
+                                      struct lt_config_t* config);
+
+lt_ret_t lt_erase_and_write_R_config_retry(lt_handle_t* tropic_handle,
+                                           const struct lt_config_t* config);
+
 #endif
 
 #endif

@@ -27,7 +27,7 @@ if TYPE_CHECKING:
         EthereumTokenInfo,
         PaymentRequest,
     )
-    from trezor.ui.layouts import PropertyType
+    from trezor.ui.layouts import StrPropertyType
 
 
 async def require_confirm_approve(
@@ -35,7 +35,7 @@ async def require_confirm_approve(
     value: int | None,
     address_n: list[int],
     maximum_fee: str,
-    fee_info_items: Iterable[PropertyType],
+    fee_info_items: Iterable[StrPropertyType],
     chain_id: int,
     network: EthereumNetworkInfo,
     token: EthereumTokenInfo,
@@ -87,10 +87,10 @@ async def require_confirm_tx(
     value: int,
     address_n: list[int],
     maximum_fee: str,
-    fee_info_items: Iterable[PropertyType],
+    fee_info_items: Iterable[StrPropertyType],
     network: EthereumNetworkInfo,
     token: EthereumTokenInfo | None,
-    is_contract_interaction: bool,
+    is_send: bool,
     chunkify: bool,
 ) -> None:
     from trezor.ui.layouts import confirm_ethereum_tx
@@ -105,7 +105,7 @@ async def require_confirm_tx(
         account_path,
         maximum_fee,
         fee_info_items,
-        is_contract_interaction,
+        is_send,
         chunkify=chunkify,
     )
 
@@ -115,7 +115,7 @@ async def require_confirm_payment_request(
     verified_payment_req: PaymentRequest,
     address_n: list[int],
     maximum_fee: str,
-    fee_info_items: Iterable[PropertyType],
+    fee_info_items: Iterable[StrPropertyType],
     chain_id: int,
     network: EthereumNetworkInfo,
     token: EthereumTokenInfo | None,
@@ -163,7 +163,7 @@ async def require_confirm_payment_request(
             raise wire.DataError("Unrecognized memo type in payment request memo.")
 
     account, account_path = get_account_and_path(address_n)
-    account_items: list[PropertyType] = []
+    account_items: list[StrPropertyType] = []
     if account:
         account_items.append((TR.words__account, account, True))
     if account_path:
@@ -191,7 +191,7 @@ async def require_confirm_stake(
     value: int,
     address_n: list[int],
     maximum_fee: str,
-    fee_info_items: Iterable[PropertyType],
+    fee_info_items: Iterable[StrPropertyType],
     network: EthereumNetworkInfo,
     chunkify: bool,
 ) -> None:
@@ -220,7 +220,7 @@ async def require_confirm_unstake(
     value: int,
     address_n: list[int],
     maximum_fee: str,
-    fee_info_items: Iterable[PropertyType],
+    fee_info_items: Iterable[StrPropertyType],
     network: EthereumNetworkInfo,
     chunkify: bool,
 ) -> None:
@@ -248,7 +248,7 @@ async def require_confirm_claim(
     addr_bytes: bytes,
     address_n: list[int],
     maximum_fee: str,
-    fee_info_items: Iterable[PropertyType],
+    fee_info_items: Iterable[StrPropertyType],
     network: EthereumNetworkInfo,
     chunkify: bool,
 ) -> None:
@@ -298,20 +298,6 @@ def require_confirm_address(
         warning_footer=warning_footer,
         br_name=br_name,
         br_code=ButtonRequestType.SignTx,
-    )
-
-
-def require_confirm_other_data(data: AnyBytes, data_total: int) -> Awaitable[None]:
-    return confirm_blob(
-        "confirm_data",
-        TR.ethereum__title_input_data,
-        data,
-        description=TR.ethereum__data_size_template.format(data_total),
-        subtitle=TR.ethereum__title_all_input_data_template.format(data_total),
-        verb=TR.buttons__confirm,
-        verb_cancel=TR.send__cancel_sign,
-        br_code=ButtonRequestType.SignTx,
-        ask_pagination=True,
     )
 
 

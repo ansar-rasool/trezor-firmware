@@ -33,7 +33,7 @@
   },
   "header": {
     "language": "de-DE",
-    "version": "2.10.0"
+    "version": "2.11.0"
   },
   "translations": {
     "addr_mismatch__contact_support_at": "Kontaktiere den Trezor Support unter",
@@ -145,12 +145,17 @@
       "Eckhart": "Mit dem Backup kannst du immer dein Wallet wiederherstellen."
     },
     "backup__title_backup_completed": {
-      "Bolt": "Wallet-Backup abgeschlossen",
-      "Caesar": "Wallet-Backup abgeschlossen",
+      "Bolt": "",
+      "Caesar": "",
       "Delizia": "Wallet-Backup abgeschlossen",
       "Eckhart": "Wallet-Backup abgeschlossen."
     },
-    "backup__title_backup_wallet": "Wallet-Backup",
+    "backup__title_backup_wallet": {
+      "Bolt": "",
+      "Caesar": "Wallet-Backup",
+      "Delizia": "",
+      "Eckhart": ""
+    },
     "backup__title_create_wallet_backup": "Wallet-Backup erstellen",
     "backup__title_skip": "Backup überspringen",
     "backup__want_to_skip": "Möchtest du das Backup wirklich überspringen?",
@@ -163,12 +168,7 @@
     "bitcoin__locktime_set_to_blockheight": "Sperrzeit festgelegt auf Blockhöhe",
     "bitcoin__lot_of_change_outputs": "Viele Wechselgeldausgaben.",
     "bitcoin__multiple_accounts": "Mehrere Konten",
-    "bitcoin__new_fee_rate": {
-      "Bolt": "Neuer Gebührensatz:",
-      "Caesar": "Neuer Gebührensatz:",
-      "Delizia": "Neuer Gebührensatz:",
-      "Eckhart": "Neue Gebühren-Rate:"
-    },
+    "bitcoin__new_fee_rate": "Neuer Gebührensatz",
     "bitcoin__simple_send_of": "Einfaches Senden von",
     "bitcoin__ticket_amount": "Ticketbetrag",
     "bitcoin__title_confirm_details": "Details bestätigen",
@@ -437,20 +437,20 @@
     "cardano__address_no_staking": "Adresse - keine Staking-Belohnungen.",
     "cardano__always_abstain": "Immer enthalten",
     "cardano__always_no_confidence": "Immer „Nein“",
-    "cardano__amount_burned_decimals_unknown": "Verbrannter Betrag (Dezimalstellen unbekannt):",
-    "cardano__amount_minted_decimals_unknown": "Geminteter Betrag (Dezimalstellen unbekannt):",
-    "cardano__amount_sent_decimals_unknown": "Gesendeter Betrag (Dezimalstellen unbekannt):",
+    "cardano__amount_burned_decimals_unknown": "Verbrannter Betrag (Dezimalstellen unbekannt)",
+    "cardano__amount_minted_decimals_unknown": "Geminteter Betrag (Dezimalstellen unbekannt)",
+    "cardano__amount_sent_decimals_unknown": "Gesendeter Betrag (Dezimalstellen unbekannt)",
     "cardano__anonymous_pool": "Pool hat keine Metadaten (anonymer Pool)",
-    "cardano__asset_fingerprint": "Fingerabdruck:",
-    "cardano__auxiliary_data_hash": "Hilfsdaten-Hash:",
+    "cardano__asset_fingerprint": "Fingerabdruck",
+    "cardano__auxiliary_data_hash": "Hilfsdaten-Hash",
     "cardano__block": "Block",
     "cardano__catalyst": "Catalyst",
     "cardano__certificate": "Zertifikat",
     "cardano__change_output": "Wechselgeldausgabe",
     "cardano__check_all_items": "Prüfe alle Elemente sorgfältig.",
     "cardano__choose_level_of_details": "Detailebene auswählen:",
-    "cardano__collateral_input_id": "Sicherheiten-Eingabe-ID:",
-    "cardano__collateral_input_index": "Sicherheiten-Eingabeindex:",
+    "cardano__collateral_input_id": "Sicherheiten-Eingabe-ID",
+    "cardano__collateral_input_index": "Sicherheiten-Eingabeindex",
     "cardano__collateral_output_contains_tokens": "Die Rückgabe von Sicherheiten beinhaltet Token.",
     "cardano__collateral_return": "Rückgabe von Sicherheiten",
     "cardano__confirm_message": {
@@ -473,28 +473,28 @@
     "cardano__cost": "Kosten",
     "cardano__credential_mismatch": "Daten stimmen nicht mit Zahlungsdaten überein.",
     "cardano__datum_hash": {
-      "Bolt": "Datum-Hash:",
-      "Caesar": "Bezugspunkt-Hash:",
-      "Delizia": "Bezugspunkt-Hash:",
-      "Eckhart": "Bezugspunkt-Hash:"
+      "Bolt": "Datum-Hash",
+      "Caesar": "Bezugspunkt-Hash",
+      "Delizia": "Bezugspunkt-Hash",
+      "Eckhart": "Bezugspunkt-Hash"
     },
-    "cardano__delegating_to": "Delegieren an:",
-    "cardano__delegating_to_key_hash": "Delegieren an Key-Hash:",
-    "cardano__delegating_to_script": "Delegieren an Skript:",
-    "cardano__deposit": "Einzahlung:",
+    "cardano__delegating_to": "Delegieren an",
+    "cardano__delegating_to_key_hash": "Delegieren an Key-Hash",
+    "cardano__delegating_to_script": "Delegieren an Skript",
+    "cardano__deposit": "Einzahlung",
     "cardano__empty_message": "Leere Nachricht",
-    "cardano__for_account_and_index_template": "für Konto {0} und Index {1}:",
-    "cardano__for_account_template": "für Konto {0}:",
-    "cardano__for_key_hash": "für Key-Hash:",
-    "cardano__for_script": "für Skript:",
+    "cardano__for_account_and_index_template": "Für Konto {0} und Index {1}",
+    "cardano__for_account_template": "Für Konto {0}",
+    "cardano__for_key_hash": "Für Key-Hash",
+    "cardano__for_script": "Für Skript",
     "cardano__inline_datum": {
       "Bolt": "Inline-Datum",
       "Caesar": "Inline-Bezugspunkt",
       "Delizia": "Inline-Bezugspunkt",
       "Eckhart": "Inline-Datum"
     },
-    "cardano__input_id": "Eingabe-ID:",
-    "cardano__input_index": "Eingabenindex:",
+    "cardano__input_id": "Eingabe-ID",
+    "cardano__input_index": "Eingabenindex",
     "cardano__intro_text_change": {
       "Bolt": "Die folgende Adresse ist eine Wechselgeldadresse.",
       "Caesar": "Die folgende Adresse ist eine Wechselgeldadresse. Ihr(e)",
@@ -515,15 +515,15 @@
     },
     "cardano__key_hash": "Key-Hash",
     "cardano__margin": "Marge",
-    "cardano__message_hash": "Nachrichten-Hash:",
+    "cardano__message_hash": "Nachrichten-Hash",
     "cardano__message_hex": "Nachrichten-Hex",
     "cardano__message_text": "Nachrichtentext",
     "cardano__multisig_path": "Multisig-Pfad",
     "cardano__nested_scripts_template": "Enthält {0} verschachtelte Skripte.",
-    "cardano__network": "Netzwerk:",
+    "cardano__network": "Netzwerk",
     "cardano__no_output_tx": "Transaktion hat keine Ausgaben. Netzwerk kann nicht verifiziert werden.",
-    "cardano__nonce": "Nonce:",
-    "cardano__other": "andere",
+    "cardano__nonce": "Nonce",
+    "cardano__other": "Andere",
     "cardano__path": "Pfad",
     "cardano__pledge": {
       "Bolt": "Versprechen",
@@ -533,28 +533,28 @@
     },
     "cardano__pointer": "Pointer",
     "cardano__policy_id": "Richtlinien-ID",
-    "cardano__pool_metadata_hash": "Pool-Metadaten-Hash:",
-    "cardano__pool_metadata_url": "Pool-Metadaten-URL:",
-    "cardano__pool_owner": "Pool-Eigentümer:",
-    "cardano__pool_reward_account": "Pool-Belohnungskonto:",
-    "cardano__reference_input_id": "Referenz-Eingabe-ID:",
-    "cardano__reference_input_index": "Referenz-Eingabeindex:",
+    "cardano__pool_metadata_hash": "Pool-Metadaten-Hash",
+    "cardano__pool_metadata_url": "Pool-Metadaten-URL",
+    "cardano__pool_owner": "Pool-Eigentümer",
+    "cardano__pool_reward_account": "Pool-Belohnungskonto",
+    "cardano__reference_input_id": "Referenz-Eingabe-ID",
+    "cardano__reference_input_index": "Referenz-Eingabeindex",
     "cardano__reference_script": "Referenzskript",
     "cardano__required_signer": "Erforderlicher Unterzeichner",
     "cardano__reward": "Belohnung",
     "cardano__reward_address": "Adresse ist eine Adresse für Belohnungen.",
     "cardano__reward_eligibility_warning": "Warnung: Die Adresse ist keine Zahlungsadresse und somit nicht für Belohnungen berechtigt.",
     "cardano__rewards_go_to": {
-      "Bolt": "Belohnung geht an:",
-      "Caesar": "Belohnung geht an:",
-      "Delizia": "Belohnung geht an:",
-      "Eckhart": "Belohnungen gehen an:"
+      "Bolt": "Belohnung geht an",
+      "Caesar": "Belohnung geht an",
+      "Delizia": "Belohnung geht an",
+      "Eckhart": "Belohnungen gehen an"
     },
     "cardano__script": "Skript",
     "cardano__script_all": "Alle",
     "cardano__script_any": "Beliebige",
-    "cardano__script_data_hash": "Skriptdaten-Hash:",
-    "cardano__script_hash": "Skript-Hash:",
+    "cardano__script_data_hash": "Skriptdaten-Hash",
+    "cardano__script_hash": "Skript-Hash",
     "cardano__script_invalid_before": "Ungültig vor",
     "cardano__script_invalid_hereafter": "Ungültig nach",
     "cardano__script_key": {
@@ -604,10 +604,10 @@
       "Eckhart": "Staking-Pool-Anmeldung"
     },
     "cardano__stake_pool_registration_pool_id": {
-      "Bolt": "Staking-Pool-Registrierung\nPool-ID:",
-      "Caesar": "Staking-Pool-Registrierung\nPool-ID:",
-      "Delizia": "Staking-Pool-Registrierung\nPool-ID:",
-      "Eckhart": "Staking-Pool-Anmeldung\nPool-ID:"
+      "Bolt": "Staking-Pool-Registrierung\nPool-ID",
+      "Caesar": "Staking-Pool-Registrierung\nPool-ID",
+      "Delizia": "Staking-Pool-Registrierung\nPool-ID",
+      "Eckhart": "Staking-Pool-Anmeldung\nPool-ID"
     },
     "cardano__stake_registration": {
       "Bolt": "Stake-Key-Registrierung",
@@ -616,33 +616,28 @@
       "Eckhart": "Stake-Key-Anmeldung"
     },
     "cardano__staking_key_for_account": "Staking-Key für Konto",
-    "cardano__to_pool": "an Pool:",
+    "cardano__to_pool": "An Pool",
     "cardano__token_minting_path": "Token-Minting-Pfad",
-    "cardano__total_collateral": "Gesamtsicherheiten:",
+    "cardano__total_collateral": "Gesamtsicherheiten",
     "cardano__transaction": "Transaktion",
     "cardano__transaction_contains_minting_or_burning": "Die Transaktion beinhaltet das Minting oder Burning von Token.",
-    "cardano__transaction_contains_script_address_no_datum": {
-      "Bolt": "Die folgende Transaktionsausgabe enthält eine Skriptadresse, aber keinen Bezugspunkt.",
-      "Caesar": "Die folgende Transaktionsausgabe enthält eine Skriptadresse, aber keinen Bezugspunkt.",
-      "Delizia": "Die folgende Transaktionsausgabe enthält eine Skriptadresse, aber keinen Bezugspunkt.",
-      "Eckhart": "Die folgende Transaktionsausgabe enthält eine Skriptadresse, aber kein Datum."
-    },
-    "cardano__transaction_id": "Transaktions-ID:",
+    "cardano__transaction_contains_script_address_no_datum": "Die folgende Transaktionsausgabe enthält eine Skriptadresse, aber kein Datum.",
+    "cardano__transaction_id": "Transaktions-ID",
     "cardano__transaction_no_collateral_input": "Die Transaktion enthält keine Sicherheiten. Das Plutus-Skript kann nicht ausgeführt werden.",
     "cardano__transaction_no_script_data_hash": "Die Transaktion enthält keinen Skriptdaten-Hash. Das Plutus-Skript kann nicht ausgeführt werden.",
     "cardano__transaction_output_contains_tokens": "Die folgende Transaktionsausgabe beinhaltet Token.",
-    "cardano__ttl": "TTL:",
+    "cardano__ttl": "TTL",
     "cardano__unknown_collateral_amount": "Unbekannter Sicherheitenbetrag.",
     "cardano__unusual_path": "Pfad ist ungewöhnlich.",
-    "cardano__valid_since": "Gültig seit:",
+    "cardano__valid_since": "Gültig seit",
     "cardano__verify_script": "Skript verifizieren",
     "cardano__vote_delegation": "Vote-Delegierung",
     "cardano__vote_key_registration": "Vote-Key-Registrierung (CIP-36)",
-    "cardano__vote_public_key": "Public Key für Vote:",
-    "cardano__voting_purpose": "Voting-Zweck:",
+    "cardano__vote_public_key": "Public Key für Vote",
+    "cardano__voting_purpose": "Voting-Zweck",
     "cardano__warning": "Warnung",
-    "cardano__weight": "Gewicht:",
-    "cardano__withdrawal_for_address_template": "Auszahlung für {0} Adresse bestätigen:",
+    "cardano__weight": "Gewicht",
+    "cardano__withdrawal_for_address_template": "Auszahlung für {0} Adresse bestätigen",
     "cardano__x_of_y_signatures_template": "Erfordert {0} von {1} Signaturen.",
     "coinjoin__access_account": "Auf CoinJoin-Konto zugreifen?",
     "coinjoin__do_not_disconnect": "Trenne deinen Trezor nicht!",
@@ -697,7 +692,7 @@
       "Eckhart": ""
     },
     "eos__action_name": {
-      "Bolt": "Aktionsname:",
+      "Bolt": "Aktionsname",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
@@ -715,7 +710,7 @@
       "Eckhart": ""
     },
     "eos__bytes": {
-      "Bolt": "Bytes:",
+      "Bolt": "Bytes",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
@@ -727,31 +722,31 @@
       "Eckhart": ""
     },
     "eos__checksum": {
-      "Bolt": "Prüfsumme:",
+      "Bolt": "Prüfsumme",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "eos__code": {
-      "Bolt": "Code:",
+      "Bolt": "Code",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "eos__contract": {
-      "Bolt": "Kontrakt:",
+      "Bolt": "Kontrakt",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "eos__cpu": {
-      "Bolt": "CPU:",
+      "Bolt": "CPU",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "eos__creator": {
-      "Bolt": "Ersteller:",
+      "Bolt": "Ersteller",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
@@ -769,7 +764,7 @@
       "Eckhart": ""
     },
     "eos__from": {
-      "Bolt": "Von:",
+      "Bolt": "Von",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
@@ -787,13 +782,13 @@
       "Eckhart": ""
     },
     "eos__name": {
-      "Bolt": "Name:",
+      "Bolt": "Name",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "eos__net": {
-      "Bolt": "NET:",
+      "Bolt": "NET",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
@@ -805,37 +800,37 @@
       "Eckhart": ""
     },
     "eos__owner": {
-      "Bolt": "Eigentümer:",
+      "Bolt": "Eigentümer",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "eos__parent": {
-      "Bolt": "Elternteil:",
+      "Bolt": "Elternteil",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "eos__payer": {
-      "Bolt": "Zahlender:",
+      "Bolt": "Zahlender",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "eos__permission": {
-      "Bolt": "Berechtigung:",
+      "Bolt": "Berechtigung",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "eos__proxy": {
-      "Bolt": "Proxy:",
+      "Bolt": "Proxy",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "eos__receiver": {
-      "Bolt": "Empfänger:",
+      "Bolt": "Empfänger",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
@@ -847,7 +842,7 @@
       "Eckhart": ""
     },
     "eos__requirement": {
-      "Bolt": "Anforderung:",
+      "Bolt": "Anforderung",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
@@ -859,31 +854,31 @@
       "Eckhart": ""
     },
     "eos__sender": {
-      "Bolt": "Sender:",
+      "Bolt": "Sender",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "eos__threshold": {
-      "Bolt": "Schwelle:",
+      "Bolt": "Schwelle",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "eos__to": {
-      "Bolt": "An:",
+      "Bolt": "An",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "eos__transfer": {
-      "Bolt": "Überweisung:",
+      "Bolt": "Überweisung",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "eos__type": {
-      "Bolt": "Typ:",
+      "Bolt": "Typ",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
@@ -919,7 +914,7 @@
       "Eckhart": ""
     },
     "eos__voter": {
-      "Bolt": "Voter:",
+      "Bolt": "Voter",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
@@ -943,6 +938,8 @@
       "Eckhart": "{provider} Kontraktadresse"
     },
     "ethereum__data_size_template": "Größe: {0} Bytes",
+    "ethereum__eip_7702": "",
+    "ethereum__eip_7702_title": "",
     "ethereum__gas_limit": "Gas-Grenze",
     "ethereum__gas_price": "Gas-Preis",
     "ethereum__interaction_contract": "Interaktionsvertrag",
@@ -1201,17 +1198,22 @@
       "Delizia": "Über Menü fortfahren",
       "Eckhart": "Nutze das Menü um fortfahren"
     },
-    "instructions__shares_continue_with_x_template": "Mit Share #{0} fortfahren",
+    "instructions__shares_continue_with_x_template": {
+      "Bolt": "",
+      "Caesar": "",
+      "Delizia": "Mit Share #{0} fortfahren",
+      "Eckhart": ""
+    },
     "instructions__shares_start_with_1": {
-      "Bolt": "Mit Share #1 beginnen",
-      "Caesar": "Mit Share #1 beginnen",
+      "Bolt": "",
+      "Caesar": "",
       "Delizia": "Mit Share #1 beginnen",
       "Eckhart": "Beginne mit Share #1"
     },
     "instructions__shares_start_with_x_template": {
-      "Bolt": "Beginne mit Share #{0}",
-      "Caesar": "Mit Share #{0} beginnen",
-      "Delizia": "Mit Share #{0} beginnen",
+      "Bolt": "",
+      "Caesar": "",
+      "Delizia": "",
       "Eckhart": "Beginne mit Share #{0}"
     },
     "instructions__swipe_down": {
@@ -1229,7 +1231,6 @@
     "instructions__tap": "Tippen",
     "instructions__tap_to_confirm": "Zum Bestätigen tippen",
     "instructions__tap_to_continue": "Zum Fortfahren tippen",
-    "instructions__tap_to_start": "Zum Beginnen tippen",
     "instructions__view_all_data": "Alle Daten im Menü sehen.",
     "joint__title": {
       "Bolt": "Gemeins. Transakt.",
@@ -1237,8 +1238,8 @@
       "Delizia": "Gemeins. transakt.",
       "Eckhart": "Gemeins. Transakt."
     },
-    "joint__to_the_total_amount": "Gesamtbetrag:",
-    "joint__you_are_contributing": "Dein Anteil:",
+    "joint__to_the_total_amount": "Gesamtbetrag",
+    "joint__you_are_contributing": "Dein Anteil",
     "language__change_to_template": "Sprache in {0} ändern?",
     "language__changed": {
       "Bolt": "Sprache erfolgreich geändert",
@@ -1329,8 +1330,8 @@
     },
     "modify_fee__new_transaction_fee": {
       "Bolt": "Neue Transaktionsgebühr:",
-      "Caesar": "Neue Transaktionsgebühr:",
-      "Delizia": "Neue Transak.-Gebühr:",
+      "Caesar": "",
+      "Delizia": "Neue Transaktionsgebühr:",
       "Eckhart": "Neue Transaktionsgebühr"
     },
     "modify_fee__no_change": {
@@ -1490,7 +1491,7 @@
       "Eckhart": ""
     },
     "nem__description": {
-      "Bolt": "Beschreibung:",
+      "Bolt": "Beschreibung",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
@@ -1526,7 +1527,7 @@
       "Eckhart": ""
     },
     "nem__initial_supply": {
-      "Bolt": "Anfängliches Angebot:",
+      "Bolt": "Anfängliches Angebot",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
@@ -1538,7 +1539,7 @@
       "Eckhart": ""
     },
     "nem__levy_divisibility": {
-      "Bolt": "Teilbarkeit der Abgaben:",
+      "Bolt": "Teilbarkeit der Abgaben",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
@@ -1556,25 +1557,25 @@
       "Eckhart": ""
     },
     "nem__levy_mosaic": {
-      "Bolt": "Abgabenmosaik:",
+      "Bolt": "Abgabenmosaik",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "nem__levy_namespace": {
-      "Bolt": "Abgaben-Namespace:",
+      "Bolt": "Abgaben-Namespace",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "nem__levy_recipient": {
-      "Bolt": "Abgabenempfänger:",
+      "Bolt": "Abgabenempfänger",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
     },
     "nem__levy_type": {
-      "Bolt": "Abgabentyp:",
+      "Bolt": "Abgabentyp",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
@@ -1652,7 +1653,7 @@
       "Eckhart": ""
     },
     "nem__transferable": {
-      "Bolt": "Übertragbar?",
+      "Bolt": "Übertragbar",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": ""
@@ -1741,11 +1742,21 @@
     "passphrase__turn_off": "Passphrasenschutz deaktivieren?",
     "passphrase__turn_on": "Passphrasenschutz aktivieren?",
     "passphrase__wallet": "Passphrase Wallet",
-    "pin__cancel_description": "Ohne PIN fortfahren",
-    "pin__cancel_info": "Ohne PIN kann jeder auf dieses Gerät zugreifen.",
+    "pin__cancel_description": {
+      "Bolt": "",
+      "Caesar": "",
+      "Delizia": "Ohne PIN fortfahren",
+      "Eckhart": ""
+    },
+    "pin__cancel_info": {
+      "Bolt": "",
+      "Caesar": "",
+      "Delizia": "Ohne PIN kann jeder auf dieses Gerät zugreifen.",
+      "Eckhart": "Ohne PIN kann jeder auf dieses Gerät zugreifen."
+    },
     "pin__cancel_setup": {
-      "Bolt": "PIN-Einrichtung abbrechen",
-      "Caesar": "PIN-Einrichtung abbrechen",
+      "Bolt": "",
+      "Caesar": "",
       "Delizia": "PIN-Einrichtung abbrechen",
       "Eckhart": "PIN-Einrichtung abbrechen?"
     },
@@ -1755,7 +1766,12 @@
     "pin__cursor_will_change": "Die Cursorposition ändert sich für mehr Sicherheit zwischen den Einträgen.",
     "pin__diff_from_wipe_code": "Die neue PIN muss sich von deinem Löschcode unterscheiden.",
     "pin__disabled": "PIN-Schutz\ndeaktiviert.",
-    "pin__enabled": "PIN-Schutz\naktiviert.",
+    "pin__enabled": {
+      "Bolt": "PIN-Schutz\naktiviert.",
+      "Caesar": "PIN-Schutz\naktiviert.",
+      "Delizia": "PIN-Schutz\naktiviert.",
+      "Eckhart": ""
+    },
     "pin__enter": "PIN eingeben",
     "pin__enter_new": "Neue PIN eingeben",
     "pin__entered_not_valid": "Die eingegebene PIN ist ungültig.",
@@ -1795,9 +1811,9 @@
       "Eckhart": "Entferne PIN"
     },
     "pin__setup_completed": {
-      "Bolt": "PIN-Einrichtung abgeschlossen.",
-      "Caesar": "PIN-Setup abgeschlossen.",
-      "Delizia": "PIN-Einrichtung abgeschlossen.",
+      "Bolt": "",
+      "Caesar": "",
+      "Delizia": "",
       "Eckhart": "PIN-Einrichtung abgeschlossen."
     },
     "pin__should_be_long": "PIN sollte aus 4-50 Ziffern bestehen.",
@@ -1906,7 +1922,7 @@
       "Bolt": "Gruppe {0}",
       "Caesar": "Gruppe {0}",
       "Delizia": "Gruppe {0}",
-      "Eckhart": "Gruppe #{0}"
+      "Eckhart": ""
     },
     "recovery__group_threshold_reached": "Gruppenschwelle wurde erreicht.",
     "recovery__info_about_disconnect": "Es ist sicher, deinen Trezor zu trennen und später fortzufahren, während du dein Wallet wiederherstellst.",
@@ -1934,7 +1950,12 @@
       "Eckhart": "Share stimmt nicht überein."
     },
     "recovery__share_from_another_multi_share_backup": "Du hast den Share eines anderen Backups eingegeben.",
-    "recovery__share_from_group_entered_template": "Share #{0} von Gruppe #{1} eingegeben.",
+    "recovery__share_from_group_entered_template": {
+      "Bolt": "",
+      "Caesar": "",
+      "Delizia": "",
+      "Eckhart": "Share #{0} von Gruppe #{1} eingegeben."
+    },
     "recovery__share_num_template": {
       "Bolt": "Share {0}",
       "Caesar": "Share {0}",
@@ -1979,7 +2000,7 @@
     },
     "recovery__x_more_items_starting_template_plural": {
       "Bolt": "{count} mehr {plural} gestartet",
-      "Caesar": "{count} mehr {plural} gestartet",
+      "Caesar": "",
       "Delizia": "{count} mehr {plural} gestartet",
       "Eckhart": "Du brauchst {count} mehr, beginnend mit {plural}"
     },
@@ -1990,14 +2011,24 @@
       "Eckhart": "{count} weitere {plural} erforderlich."
     },
     "recovery__x_of_y_entered_template": "{0} von {1} Shares eingegeben",
-    "recovery__you_have_entered": "Du hast eingegeben",
+    "recovery__you_have_entered": {
+      "Bolt": "Du hast eingegeben",
+      "Caesar": "Du hast eingegeben",
+      "Delizia": "Du hast eingegeben",
+      "Eckhart": ""
+    },
     "regulatory__title": {
       "Bolt": "",
       "Caesar": "",
       "Delizia": "",
       "Eckhart": "Regulatorisch"
     },
-    "reset__advanced_group_threshold_info": "Die Gruppenschwelle zeigt die nötige Anzahl der Gruppen zur Wallet-Wiederherstell.",
+    "reset__advanced_group_threshold_info": {
+      "Bolt": "Die Gruppenschwelle zeigt die nötige Anzahl der Gruppen zur Wallet-Wiederherstell.",
+      "Caesar": "",
+      "Delizia": "Die Gruppenschwelle zeigt die nötige Anzahl der Gruppen zur Wallet-Wiederherstell.",
+      "Eckhart": "Die Gruppenschwelle zeigt die nötige Anzahl der Gruppen zur Wallet-Wiederherstell."
+    },
     "reset__all_x_of_y_template": {
       "Bolt": "alle {0} der {1} Shares",
       "Caesar": "",
@@ -2038,7 +2069,7 @@
     "reset__check_backup_title": "Backup überprüfen",
     "reset__check_group_share_title_template": {
       "Bolt": "G{0}-share {1} prüfen",
-      "Caesar": "G{0}-Share {1} prüfen",
+      "Caesar": "",
       "Delizia": "G{0}-share {1} prüfen",
       "Eckhart": "Prüfe g{0} - Share {1}"
     },
@@ -2050,9 +2081,9 @@
     },
     "reset__check_share_title_template": {
       "Bolt": "Share #{0} prüfen",
-      "Caesar": "Share #{0} prüfen",
+      "Caesar": "",
       "Delizia": "Share #{0} prüfen",
-      "Eckhart": "Prüfe Share #{0}"
+      "Eckhart": ""
     },
     "reset__check_wallet_backup_title": {
       "Bolt": "Seed überprüfen",
@@ -2061,7 +2092,12 @@
       "Eckhart": "Prüfe Wallet-Backup"
     },
     "reset__continue_with_next_share": "Fahre mit dem nächsten Share fort.",
-    "reset__continue_with_share_template": "Fahre mit Share #{0} fort.",
+    "reset__continue_with_share_template": {
+      "Bolt": "Fahre mit Share #{0} fort.",
+      "Caesar": "Fahre mit Share #{0} fort.",
+      "Delizia": "",
+      "Eckhart": ""
+    },
     "reset__create_x_of_y_multi_share_backup_template": "Möchtest du {0} von {1} Multi-Share-Backups erstellen?",
     "reset__finished_verifying_group_template": {
       "Bolt": "Verifizierung deiner Recovery Shares für Gruppe {0} ist abgeschlossen.",
@@ -2083,13 +2119,13 @@
     },
     "reset__group_description": {
       "Bolt": "Eine Gruppe besteht aus Recovery Shares.",
-      "Caesar": "Eine Gruppe besteht aus Recovery Shares.",
+      "Caesar": "",
       "Delizia": "Eine Gruppe besteht aus Recovery Shares.",
       "Eckhart": "Eine Gruppe besteht aus Recovery-Shares."
     },
     "reset__group_info": {
       "Bolt": "Jede Gruppe hat eine feste Share-Anzahl und eine eigene Schwelle. In den nächsten Schritten legst du die Anzahl der Shares und die Schwellen fest.",
-      "Caesar": "Jede Gruppe hat eine feste Share-Anzahl und eine eigene Schwelle. In den nächsten Schritten legst du die Anzahl der Shares und die Schwellen fest.",
+      "Caesar": "",
       "Delizia": "Jede Gruppe hat eine feste Share-Anzahl und eine eigene Schwelle. In den nächsten Schritten legst du die Anzahl der Shares und die Schwellen fest.",
       "Eckhart": "Jede Gruppe hat eine feste Share-Anzahl und ihre eigene Schwelle. Als Nächstes legst du die Anzahl der Shares und die Schwellen fest."
     },
@@ -2146,7 +2182,7 @@
     "reset__num_of_share_holders_template": "{0} Personen oder Standorte halten jeweils einen Share.",
     "reset__num_of_shares_advanced_info_template": {
       "Bolt": "Jeder Recovery Share besteht aus {0} Wörtern. Wähle jetzt die Schwelle für die Anzahl der Shares zur Bildung von Gruppe {1}.",
-      "Caesar": "Jeder Recovery Share besteht aus {0} Wörtern. Wähle jetzt die Schwelle für die Anzahl der Shares zur Bildung von Gruppe {1}.",
+      "Caesar": "",
       "Delizia": "Jeder Recovery Share besteht aus {0} Wörtern. Wähle jetzt die Schwelle für die Anzahl der Shares zur Bildung von Gruppe {1}.",
       "Eckhart": "Jeder Recovery Share besteht aus {0} Wörtern. Wähle als Nächstes den Schwellenwert für die Anzahl der Shares zur Bildung der Gruppe {1}."
     },
@@ -2157,13 +2193,18 @@
       "Eckhart": ""
     },
     "reset__num_of_shares_how_many": "Wie viele Wallet-Backup-Shares möchtest du erstellen?",
-    "reset__num_of_shares_long_info_template": "Jeder Recovery Share besteht aus {0} Wörtern. Speichere jede Wortliste an einem anderen, sicheren Ort oder teile sie mit vertrauenswürdigen Personen. Nutze sie je nach Bedarf, um dein Wallet wiederherzustellen.",
+    "reset__num_of_shares_long_info_template": {
+      "Bolt": "",
+      "Caesar": "",
+      "Delizia": "Jeder Recovery Share besteht aus {0} Wörtern. Speichere jede Wortliste an einem anderen, sicheren Ort oder teile sie mit vertrauenswürdigen Personen. Nutze sie je nach Bedarf, um dein Wallet wiederherzustellen.",
+      "Eckhart": "Jeder Recovery Share besteht aus {0} Wörtern. Speichere jede Wortliste an einem anderen, sicheren Ort oder teile sie mit vertrauenswürdigen Personen. Nutze sie je nach Bedarf, um dein Wallet wiederherzustellen."
+    },
     "reset__num_shares_for_group_template": "Die erforderliche Anzahl an Shares zur Bildung der Gruppe {0}.",
     "reset__number_of_shares_info": {
-      "Bolt": "= Gesamtzahl eindeutiger Wortlisten für Wallet-Backup.",
+      "Bolt": "",
       "Caesar": "= Gesamtzahl einzigartiger Wortlisten für Wallet-Backup.",
-      "Delizia": "= Gesamtzahl eindeutiger Wortlisten für Wallet-Backup.",
-      "Eckhart": "= Gesamtzahl einzigartiger Wortlisten für Wallet-Backup."
+      "Delizia": "",
+      "Eckhart": ""
     },
     "reset__one_share": {
       "Bolt": "1 Share",
@@ -2171,7 +2212,12 @@
       "Delizia": "",
       "Eckhart": ""
     },
-    "reset__only_one_share_will_be_created": "Es wird nur ein Share erstellt.",
+    "reset__only_one_share_will_be_created": {
+      "Bolt": "Es wird nur ein Share erstellt.",
+      "Caesar": "",
+      "Delizia": "",
+      "Eckhart": ""
+    },
     "reset__recovery_share_description": {
       "Bolt": "Die Recovery-Share ist eine Wortliste, die du beim Einrichten deines Trezors aufgeschrieben hast.",
       "Caesar": "Ein Recovery-Share ist eine Wortliste, die du beim Einrichten deines Trezors aufgeschrieben hast.",
@@ -2196,15 +2242,15 @@
       "Eckhart": "Wähle die Mindestzahl Shares zur Wiederherstellung deines Wallets."
     },
     "reset__select_word_from_share_template": {
-      "Bolt": "Wählen Sie das Wort #{0} von\nShare #{1}",
-      "Caesar": "Wähle das Wort #{0} von\nShare #{1}",
-      "Delizia": "Wählen Sie das Wort #{0} von\nShare #{1}",
+      "Bolt": "",
+      "Caesar": "",
+      "Delizia": "",
       "Eckhart": "Wähle das Wort #{0} aus Share #{1}"
     },
     "reset__select_word_template": {
-      "Bolt": "{0} Wort auswählen",
-      "Caesar": "{0} Wort auswählen",
-      "Delizia": "{0} Wort auswählen",
+      "Bolt": "",
+      "Caesar": "",
+      "Delizia": "",
       "Eckhart": "Wähle das Wort #{0} aus deinem Wallet-Backup"
     },
     "reset__select_word_x_of_y_template": {
@@ -2219,8 +2265,18 @@
       "Delizia": "",
       "Eckhart": ""
     },
-    "reset__share_checked_successfully_template": "Share #{0} erfolgreich geprüft.",
-    "reset__share_completed_template": "Share #{0} abgeschlossen",
+    "reset__share_checked_successfully_template": {
+      "Bolt": "Share #{0} erfolgreich geprüft.",
+      "Caesar": "Share #{0} erfolgreich geprüft.",
+      "Delizia": "",
+      "Eckhart": ""
+    },
+    "reset__share_completed_template": {
+      "Bolt": "",
+      "Caesar": "",
+      "Delizia": "Share #{0} abgeschlossen",
+      "Eckhart": "Share #{0} abgeschlossen"
+    },
     "reset__share_words_first": {
       "Bolt": "Notiere das erste Wort deines Backups.",
       "Caesar": "Notiere das erste Wort deines Backups.",
@@ -2229,23 +2285,38 @@
     },
     "reset__share_words_title": "Standard-Backup",
     "reset__slip39_checklist_more_info_threshold": {
-      "Bolt": "Der Schwellenwert legt die minimale Anzahl an Shares fest, die zum Wiederherstellen deiner Wallet erforderlich ist.",
-      "Caesar": "Der Schwellenwert legt die minimale Anzahl an Shares fest, die erforderlich ist, um deine Wallet wiederherzustellen.",
+      "Bolt": "",
+      "Caesar": "",
       "Delizia": "Der Schwellenwert legt die minimale Anzahl an Shares fest, die erforderlich ist, um deine Wallet wiederherzustellen.",
       "Eckhart": "Der Schwellenwert legt die minimale Anzahl an Shares fest, die erforderlich ist, um deine Wallet wiederherzustellen."
     },
-    "reset__slip39_checklist_more_info_threshold_example_template": "Wenn du {0} von {1} Shares festlegst, sind {2} Backup-Shares zur Wallet-Wiederherstellung nötig.",
+    "reset__slip39_checklist_more_info_threshold_example_template": {
+      "Bolt": "",
+      "Caesar": "",
+      "Delizia": "Wenn du {0} von {1} Shares festlegst, sind {2} Backup-Shares zur Wallet-Wiederherstellung nötig.",
+      "Eckhart": "Wenn du {0} von {1} Shares festlegst, sind {2} Backup-Shares zur Wallet-Wiederherstellung nötig."
+    },
     "reset__slip39_checklist_num_groups": "Anzahl der Gruppen",
     "reset__slip39_checklist_num_groups_x_template": "Anzahl der Gruppen: {0}",
     "reset__slip39_checklist_num_shares": "Anzahl der Shares",
-    "reset__slip39_checklist_num_shares_x_template": "Anzahl der Shares: {0}",
+    "reset__slip39_checklist_num_shares_x_template": {
+      "Bolt": "",
+      "Caesar": "",
+      "Delizia": "Anzahl der Shares: {0}",
+      "Eckhart": "Anzahl der Shares: {0}"
+    },
     "reset__slip39_checklist_set_num_groups": {
       "Bolt": "Gruppenanzahl wählen",
-      "Caesar": "Gruppenanzahl wählen",
+      "Caesar": "",
       "Delizia": "Gruppenanzahl wählen",
       "Eckhart": "Gruppenanzahl festlegen"
     },
-    "reset__slip39_checklist_set_num_shares": "Share-Anzahl festlegen",
+    "reset__slip39_checklist_set_num_shares": {
+      "Bolt": "Share-Anzahl festlegen",
+      "Caesar": "",
+      "Delizia": "Share-Anzahl festlegen",
+      "Eckhart": "Share-Anzahl festlegen"
+    },
     "reset__slip39_checklist_set_sizes": {
       "Bolt": "Größen und Schwellen festlegen",
       "Caesar": "Größen und Schwellen festlegen",
@@ -2265,8 +2336,8 @@
       "Eckhart": "Wiederherstellungsschwellenwert festlegen"
     },
     "reset__slip39_checklist_threshold_x_template": {
-      "Bolt": "Wiederherstellungsschwelle: {0}",
-      "Caesar": "Wiederherstellungsschwelle: {0}",
+      "Bolt": "",
+      "Caesar": "",
       "Delizia": "Wiederherstellungsschwelle: {0}",
       "Eckhart": "Wiederherstellungsschwellenwert: {0}"
     },
@@ -2274,12 +2345,12 @@
     "reset__slip39_checklist_write_down": {
       "Bolt": "Alle Shares notieren und prüfen",
       "Caesar": "Notiere und prüfe alle Shares",
-      "Delizia": "Alle Shares notieren und prüfen",
-      "Eckhart": "Notieren und prüfe alle Shares"
+      "Delizia": "",
+      "Eckhart": ""
     },
     "reset__slip39_checklist_write_down_recovery": {
-      "Bolt": "Notiere und prüfe alle Wallet-Backup-Shares.",
-      "Caesar": "Notiere und prüfe alle Wallet-Backup-Shares.",
+      "Bolt": "",
+      "Caesar": "",
       "Delizia": "Notiere und prüfe alle Wallet-Backup-Shares.",
       "Eckhart": "Notiere und prüfe alle Wallet-Backup-Shares"
     },
@@ -2296,44 +2367,49 @@
       "Eckhart": "Das Wort erscheint mehrere Male im Backup."
     },
     "reset__threshold_info": {
-      "Bolt": "= Mindestanzahl eindeutiger Wortlisten für Wiederherstellung.",
+      "Bolt": "",
       "Caesar": "= Mindestanzahl eindeutiger Wortlisten für Wiederherstellung.",
-      "Delizia": "= Mindestanzahl eindeutiger Wortlisten für Wiederherstellung.",
-      "Eckhart": "= Mindestanzahl einzigartiger Wortlisten für Wiederherstellung."
+      "Delizia": "",
+      "Eckhart": ""
     },
     "reset__title_backup_is_done": "Backup fertig",
     "reset__title_create_wallet": "Wallet erstellen",
     "reset__title_group_threshold": {
-      "Bolt": "Gruppenschwelle",
+      "Bolt": "",
       "Caesar": "Gruppenschwelle",
-      "Delizia": "Gruppenschwelle",
-      "Eckhart": "Gruppenschwellenwert"
+      "Delizia": "",
+      "Eckhart": ""
     },
     "reset__title_number_of_groups": "Anzahl der Gruppen",
-    "reset__title_number_of_shares": "Anzahl Shares",
+    "reset__title_number_of_shares": {
+      "Bolt": "",
+      "Caesar": "Anzahl Shares",
+      "Delizia": "",
+      "Eckhart": ""
+    },
     "reset__title_set_group_threshold": {
       "Bolt": "Grupp.-schw. wählen",
-      "Caesar": "Grupp.-Schw. wählen",
+      "Caesar": "",
       "Delizia": "Grupp.-Schw. wählen",
       "Eckhart": "Gruppen-Schwellenwert festlegen"
     },
     "reset__title_set_number_of_groups": {
       "Bolt": "Anzahl der Gruppen",
-      "Caesar": "Anzahl der Gruppen",
+      "Caesar": "",
       "Delizia": "Anzahl der Gruppen",
       "Eckhart": "Anzahl der Gruppen festlegen"
     },
     "reset__title_set_number_of_shares": {
       "Bolt": "Anzahl der Shares",
-      "Caesar": "Anzahl der Shares",
+      "Caesar": "",
       "Delizia": "Anzahl der Shares",
       "Eckhart": "Anzahl der Shares festlegen"
     },
     "reset__title_set_threshold": {
       "Bolt": "Schwelle festlegen",
-      "Caesar": "Schwelle festlegen",
+      "Caesar": "",
       "Delizia": "Schwelle festlegen",
-      "Eckhart": "Schwellenwert festlegen"
+      "Eckhart": ""
     },
     "reset__title_shamir_backup": "Multi-Share-Backup",
     "reset__to_form_group_template": {
@@ -2350,15 +2426,15 @@
     },
     "reset__total_number_of_shares_in_group_template": {
       "Bolt": "Wähle die Share-Anzahl in Gruppe {0}.",
-      "Caesar": "Wähle die Share-Anzahl in Gruppe {0}.",
+      "Caesar": "",
       "Delizia": "Wähle die Share-Anzahl in Gruppe {0}.",
       "Eckhart": "Lege die Gesamtzahl der Shares in Gruppe {0} fest."
     },
     "reset__use_your_backup": {
       "Bolt": "Verwende dein Backup, um dein Wallet wiederherzustellen.",
-      "Caesar": "Verwende dein Backup, um dein Wallet wiederherzustellen.",
-      "Delizia": "Verwende dein Backup, um dein Wallet wiederherzustellen.",
-      "Eckhart": "Verwende dein Backup, wenn du dein Wallet wiederherstellen musst."
+      "Caesar": "",
+      "Delizia": "",
+      "Eckhart": ""
     },
     "reset__words_may_repeat": {
       "Bolt": "Einige Wörter wiederholen sich möglicherweise.",
@@ -2561,10 +2637,10 @@
     },
     "send__incl_transaction_fee": "inkl. Transaktionsgebühr",
     "send__including_fee": {
-      "Bolt": "Einschließ. Gebühr:",
-      "Caesar": "Einschließ. Gebühr:",
-      "Delizia": "Einschließ. Gebühr:",
-      "Eckhart": "Einschließlich Gebühr:"
+      "Bolt": "Einschließ. Gebühr",
+      "Caesar": "Einschließ. Gebühr",
+      "Delizia": "Einschließ. Gebühr",
+      "Eckhart": "Einschließlich Gebühr"
     },
     "send__maximum_fee": {
       "Bolt": "Max. Gebühr",
@@ -2622,16 +2698,16 @@
     "setting__adjust": "Anpassen",
     "setting__apply": "Anwenden",
     "share_words__words_in_order": {
-      "Bolt": " Wörter der Reihe nach notiert.",
+      "Bolt": "",
       "Caesar": " Wörter der Reihe nach notiert.",
-      "Delizia": " Wörter der Reihe nach notiert.",
-      "Eckhart": " Wörter nacheinander."
+      "Delizia": "",
+      "Eckhart": ""
     },
     "share_words__wrote_down_all": {
-      "Bolt": "Ich habe alle ",
+      "Bolt": "",
       "Caesar": "Ich habe alle ",
-      "Delizia": "Ich habe alle ",
-      "Eckhart": "Alles notiert "
+      "Delizia": "",
+      "Eckhart": ""
     },
     "sign_message__bytes_template": "{0} Bytes",
     "sign_message__confirm_address": "Signieradresse",
@@ -2734,7 +2810,7 @@
     "stellar__allow_trust": "Trust zulassen",
     "stellar__balance_id": "Guthaben-ID",
     "stellar__bump_sequence": "Bump-Sequenz",
-    "stellar__buying": "Kaufen:",
+    "stellar__buying": "Kaufen",
     "stellar__claim_claimable_balance": {
       "Bolt": "Anspruchsfähiges Guthaben beanspruchen",
       "Caesar": "Anspruchsfähiges Guthaben beanspruchen",
@@ -2761,7 +2837,7 @@
     },
     "stellar__final_confirm": "Letzte Bestätigung",
     "stellar__hash": "Hash",
-    "stellar__high": "Hoch:",
+    "stellar__high": "Hoch",
     "stellar__home_domain": {
       "Bolt": "Startseite",
       "Caesar": "Startseite",
@@ -2770,11 +2846,11 @@
     },
     "stellar__inflation": "Inflation",
     "stellar__issuer_template": "{0} Aussteller",
-    "stellar__key": "Key:",
+    "stellar__key": "Key",
     "stellar__limit": "Grenze",
-    "stellar__low": "Niedrig:",
-    "stellar__master_weight": "Master-Gewicht:",
-    "stellar__medium": "Mittel:",
+    "stellar__low": "Niedrig",
+    "stellar__master_weight": "Master-Gewicht",
+    "stellar__medium": "Mittel",
     "stellar__new_offer": "Neues Angebot",
     "stellar__new_passive_offer": "Neues passives Angebot",
     "stellar__no_memo_set": {
@@ -2789,10 +2865,10 @@
     "stellar__pay": "Zahlen",
     "stellar__pay_at_most": "Maximal",
     "stellar__preauth_transaction": "Vor-Auth-Transaktion",
-    "stellar__price_per_template": "Preis pro {0}:",
+    "stellar__price_per_template": "Preis pro {0}",
     "stellar__remove_signer": "Unterzeichner entfernen",
     "stellar__revoke_trust": "Trust aufheben",
-    "stellar__selling": "Verkaufen:",
+    "stellar__selling": "Verkaufen",
     "stellar__set_data": "Daten festlegen",
     "stellar__set_flags": "Flags festlegen",
     "stellar__set_sequence_to_template": "Sequenz auf {0} setzen?",
@@ -2828,7 +2904,7 @@
     },
     "stellar__valid_from": "Gültig von (UTC)",
     "stellar__valid_to": "Gültig bis (UTC)",
-    "stellar__value_sha256": "Wert (SHA-256):",
+    "stellar__value_sha256": "Wert (SHA-256)",
     "stellar__wanna_clean_value_key_template": "Möchtest du den Wert-Key {0} löschen?",
     "storage_msg__processing": {
       "Bolt": "Verarbeitung",
@@ -2845,8 +2921,8 @@
     },
     "storage_msg__wrong_pin": "Falscher PIN",
     "tezos__baker_address": "Baker-Adresse",
-    "tezos__balance": "Guthaben:",
-    "tezos__ballot": "Abstimmung:",
+    "tezos__balance": "Guthaben",
+    "tezos__ballot": "Abstimmung",
     "tezos__confirm_delegation": "Delegierung bestätigen",
     "tezos__confirm_origination": "Herkunft bestätigen",
     "tezos__delegator": {
@@ -3197,6 +3273,7 @@
       "Eckhart": "Dein Trezor hat Schwierigkeiten, mit deinem verbundenen Gerät zu kommunizieren."
     },
     "words__confirm": "Bestätigen",
+    "words__confirm_all": "",
     "words__confirm_fee": "Gebühr bestätigen",
     "words__connect": "Verbinden",
     "words__connected": "Verbunden",
@@ -3211,12 +3288,23 @@
     "words__enabled": "Aktiviert",
     "words__error": "Fehler",
     "words__fee": "Gebühr",
+    "words__fee_limit": "Gebührenlimit",
     "words__forget": "Vergessen",
-    "words__from": "von",
+    "words__from": {
+      "Bolt": "von",
+      "Caesar": "von",
+      "Delizia": "von",
+      "Eckhart": ""
+    },
     "words__good_to_know": "Gut zu wissen",
     "words__important": "Wichtig",
     "words__instructions": "Anweisungen",
-    "words__keep_it_safe": "Sicher aufbewahren!",
+    "words__keep_it_safe": {
+      "Bolt": "",
+      "Caesar": "Sicher aufbewahren!",
+      "Delizia": "",
+      "Eckhart": ""
+    },
     "words__know_what_your_doing": {
       "Bolt": "Fahre nur fort, wenn du dir ganz sicher bist!",
       "Caesar": "Fahre nur fort, wenn du dir ganz sicher bist!",
@@ -3229,6 +3317,7 @@
     "words__name": "Name",
     "words__no": "Nein",
     "words__not_recommended": "Nicht empfohlen!",
+    "words__note": "Anmerkung",
     "words__off": "AUS",
     "words__on": "EIN",
     "words__operation_cancelled": "Vorgang abgebrochen",
@@ -3262,24 +3351,47 @@
       "Eckhart": "Festlegen"
     },
     "words__settings": "Einstellungen",
+    "words__show_next": "",
     "words__sign": "Signieren",
     "words__signer": "Unterzeichner",
+    "words__staking_for": "",
+    "words__staking_from": "",
     "words__swap": "Swap",
     "words__title_check": "Prüfen",
     "words__title_done": "Fertig",
-    "words__title_group": "Gruppe",
+    "words__title_group": {
+      "Bolt": "",
+      "Caesar": "Gruppe",
+      "Delizia": "",
+      "Eckhart": ""
+    },
     "words__title_information": "Informationen",
     "words__title_remember": {
-      "Bolt": "Erinnerung",
+      "Bolt": "",
       "Caesar": "Erinnerung",
-      "Delizia": "Erinnerung",
-      "Eckhart": "Merken"
+      "Delizia": "",
+      "Eckhart": ""
     },
-    "words__title_share": "Share",
-    "words__title_shares": "Shares",
+    "words__title_share": {
+      "Bolt": "",
+      "Caesar": "Share",
+      "Delizia": "",
+      "Eckhart": ""
+    },
+    "words__title_shares": {
+      "Bolt": "",
+      "Caesar": "Shares",
+      "Delizia": "",
+      "Eckhart": ""
+    },
     "words__title_success": "Erfolg",
     "words__title_summary": "Zusammenfassung",
-    "words__title_threshold": "Schwelle",
+    "words__title_threshold": {
+      "Bolt": "",
+      "Caesar": "Schwelle",
+      "Delizia": "",
+      "Eckhart": ""
+    },
     "words__token": "Token",
     "words__transaction_fee": "Transaktionsgebühr",
     "words__try_again": {

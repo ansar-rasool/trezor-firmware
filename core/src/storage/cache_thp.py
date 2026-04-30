@@ -70,7 +70,7 @@ class ChannelCache(ThpDataCache):
 
     @property
     def sync(self) -> int:
-        # can_send_bit | sync_receive_bit | sync_send_bit | rfu(5)
+        # can_send_bit | sync_receive_bit | sync_send_bit | ack_piggybacking | rfu(4)
         return self.get_int(CHANNEL_SYNC) or 0x00
 
     @sync.setter
@@ -79,8 +79,14 @@ class ChannelCache(ThpDataCache):
 
     def set_host_static_public_key(self, key: memoryview) -> None:
         if len(key) != KEY_LENGTH:
-            raise ValueError("Invalid key length")
+            raise ValueError  # Invalid key length
         self.set(CHANNEL_HOST_STATIC_PUBKEY, key)
+
+    def get_host_static_public_key(self) -> bytes:
+        key = self.get(CHANNEL_HOST_STATIC_PUBKEY)
+        if key is None:
+            raise ValueError  # Host static public key is not set in the channel cache.
+        return key
 
 
 class SessionThpCache(ThpDataCache):

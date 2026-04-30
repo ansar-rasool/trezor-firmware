@@ -163,6 +163,65 @@ access_violation:
 
 // ---------------------------------------------------------------------
 
+#ifdef USE_IPC
+
+bool ipc_register__verified(systask_id_t origin, void *buffer, size_t size) {
+  if (!probe_write_access(buffer, size)) {
+    goto access_violation;
+  }
+
+  return ipc_register(origin, buffer, size);
+
+access_violation:
+  apptask_access_violation();
+  return false;
+}
+
+bool ipc_try_receive__verified(ipc_message_t *msg) {
+  if (!probe_write_access(msg, sizeof(*msg))) {
+    goto access_violation;
+  }
+
+  return ipc_try_receive(msg);
+
+access_violation:
+  apptask_access_violation();
+  return false;
+}
+
+void ipc_message_free__verified(ipc_message_t *msg) {
+  if (!probe_read_access(msg, sizeof(*msg))) {
+    goto access_violation;
+  }
+
+  // We don't not check the block pointed by `msg->data`,
+  // because the msg->data is treated as a "token" and validated
+  // in the ipc_message_free() itself.
+
+  ipc_message_free(msg);
+  return;
+
+access_violation:
+  apptask_access_violation();
+}
+
+bool ipc_send__verified(systask_id_t remote, uint32_t fn, const void *data,
+                        size_t data_size) {
+  if (!probe_read_access(data, data_size)) {
+    goto access_violation;
+  }
+
+  return ipc_send(remote, fn, data, data_size);
+
+access_violation:
+  apptask_access_violation();
+  return false;
+}
+
+#endif  // USE_IPC
+
+// ---------------------------------------------------------------------
+
 bool boot_image_check__verified(const boot_image_t *image) {
   if (!probe_read_access(image, sizeof(*image))) {
     goto access_violation;
@@ -539,6 +598,22 @@ access_violation:
 
 // ---------------------------------------------------------------------
 
+#ifdef USE_TELEMETRY
+bool telemetry_get__verified(telemetry_data_t *out) {
+  if (!probe_write_access(out, sizeof(*out))) {
+    goto access_violation;
+  }
+
+  return telemetry_get(out);
+
+access_violation:
+  apptask_access_violation();
+  return false;
+}
+#endif
+
+// ---------------------------------------------------------------------
+
 static PIN_UI_WAIT_CALLBACK storage_callback = NULL;
 
 static secbool storage_callback_wrapper(uint32_t wait, uint32_t progress,
@@ -564,8 +639,9 @@ access_violation:
   apptask_access_violation();
 }
 
-secbool storage_unlock__verified(const uint8_t *pin, size_t pin_len,
-                                 const uint8_t *ext_salt) {
+storage_unlock_result_t storage_unlock__verified(const uint8_t *pin,
+                                                 size_t pin_len,
+                                                 const uint8_t *ext_salt) {
   if (!probe_read_access(pin, pin_len)) {
     goto access_violation;
   }
@@ -578,22 +654,12 @@ secbool storage_unlock__verified(const uint8_t *pin, size_t pin_len,
 
 access_violation:
   apptask_access_violation();
-  return secfalse;
+  return UNLOCK_ACCESS_VIOLATION;
 }
 
-secbool storage_change_pin__verified(const uint8_t *oldpin, size_t oldpin_len,
-                                     const uint8_t *newpin, size_t newpin_len,
-                                     const uint8_t *old_ext_salt,
-                                     const uint8_t *new_ext_salt) {
-  if (!probe_read_access(oldpin, oldpin_len)) {
-    goto access_violation;
-  }
-
+storage_pin_change_result_t storage_change_pin__verified(
+    const uint8_t *newpin, size_t newpin_len, const uint8_t *new_ext_salt) {
   if (!probe_read_access(newpin, newpin_len)) {
-    goto access_violation;
-  }
-
-  if (!probe_read_access(old_ext_salt, EXTERNAL_SALT_SIZE)) {
     goto access_violation;
   }
 
@@ -601,12 +667,11 @@ secbool storage_change_pin__verified(const uint8_t *oldpin, size_t oldpin_len,
     goto access_violation;
   }
 
-  return storage_change_pin(oldpin, oldpin_len, newpin, newpin_len,
-                            old_ext_salt, new_ext_salt);
+  return storage_change_pin(newpin, newpin_len, new_ext_salt);
 
 access_violation:
   apptask_access_violation();
-  return secfalse;
+  return PIN_CHANGE_ACCESS_VIOLATION;
 }
 
 void storage_ensure_not_wipe_code__verified(const uint8_t *pin,
@@ -1296,7 +1361,7 @@ access_violation:
 
 bool tropic_data_read__verified(uint16_t udata_slot, uint8_t *data,
                                 uint16_t *size) {
-  if (!probe_write_access(data, R_MEM_DATA_SIZE_MAX)) {
+  if (!probe_write_access(data, TROPIC_SLOT_MAX_SIZE_V1)) {
     goto access_violation;
   }
 
@@ -1310,5 +1375,62 @@ access_violation:
   return false;
 }
 #endif
+
+#ifdef USE_APP_LOADING
+
+ts_t app_task_spawn__verified(const app_hash_t *hash, systask_id_t *task_id) {
+  if (!probe_read_access(hash, sizeof(*hash))) {
+    goto access_violation;
+  }
+
+  if (!probe_write_access(task_id, sizeof(*task_id))) {
+    goto access_violation;
+  }
+
+  return app_task_spawn(hash, task_id);
+access_violation:
+  apptask_access_violation();
+  return TS_EACCES;
+}
+
+ts_t app_task_get_pminfo__verified(systask_id_t task_id,
+                                   systask_postmortem_t *pminfo) {
+  if (!probe_write_access(pminfo, sizeof(*pminfo))) {
+    goto access_violation;
+  }
+
+  return app_task_get_pminfo(task_id, pminfo);
+access_violation:
+  apptask_access_violation();
+  return TS_EACCES;
+}
+
+app_cache_handle_t app_cache_create_image__verified(const app_hash_t *hash,
+                                                    size_t image_size) {
+  if (!probe_read_access(hash, sizeof(*hash))) {
+    goto access_violation;
+  }
+
+  return app_cache_create_image(hash, image_size);
+
+access_violation:
+  apptask_access_violation();
+  return APP_CACHE_INVALID_HANDLE;
+}
+
+ts_t app_cache_write_image__verified(app_cache_handle_t handle,
+                                     uintptr_t offset, const void *data,
+                                     size_t data_size) {
+  if (!probe_read_access(data, data_size)) {
+    goto access_violation;
+  }
+  return app_cache_write_image(handle, offset, data, data_size);
+
+access_violation:
+  apptask_access_violation();
+  return TS_EACCES;
+}
+
+#endif  // USE_APP_LOADING
 
 #endif  // KERNEL

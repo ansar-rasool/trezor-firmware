@@ -361,11 +361,15 @@ int hdnode_private_ckd_cached(HDNode *inout, const uint32_t *i, size_t i_count,
     // no way how to compute parent fingerprint
     return 1;
   }
-  if (i_count == 1) {
+  if (i_count == 1 || i_count - 1 > BIP32_CACHE_MAXDEPTH) {
+    // when parent is uncacheable just derive the node and return
+    for (size_t k = 0; k < i_count - 1; k++) {
+      if (hdnode_private_ckd(inout, i[k]) == 0) return 0;
+    }
     if (fingerprint) {
       *fingerprint = hdnode_fingerprint(inout);
     }
-    if (hdnode_private_ckd(inout, i[0]) == 0) return 0;
+    if (hdnode_private_ckd(inout, i[i_count - 1]) == 0) return 0;
     return 1;
   }
 
@@ -712,21 +716,25 @@ int hdnode_serialize_private(const HDNode *node, uint32_t fingerprint,
 static int hdnode_deserialize(const char *str, uint32_t version,
                               bool use_private, const char *curve, HDNode *node,
                               uint32_t *fingerprint) {
+  int ret = 0;
   uint8_t node_data[78] = {0};
   memzero(node, sizeof(HDNode));
   node->curve = get_curve_by_name(curve);
   if (base58_decode_check(str, node->curve->hasher_base58, node_data,
                           sizeof(node_data)) != sizeof(node_data)) {
-    return -1;
+    ret = -1;
+    goto cleanup;
   }
   uint32_t ver = read_be(node_data);
   if (ver != version) {
-    return -3;  // invalid version
+    ret = -3;  // invalid version
+    goto cleanup;
   }
   if (use_private) {
     // invalid data
     if (node_data[45]) {
-      return -2;
+      ret = -2;
+      goto cleanup;
     }
     memcpy(node->private_key, node_data + 46, 32);
     memzero(node->public_key, sizeof(node->public_key));
@@ -742,7 +750,10 @@ static int hdnode_deserialize(const char *str, uint32_t version,
   }
   node->child_num = read_be(node_data + 9);
   memcpy(node->chain_code, node_data + 13, 32);
-  return 0;
+
+cleanup:
+  memzero(node_data, sizeof(node_data));
+  return ret;
 }
 
 int hdnode_deserialize_public(const char *str, uint32_t version,

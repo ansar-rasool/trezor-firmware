@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
     from trezor.enums import AmountUnit
     from trezor.messages import PaymentRequest, TxOutput
-    from trezor.ui.layouts import PropertyType
+    from trezor.ui.layouts import StrPropertyType
 
     from apps.common.coininfo import CoinInfo
     from apps.common.paths import Bip32Path
@@ -50,12 +50,12 @@ def format_coin_amount(amount: int, coin: CoinInfo, amount_unit: AmountUnit) -> 
 
 
 def account_label(coin: CoinInfo, address_n: Bip32Path | None) -> str:
-    return (
-        TR.bitcoin__multiple_accounts
-        if address_n is None
-        else address_n_to_name(coin, list(address_n) + [0] * BIP32_WALLET_DEPTH)
-        or f"Path {address_n_to_str(address_n)}"
-    )
+    if address_n is None:
+        return TR.bitcoin__multiple_accounts
+    else:
+        return address_n_to_name(
+            coin, list(address_n) + [0] * BIP32_WALLET_DEPTH
+        ) or address_n_to_str(address_n)
 
 
 async def confirm_output(
@@ -207,7 +207,7 @@ async def show_payment_request_details(
 
     account = account_label(coin, address_n)
     account_path = address_n_to_str(address_n) if address_n else None
-    account_items: list[PropertyType] = []
+    account_items: list[StrPropertyType] = []
     if account:
         account_items.append((TR.words__account, account, True))
     if account_path:
@@ -288,13 +288,21 @@ async def confirm_total(
     amount_unit: AmountUnit,
     address_n: Bip32Path | None,
 ) -> None:
+    account = account_label(coin, address_n)
+    account_path = address_n_to_str(address_n) if address_n else None
+    account_items: list[StrPropertyType] = [(TR.words__account, account, None)]
+    if account_path and account_path != account:
+        account_items.append((TR.address_details__derivation_path, account_path, None))
 
     await layouts.confirm_total(
         format_coin_amount(spending, coin, amount_unit),
         format_coin_amount(fee, coin, amount_unit),
-        fee_rate_amount=format_fee_rate(fee_rate, coin) if fee_rate >= 0 else None,
-        source_account=account_label(coin, address_n),
-        source_account_path=address_n_to_str(address_n) if address_n else None,
+        account_items=account_items,
+        fee_items=(
+            [(TR.confirm_total__fee_rate, format_fee_rate(fee_rate, coin), None)]
+            if fee_rate >= 0
+            else None
+        ),
     )
 
 

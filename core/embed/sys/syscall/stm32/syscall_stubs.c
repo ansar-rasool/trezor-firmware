@@ -103,6 +103,8 @@ ssize_t syshandle_write(syshandle_t handle, const void *data,
 
 #ifdef USE_DBG_CONSOLE
 
+#include <sys/dbg_console.h>
+
 ssize_t dbg_console_read(void *buffer, size_t buffer_size) {
   return syscall_invoke2((uint32_t)buffer, buffer_size,
                          SYSCALL_DBG_CONSOLE_READ);
@@ -120,7 +122,7 @@ ssize_t dbg_console_write(const void *data, size_t data_size) {
 
 #ifdef USE_DBG_CONSOLE
 
-#include <rtl/logging.h>
+#include <sys/logging.h>
 
 bool syslog_start_record(const log_source_t *source, log_level_t level) {
   return (bool)syscall_invoke2((uint32_t)source, level,
@@ -140,10 +142,43 @@ bool syslog_set_filter(const char *filter, size_t filter_len) {
 #endif
 
 // =============================================================================
+// ipc.h
+// =============================================================================
+
+#ifdef USE_IPC
+
+#include <sys/ipc.h>
+
+bool ipc_register(systask_id_t origin, void *buffer, size_t size) {
+  return (bool)syscall_invoke3((uint32_t)origin, (uint32_t)buffer, size,
+                               SYSCALL_IPC_REGISTER);
+}
+
+void ipc_unregister(systask_id_t origin) {
+  syscall_invoke1((uint32_t)origin, SYSCALL_IPC_UNREGISTER);
+}
+
+bool ipc_try_receive(ipc_message_t *msg) {
+  return (bool)syscall_invoke1((uint32_t)msg, SYSCALL_IPC_TRY_RECEIVE);
+}
+
+void ipc_message_free(ipc_message_t *msg) {
+  syscall_invoke1((uint32_t)msg, SYSCALL_IPC_FREE_MESSAGE);
+}
+
+bool ipc_send(systask_id_t remote, uint32_t fn, const void *data,
+              size_t data_size) {
+  return (bool)syscall_invoke4((uint32_t)remote, fn, (uint32_t)data, data_size,
+                               SYSCALL_IPC_SEND);
+}
+
+#endif  // USE_IPC
+
+// =============================================================================
 // boot_image.h
 // =============================================================================
 
-#include <util/boot_image.h>
+#include <sec/boot_image.h>
 
 bool boot_image_check(const boot_image_t *image) {
   return (bool)syscall_invoke1((uint32_t)image, SYSCALL_BOOT_IMAGE_CHECK);
@@ -181,7 +216,7 @@ void reboot_device(void) {
 // notify.h
 // =============================================================================
 
-#include <sys/notify.h>
+#include <io/notify.h>
 
 void notify_send(notification_event_t event) {
   syscall_invoke1((uint32_t)event, SYSCALL_NOTIFY_SEND);
@@ -293,7 +328,7 @@ secbool __wur sdcard_write_blocks(const uint32_t *src, uint32_t block_num,
 // unit_properties.h
 // =============================================================================
 
-#include <util/unit_properties.h>
+#include <sec/unit_properties.h>
 
 void unit_properties_get(unit_properties_t *props) {
   syscall_invoke1((uint32_t)props, SYSCALL_UNIT_PROPERTIES_GET);
@@ -393,25 +428,22 @@ rgb_led_effect_type_t rgb_led_effect_get_type(void) {
 
 #include <io/haptic.h>
 
-void haptic_set_enabled(bool enabled) {
-  syscall_invoke1((uint32_t)enabled, SYSCALL_HAPTIC_SET_ENABLED);
+ts_t haptic_set_enabled(bool enabled) {
+  return ts_make(
+      syscall_invoke1((uint32_t)enabled, SYSCALL_HAPTIC_SET_ENABLED));
 }
 
 bool haptic_get_enabled(void) {
   return (bool)syscall_invoke0(SYSCALL_HAPTIC_GET_ENABLED);
 }
 
-bool haptic_test(uint16_t duration_ms) {
-  return (bool)syscall_invoke1(duration_ms, SYSCALL_HAPTIC_TEST);
+ts_t haptic_play(haptic_effect_t effect) {
+  return ts_make(syscall_invoke1((uint32_t)effect, SYSCALL_HAPTIC_PLAY));
 }
 
-bool haptic_play(haptic_effect_t effect) {
-  return (bool)syscall_invoke1((uint32_t)effect, SYSCALL_HAPTIC_PLAY);
-}
-
-bool haptic_play_custom(int8_t amplitude_pct, uint16_t duration_ms) {
-  return (bool)syscall_invoke2((uint32_t)amplitude_pct, duration_ms,
-                               SYSCALL_HAPTIC_PLAY_CUSTOM);
+ts_t haptic_play_custom(int8_t amplitude_pct, uint16_t duration_ms) {
+  return ts_make(syscall_invoke2((uint32_t)amplitude_pct, duration_ms,
+                                 SYSCALL_HAPTIC_PLAY_CUSTOM));
 }
 
 #endif  // USE_HAPTIC
@@ -466,6 +498,18 @@ secbool secret_key_delegated_identity(uint8_t dest[ECDSA_PRIVATE_KEY_SIZE]) {
 }
 
 // =============================================================================
+// telemetry.h
+// =============================================================================
+
+#ifdef USE_TELEMETRY
+#include <sec/telemetry.h>
+
+bool telemetry_get(telemetry_data_t *out) {
+  return (bool)syscall_invoke1((uint32_t)out, SYSCALL_TELEMETRY_GET);
+}
+#endif
+
+// =============================================================================
 // storage.h
 // =============================================================================
 
@@ -492,10 +536,10 @@ secbool storage_is_unlocked(void) {
 
 void storage_lock(void) { syscall_invoke0(SYSCALL_STORAGE_LOCK); }
 
-secbool storage_unlock(const uint8_t *pin, size_t pin_len,
-                       const uint8_t *ext_salt) {
-  return (secbool)syscall_invoke3((uint32_t)pin, pin_len, (uint32_t)ext_salt,
-                                  SYSCALL_STORAGE_UNLOCK);
+storage_unlock_result_t storage_unlock(const uint8_t *pin, size_t pin_len,
+                                       const uint8_t *ext_salt) {
+  return (storage_unlock_result_t)syscall_invoke3(
+      (uint32_t)pin, pin_len, (uint32_t)ext_salt, SYSCALL_STORAGE_UNLOCK);
 }
 
 secbool storage_has_pin(void) {
@@ -509,13 +553,11 @@ uint32_t storage_get_pin_rem(void) {
   return syscall_invoke0(SYSCALL_STORAGE_GET_PIN_REM);
 }
 
-secbool storage_change_pin(const uint8_t *oldpin, size_t oldpin_len,
-                           const uint8_t *newpin, size_t newpin_len,
-                           const uint8_t *old_ext_salt,
-                           const uint8_t *new_ext_salt) {
-  return (secbool)syscall_invoke6(
-      (uint32_t)oldpin, oldpin_len, (uint32_t)newpin, newpin_len,
-      (uint32_t)old_ext_salt, (uint32_t)new_ext_salt,
+storage_pin_change_result_t storage_change_pin(const uint8_t *newpin,
+                                               size_t newpin_len,
+                                               const uint8_t *new_ext_salt) {
+  return (storage_pin_change_result_t)syscall_invoke3(
+      (uint32_t)newpin, newpin_len, (uint32_t)new_ext_salt,
       SYSCALL_STORAGE_CHANGE_PIN);
 }
 
@@ -567,7 +609,7 @@ secbool storage_next_counter(const uint16_t key, uint32_t *count) {
 // translations.h
 // =============================================================================
 
-#include <util/translations.h>
+#include <io/translations.h>
 
 bool translations_write(const uint8_t *data, uint32_t offset, uint32_t len) {
   return (bool)syscall_invoke3((uint32_t)data, offset, len,
@@ -589,7 +631,7 @@ uint32_t translations_area_bytesize(void) {
 // rng.h
 // =============================================================================
 
-#include <sec/rng.h>
+#include <sec/rng_strong.h>
 
 void rng_fill_buffer(void *buffer, size_t buffer_size) {
   syscall_invoke2((uint32_t)buffer, buffer_size, SYSCALL_RNG_FILL_BUFFER);
@@ -604,7 +646,7 @@ bool rng_fill_buffer_strong(void *buffer, size_t buffer_size) {
 // fwutils.h
 // =============================================================================
 
-#include <util/fwutils.h>
+#include <sec/fwutils.h>
 
 secbool firmware_get_vendor(char *buff, size_t buff_size) {
   return syscall_invoke2((uint32_t)buff, buff_size,
@@ -742,7 +784,7 @@ void nrf_reboot(void) { syscall_invoke0(SYSCALL_NRF_REBOOT); }
 
 #ifdef USE_POWER_MANAGER
 
-#include <sys/power_manager.h>
+#include <io/power_manager.h>
 
 pm_status_t pm_suspend(wakeup_flags_t *wakeup_reason) {
   return (pm_status_t)syscall_invoke1((uint32_t)wakeup_reason,
@@ -751,6 +793,14 @@ pm_status_t pm_suspend(wakeup_flags_t *wakeup_reason) {
 
 pm_status_t pm_hibernate(void) {
   return (pm_status_t)syscall_invoke0(SYSCALL_POWER_MANAGER_HIBERNATE);
+}
+
+pm_status_t pm_charging_enable(void) {
+  return (pm_status_t)syscall_invoke0(SYSCALL_POWER_MANAGER_CHARGING_ENABLE);
+}
+
+pm_status_t pm_charging_disable(void) {
+  return (pm_status_t)syscall_invoke0(SYSCALL_POWER_MANAGER_CHARGING_DISABLE);
 }
 
 pm_status_t pm_get_state(pm_state_t *state) {
@@ -771,7 +821,7 @@ bool pm_get_events(pm_event_t *events) {
 
 #ifdef USE_HW_JPEG_DECODER
 
-#include <gfx/jpegdec.h>
+#include <io/jpegdec.h>
 
 bool jpegdec_open(void) { return (bool)syscall_invoke0(SYSCALL_JPEGDEC_OPEN); }
 
@@ -804,7 +854,7 @@ bool jpegdec_get_slice_mono8(uint32_t *mono8, jpegdec_slice_t *slice) {
 
 #ifdef USE_DMA2D
 
-#include <gfx/dma2d_bitblt.h>
+#include <io/dma2d_bitblt.h>
 
 void dma2d_wait(void) { syscall_invoke0(SYSCALL_DMA2D_WAIT); }
 
@@ -879,6 +929,47 @@ bool tropic_ecc_sign(uint16_t key_slot_index, const uint8_t *dig,
 bool tropic_data_read(uint16_t udata_slot, uint8_t *data, uint16_t *size) {
   return (bool)syscall_invoke3((uint32_t)udata_slot, (uint32_t)data,
                                (uint32_t)size, SYSCALL_TROPIC_DATA_READ);
+}
+
+#endif
+
+#ifdef USE_APP_LOADING
+
+#include <io/app_loader.h>
+
+ts_t app_task_spawn(const app_hash_t *hash, systask_id_t *task_id) {
+  return ts_make(syscall_invoke2((uint32_t)hash, (uint32_t)task_id,
+                                 SYSCALL_APP_TASK_SPAWN));
+}
+
+bool app_task_is_running(systask_id_t task_id) {
+  return (bool)syscall_invoke1((uint32_t)task_id, SYSCALL_APP_TASK_IS_RUNNING);
+}
+
+ts_t app_task_get_pminfo(systask_id_t task_id, systask_postmortem_t *pminfo) {
+  return ts_make(syscall_invoke2((uint32_t)task_id, (uint32_t)pminfo,
+                                 SYSCALL_APP_TASK_GET_PMINFO));
+}
+
+void app_task_unload(systask_id_t task_id) {
+  syscall_invoke1((uint32_t)task_id, SYSCALL_APP_TASK_UNLOAD);
+}
+
+app_cache_handle_t app_cache_create_image(const app_hash_t *hash, size_t size) {
+  return (app_cache_handle_t)syscall_invoke2((uint32_t)hash, (uint32_t)size,
+                                             SYSCALL_APP_CACHE_CREATE_IMAGE);
+}
+
+ts_t app_cache_write_image(app_cache_handle_t handle, uintptr_t offset,
+                           const void *data, size_t data_size) {
+  return ts_make(syscall_invoke4((uint32_t)handle, (uint32_t)offset,
+                                 (uint32_t)data, data_size,
+                                 SYSCALL_APP_CACHE_WRITE_IMAGE));
+}
+
+ts_t app_cache_finalize_image(app_cache_handle_t handle, bool accept) {
+  return ts_make(syscall_invoke2((uint32_t)handle, (uint32_t)accept,
+                                 SYSCALL_APP_CACHE_FINALIZE_IMAGE));
 }
 
 #endif

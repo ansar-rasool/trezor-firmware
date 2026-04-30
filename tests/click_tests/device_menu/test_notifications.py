@@ -18,10 +18,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from trezorlib import device, messages
+from trezorlib import messages
 
 from ... import translations as TR
-from .. import reset
 from ..test_pin import PIN4, _assert_pin_entry, _enter_two_times
 from .common import (
     Menu,
@@ -124,8 +123,7 @@ def test_seedless(device_handler: "BackgroundDeviceHandler"):
         menu_idx(backup_notification, layout.vertical_menu_content())
 
 
-@pytest.mark.setup_client(needs_backup=True)
-@pytest.mark.invalidate_client
+@pytest.mark.setup_client(unfinished_backup=True)
 def test_backup_failed(
     device_handler: "BackgroundDeviceHandler",
 ):
@@ -133,33 +131,8 @@ def test_backup_failed(
     debug = device_handler.debuglink()
 
     assert features.initialized is True
-    assert features.unfinished_backup is False
-    assert features.backup_availability == messages.BackupAvailability.Required
-
-    # Spawn the backup process and cancel it
-    session = device_handler.client.get_seedless_session()
-    device_handler.run_with_provided_session(
-        session,
-        device.backup,
-    )
-
-    # confirm backup configuration
-    debug.synchronize_at("TextScreen")
-    assert TR.regexp("backup__info_single_share_backup").match(
-        debug.read_layout().text_content()
-    )
-    reset.confirm_read(debug)
-
-    # confirm backup intro
-    assert TR.reset__never_make_digital_copy in debug.read_layout().text_content()
-    reset.confirm_read(debug, middle_r=True)
-
-    # read words
-    reset.read_words(debug, do_htc=False, confirm_instruction=True)
-
-    device_handler.kill_task()
-    # Raise the loop restart exception to reset the flow
-    session.cancel()
+    assert features.unfinished_backup is True
+    assert features.backup_availability is messages.BackupAvailability.NotAvailable
 
     # Wait for the homescreen to appear
     debug.synchronize_at("Homescreen")
@@ -184,8 +157,11 @@ def test_backup_failed(
     # Wait for the homescreen to appear
     debug.synchronize_at("Homescreen")
 
+    # THP channel must be re-created after wipe
+    test_ctx = device_handler.client
+    test_ctx.client._invalidate()
+
     # Refresh features and check wiped state
-    device_handler.client = device_handler.client.get_new_client()
     features = device_handler.features()
     assert features.initialized is False
     assert features.pin_protection is False

@@ -25,6 +25,7 @@ use crate::{
             result::{BACK, CANCELLED, CONFIRMED, INFO},
             util::{upy_disable_animation, RecoveryType},
         },
+        notification::{Notification, NotificationLevel, NOTIFICATION_LEVEL_OBJ},
         ui_firmware::{
             FirmwareUI, MAX_CHECKLIST_ITEMS, MAX_GROUP_SHARE_LINES, MAX_PAIRED_DEVICES,
             MAX_WORD_QUIZ_ITEMS,
@@ -63,6 +64,7 @@ extern "C" fn new_confirm_action(n_args: usize, args: *const Obj, kwargs: *mut M
             .get(Qstr::MP_QSTR_verb)
             .unwrap_or_else(|_| Obj::const_none())
             .try_into_option()?;
+        let cancel: bool = kwargs.get_or(Qstr::MP_QSTR_cancel, true)?;
         let verb_cancel: Option<TString> = kwargs
             .get(Qstr::MP_QSTR_verb_cancel)
             .unwrap_or_else(|_| Obj::const_none())
@@ -83,6 +85,7 @@ extern "C" fn new_confirm_action(n_args: usize, args: *const Obj, kwargs: *mut M
             description,
             subtitle,
             verb,
+            cancel,
             verb_cancel,
             hold,
             hold_danger,
@@ -165,13 +168,14 @@ extern "C" fn new_confirm_value(n_args: usize, args: *const Obj, kwargs: *mut Ma
         let page_counter: bool = kwargs.get_or(Qstr::MP_QSTR_page_counter, false)?;
         let prompt_screen: bool = kwargs.get_or(Qstr::MP_QSTR_prompt_screen, false)?;
         let cancel: bool = kwargs.get_or(Qstr::MP_QSTR_cancel, false)?;
+        let back_button: bool = kwargs.get_or(Qstr::MP_QSTR_back_button, false)?;
         let warning_footer: Option<TString> = kwargs
             .get(Qstr::MP_QSTR_warning_footer)
             .unwrap_or_else(|_| Obj::const_none())
             .try_into_option()?;
         let external_menu: bool = kwargs.get_or(Qstr::MP_QSTR_external_menu, false)?;
 
-        let layout_obj = ModelUI::confirm_value(
+        let layout = ModelUI::confirm_value(
             title,
             value,
             description,
@@ -186,10 +190,12 @@ extern "C" fn new_confirm_value(n_args: usize, args: *const Obj, kwargs: *mut Ma
             page_counter,
             prompt_screen,
             cancel,
+            back_button,
             warning_footer,
             external_menu,
         )?;
-        Ok(layout_obj.into())
+
+        Ok(LayoutObj::new_root(layout)?.into())
     };
     unsafe { util::try_with_args_and_kwargs(n_args, args, kwargs, block) }
 }
@@ -370,9 +376,13 @@ extern "C" fn new_confirm_properties(n_args: usize, args: *const Obj, kwargs: *m
 extern "C" fn new_show_properties(n_args: usize, args: *const Obj, kwargs: *mut Map) -> Obj {
     let block = move |_args: &[Obj], kwargs: &Map| {
         let title: TString = kwargs.get(Qstr::MP_QSTR_title)?.try_into()?;
+        let subtitle: Option<TString> = kwargs
+            .get(Qstr::MP_QSTR_subtitle)
+            .and_then(Obj::try_into_option)
+            .unwrap_or(None);
         let value: Obj = kwargs.get(Qstr::MP_QSTR_value)?;
 
-        let layout = ModelUI::show_properties(title, value)?;
+        let layout = ModelUI::show_properties(title, subtitle, value)?;
         Ok(LayoutObj::new_root(layout)?.into())
     };
     unsafe { util::try_with_args_and_kwargs(n_args, args, kwargs, block) }
@@ -468,7 +478,7 @@ extern "C" fn new_confirm_with_info(n_args: usize, args: *const Obj, kwargs: *mu
             .try_into_option()?;
         let external_menu: bool = kwargs.get_or(Qstr::MP_QSTR_external_menu, false)?;
 
-        let layout = ModelUI::confirm_with_info(
+        let obj = ModelUI::confirm_with_info(
             title,
             subtitle,
             items,
@@ -477,7 +487,7 @@ extern "C" fn new_confirm_with_info(n_args: usize, args: *const Obj, kwargs: *mu
             verb_cancel,
             external_menu,
         )?;
-        Ok(LayoutObj::new_root(layout)?.into())
+        Ok(obj.into())
     };
     unsafe { util::try_with_args_and_kwargs(n_args, args, kwargs, block) }
 }
@@ -521,7 +531,6 @@ extern "C" fn new_flow_confirm_output(n_args: usize, args: *const Obj, kwargs: *
         let description: Option<TString> =
             kwargs.get(Qstr::MP_QSTR_description)?.try_into_option()?;
         let message: TString = kwargs.get(Qstr::MP_QSTR_message)?.try_into()?;
-        let amount: Option<TString> = kwargs.get(Qstr::MP_QSTR_amount)?.try_into_option()?;
         let chunkify: bool = kwargs.get_or(Qstr::MP_QSTR_chunkify, false)?;
         let text_mono: bool = kwargs.get_or(Qstr::MP_QSTR_text_mono, true)?;
         let account_title: TString = kwargs.get(Qstr::MP_QSTR_account_title)?.try_into()?;
@@ -533,18 +542,6 @@ extern "C" fn new_flow_confirm_output(n_args: usize, args: *const Obj, kwargs: *
 
         let address_item: Option<Obj> =
             kwargs.get(Qstr::MP_QSTR_address_item)?.try_into_option()?;
-        let extra_item: Option<Obj> = kwargs.get(Qstr::MP_QSTR_extra_item)?.try_into_option()?;
-        let summary_items: Option<Obj> =
-            kwargs.get(Qstr::MP_QSTR_summary_items)?.try_into_option()?;
-        let fee_items: Option<Obj> = kwargs.get(Qstr::MP_QSTR_fee_items)?.try_into_option()?;
-        let summary_title: Option<TString> =
-            kwargs.get(Qstr::MP_QSTR_summary_title)?.try_into_option()?;
-        let summary_br_code: Option<u16> = kwargs
-            .get(Qstr::MP_QSTR_summary_br_code)?
-            .try_into_option()?;
-        let summary_br_name: Option<TString> = kwargs
-            .get(Qstr::MP_QSTR_summary_br_name)?
-            .try_into_option()?;
         let cancel_text: Option<TString> =
             kwargs.get(Qstr::MP_QSTR_cancel_text)?.try_into_option()?;
 
@@ -554,7 +551,6 @@ extern "C" fn new_flow_confirm_output(n_args: usize, args: *const Obj, kwargs: *
             description,
             extra,
             message,
-            amount,
             chunkify,
             text_mono,
             account_title,
@@ -563,12 +559,6 @@ extern "C" fn new_flow_confirm_output(n_args: usize, args: *const Obj, kwargs: *
             br_code,
             br_name,
             address_item,
-            extra_item,
-            summary_items,
-            fee_items,
-            summary_title,
-            summary_br_code,
-            summary_br_name,
             cancel_text,
         )?;
         Ok(LayoutObj::new_root(layout)?.into())
@@ -922,13 +912,23 @@ extern "C" fn new_show_group_share_success(
 extern "C" fn new_show_homescreen(n_args: usize, args: *const Obj, kwargs: *mut Map) -> Obj {
     let block = move |_args: &[Obj], kwargs: &Map| {
         let label: TString<'static> = kwargs.get(Qstr::MP_QSTR_label)?.try_into()?;
-        let notification: Option<TString<'static>> =
-            kwargs.get(Qstr::MP_QSTR_notification)?.try_into_option()?;
-        let notification_level: u8 = kwargs.get_or(Qstr::MP_QSTR_notification_level, 0)?;
+        let notification: Option<Obj> = kwargs
+            .get(Qstr::MP_QSTR_notification)
+            .unwrap_or_else(|_| Obj::const_none())
+            .try_into_option()?;
         let lockable: bool = kwargs.get(Qstr::MP_QSTR_lockable)?.try_into()?;
         let skip_first_paint: bool = kwargs.get(Qstr::MP_QSTR_skip_first_paint)?.try_into()?;
 
-        let layout = ModelUI::show_homescreen(label, notification, notification_level, lockable)?;
+        let notification = if let Some(notif_tuple) = notification {
+            let [text, level]: [Obj; 2] = util::iter_into_array(notif_tuple)?;
+            let text: TString<'static> = text.try_into()?;
+            let level: NotificationLevel = level.try_into()?;
+            Some(Notification { text, level })
+        } else {
+            None
+        };
+
+        let layout = ModelUI::show_homescreen(label, notification, lockable)?;
         let layout_obj = LayoutObj::new_root(layout)?;
         if skip_first_paint {
             layout_obj.skip_first_paint();
@@ -1305,6 +1305,14 @@ extern "C" fn new_show_warning(n_args: usize, args: *const Obj, kwargs: *mut Map
     unsafe { util::try_with_args_and_kwargs(n_args, args, kwargs, block) }
 }
 
+extern "C" fn new_confirm_cancel(n_args: usize, args: *const Obj, kwargs: *mut Map) -> Obj {
+    let block = |_args: &[Obj], _kwargs: &Map| {
+        let layout = ModelUI::confirm_cancel()?;
+        Ok(LayoutObj::new_root(layout)?.into())
+    };
+    unsafe { util::try_with_args_and_kwargs(n_args, args, kwargs, block) }
+}
+
 extern "C" fn new_tutorial(n_args: usize, args: *const Obj, kwargs: *mut Map) -> Obj {
     let block = |_args: &[Obj], _kwargs: &Map| {
         let layout = ModelUI::tutorial()?;
@@ -1362,7 +1370,21 @@ pub static mp_module_trezorui_api: Module = obj_module! {
     /// from trezor import utils
     /// from trezor.enums import ButtonRequestType, RecoveryType
     ///
+    /// # Note: `PropertyType` / `StrPropertyType` are very much WIP.
+    /// # Historical context: Initially all we had was
+    /// # `tuple[str, str]`, `tuple[str | None, str | bytes | None, bool | None]`, etc.
+    /// # which we unified under `PropertyType`.
+    /// # We then later introduced `StrPropertyType` for cases where the value
+    /// # cannot be `bytes` and started getting rid of `PropertyType` uses.
+    /// # There are still a few instances where properties use `bytes`,
+    /// # but we should probably get rid of all and drop `PropertyType` completely.
+    /// # The next goal would be to replace the `bool` with something
+    /// # that can encode actual types / rendering strategies.
+    /// # See more details here: https://github.com/trezor/trezor-firmware/issues/5411
     /// PropertyType = tuple[str | None, StrOrBytes | None, bool | None]
+    /// StrPropertyType = tuple[str | None, str | None, bool | None]
+    ///
+    ///
     /// T = TypeVar("T")
     ///
     /// class LayoutObj(Generic[T]):
@@ -1495,6 +1517,7 @@ pub static mp_module_trezorui_api: Module = obj_module! {
     ///     description: str | None,
     ///     subtitle: str | None = None,
     ///     verb: str | None = None,
+    ///     cancel: bool = True,
     ///     verb_cancel: str | None = None,
     ///     hold: bool = False,
     ///     hold_danger: bool = False,
@@ -1546,6 +1569,7 @@ pub static mp_module_trezorui_api: Module = obj_module! {
     ///     page_counter: bool = False,
     ///     prompt_screen: bool = False,
     ///     cancel: bool = False,
+    ///     back_button: bool = False,
     ///     warning_footer: str | None = None,
     ///     external_menu: bool = False,
     /// ) -> LayoutObj[UiResult]:
@@ -1675,15 +1699,23 @@ pub static mp_module_trezorui_api: Module = obj_module! {
     ///     fee: str,
     ///     fee_label: str,
     ///     title: str | None = None,
-    ///     account_items: Sequence[PropertyType] | None = None,
+    ///     account_items: Iterable[StrPropertyType] | None = None,
     ///     account_title: str | None = None,
-    ///     extra_items: Sequence[PropertyType] | None = None,
+    ///     extra_items: Iterable[StrPropertyType] | None = None,
     ///     extra_title: str | None = None,
     ///     verb_cancel: str | None = None,
     ///     back_button: bool = False,
     ///     external_menu: bool = False,
     /// ) -> LayoutObj[UiResult]:
-    ///     """Confirm summary of a transaction."""
+    ///     """Confirm summary of a transaction.
+    ///
+    ///     account_items and extra_items need to be:
+    ///      * a list (on Eckhart and Caesar)
+    ///      * an iterable (on Delizia)
+    ///      * None / non-None on Bolt
+    ///
+    ///     TODO: get rid of account_items and extra_items for consistency!
+    ///     """
     Qstr::MP_QSTR_confirm_summary => obj_fn_kw!(0, new_confirm_summary).as_obj(),
 
     /// def confirm_with_info(
@@ -1720,7 +1752,6 @@ pub static mp_module_trezorui_api: Module = obj_module! {
     ///     message: str,
     ///     description: str | None,
     ///     extra: str | None,
-    ///     amount: str | None,
     ///     chunkify: bool,
     ///     text_mono: bool,
     ///     account_title: str,
@@ -1729,12 +1760,6 @@ pub static mp_module_trezorui_api: Module = obj_module! {
     ///     br_code: ButtonRequestType,
     ///     br_name: str,
     ///     address_item: PropertyType | None,
-    ///     extra_item: PropertyType | None,
-    ///     summary_items: Sequence[PropertyType] | None = None,
-    ///     fee_items: Sequence[PropertyType] | None = None,
-    ///     summary_title: str | None = None,
-    ///     summary_br_code: ButtonRequestType | None = None,
-    ///     summary_br_name: str | None = None,
     ///     cancel_text: str | None = None,
     /// ) -> LayoutObj[UiResult]:
     ///     """Confirm the recipient, (optionally) confirm the amount and (optionally) confirm the summary and present a Hold to Sign page."""
@@ -1956,8 +1981,7 @@ pub static mp_module_trezorui_api: Module = obj_module! {
     /// def show_homescreen(
     ///     *,
     ///     label: str,
-    ///     notification: str | None,
-    ///     notification_level: int = 0,
+    ///     notification: tuple[str, int] | None = None,
     ///     lockable: bool,
     ///     skip_first_paint: bool,
     /// ) -> LayoutObj[UiResult]:
@@ -2005,9 +2029,7 @@ pub static mp_module_trezorui_api: Module = obj_module! {
     ///     Returns on BLEEvent::{PairingCanceled, Disconnected}."""
     Qstr::MP_QSTR_show_ble_pairing_code => obj_fn_kw!(0, new_show_ble_pairing_code).as_obj(),
 
-    /// def wait_ble_host_confirmation(
-    ///     *,
-    /// ) -> LayoutObj[UiResult]:
+    /// def wait_ble_host_confirmation() -> LayoutObj[UiResult]:
     ///     """Pairing device: third screen (waiting for host confirmation).
     ///     Returns on BLEEvent::{PairingCanceled, Disconnected}."""
     Qstr::MP_QSTR_wait_ble_host_confirmation => obj_fn_kw!(0, new_wait_ble_host_confirmation).as_obj(),
@@ -2043,7 +2065,7 @@ pub static mp_module_trezorui_api: Module = obj_module! {
     /// def show_info_with_cancel(
     ///     *,
     ///     title: str,
-    ///     items: Sequence[PropertyType],
+    ///     items: list[StrPropertyType],
     ///     horizontal: bool = False,
     ///     chunkify: bool = False,
     /// ) -> LayoutObj[UiResult]:
@@ -2091,6 +2113,7 @@ pub static mp_module_trezorui_api: Module = obj_module! {
     ///     *,
     ///     title: str,
     ///     value: Sequence[PropertyType] | str,
+    ///     subtitle: str | None = None,
     /// ) -> LayoutObj[None]:
     ///     """Show a list of key-value pairs, or a monospace string."""
     Qstr::MP_QSTR_show_properties => obj_fn_kw!(0, new_show_properties).as_obj(),
@@ -2160,6 +2183,11 @@ pub static mp_module_trezorui_api: Module = obj_module! {
     ///     """Warning modal. Bolt: No buttons shown when `button` is empty string. Caesar: middle button and centered text."""
     Qstr::MP_QSTR_show_warning => obj_fn_kw!(0, new_show_warning).as_obj(),
 
+    /// def confirm_cancel() -> LayoutObj[UiResult]:
+    ///     """Ask the user to confirm the cancellation (or cancel the cancellation and go back to
+    ///     the previous flow)"""
+    Qstr::MP_QSTR_confirm_cancel => obj_fn_kw!(0, new_confirm_cancel).as_obj(),
+
     /// def tutorial() -> LayoutObj[UiResult]:
     ///     """Show user how to interact with the device."""
     Qstr::MP_QSTR_tutorial => obj_fn_kw!(0, new_tutorial).as_obj(),
@@ -2183,6 +2211,14 @@ pub static mp_module_trezorui_api: Module = obj_module! {
     ///     SWIPE_LEFT: ClassVar[int]
     ///     SWIPE_RIGHT: ClassVar[int]
     Qstr::MP_QSTR_AttachType => ATTACH_TYPE_OBJ.as_obj(),
+
+    /// class NotificationLevel:
+    ///     """Notification level determining the style of notification."""
+    ///     ALERT: ClassVar[int]
+    ///     WARNING: ClassVar[int]
+    ///     INFO: ClassVar[int]
+    ///     SUCCESS: ClassVar[int]
+    Qstr::MP_QSTR_NotificationLevel => NOTIFICATION_LEVEL_OBJ.as_obj(),
 
     /// class LayoutState:
     ///     """Layout state."""

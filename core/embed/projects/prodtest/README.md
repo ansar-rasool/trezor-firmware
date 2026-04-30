@@ -79,6 +79,39 @@ rgbled-set 0 255 0
 OK
 ```
 
+### CRC Checksum
+
+The CLI supports an optional CRC checksum for commands and responses to ensure data integrity over the communication link.
+
+When CRC is enabled, every command MUST include a CRC-32 checksum at the end of the line, preceded by a space.
+
+Command Format:
+`<command> [<args>] <CRC32>` or `checked-<command> [<args> <CRC32>]`
+
+The checksum is calculated using the standard CRC-32 algorithm (polynomial `0xEDB88320`, initial value `0xFFFFFFFF`, and final XOR `0xFFFFFFFF`) over the command string excluding the checksum. In the `checked-<command> [<args> <CRC32>]` format, the `<CRC32>` is the checksum of the string starting after `checked-`.
+
+The device also appends the checksum to every response line (including `OK`, `ERROR`, `PROGRESS`, and `#` traces).
+
+Response Format:
+`<response> <CRC32>`
+
+Example with CRC enabled:
+```
+ping ABC 3240F7DC
+OK ABC 24DA4527
+```
+
+Example with `checked-` prefix (enforces CRC for a single command even if CRC is otherwise disabled):
+```
+checked-ping ABC 3240F7DC
+OK ABC 24DA4527
+```
+If the command has no arguments, the format is `checked-<command> <CRC32>`:
+```
+checked-ping 25D53DFD
+OK  D38BF920
+```
+
 ## List of commands
 
 ### help
@@ -270,6 +303,33 @@ Example:
 ```
 display-text hello_world
 OK
+```
+
+### crc-enable
+Enables CRC check for CLI commands. Once enabled, the device expects all subsequent commands to include a CRC-32 checksum. The response to `crc-enable` itself already includes the CRC checksum.
+
+Example:
+```
+crc-enable
+OK @C09F27E9
+```
+
+### crc-disable
+Disables CRC check for CLI commands. The command itself must still include the CRC checksum if CRC was previously enabled.
+
+Example:
+```
+crc-disable @939BC008
+OK
+```
+
+### crc-status
+Returns the current CRC check status. Prints `OK 1` if CRC is enabled and `OK 0` if disabled.
+
+Example:
+```
+crc-status
+OK 1
 ```
 
 ### display-bars
@@ -695,6 +755,26 @@ prodtest-homescreen
 OK
 ```
 
+### prodtest-mem-write
+Parses hex data from the argument and stores it into an 8kB RAM buffer.
+
+`prodtest-mem-write <hexdata>`
+
+Example:
+```
+prodtest-mem-write 01020304
+OK
+```
+
+### prodtest-mem-read
+Reads back the data currently stored in the RAM buffer and outputs it as hex.
+
+Example:
+```
+prodtest-mem-read
+OK 01020304
+```
+
 ### secrets-init
 Generates random secrets and stores them in the protected storage.
 
@@ -853,6 +933,22 @@ optiga-counter-read
 OK 0E
 ```
 
+### optiga-metadata-read
+Retrieves the metadata of the specified data object in Optiga.
+
+Example:
+```
+optiga-metadata-read f1d0
+# Life cycle state: Operational
+# Maximum size: 140
+# Used size: 32
+# Read: Auto(F1D4)
+# Write: Always
+# Execute: Always
+# Data type: AUTOREF
+OK 2017C00107C4018CC50120D00100D10323F1D4D30100E80131
+```
+
 ### pm-new-soc-estimate
 Erase power manager recovery data from the backup RAM and immediately reboot the device to run new battery SoC estimate.
 
@@ -999,6 +1095,31 @@ pm-hibernate
 # Hibernating the the device...
 # Device is powered externally, hibernation is not possible.
 OK
+```
+
+### pm-battery-test
+Acquire <tested_samples> (default=10) battery measurements and check
+the following criteria to pass the test
+ - Every sample battery voltage is within range <2.95, 3.65> V
+ - Every sample NTC temperature is within range <-10, 65> °C
+
+In case any sample fails the test, the line is marked with `!` and test
+ends up with `ERROR error "Battery test failed."`.
+
+Example:
+```
+> pm-battery-test [<tested_samples>]
+PROGRESS Sample 1: Voltage 3.445 V, Temp 23.874 C
+PROGRESS Sample 2: Voltage 3.450 V, Temp 23.874 C
+PROGRESS Sample 3: Voltage 3.445 V, Temp 23.772 C
+PROGRESS Sample 4: Voltage 3.445 V, Temp 23.670 C
+PROGRESS Sample 5: Voltage 3.450 V, Temp 23.772 C
+PROGRESS Sample 6: Voltage 3.445 V, Temp 23.874 C
+PROGRESS Sample 7: Voltage 3.445 V, Temp 23.772 C
+PROGRESS Sample 8: Voltage 3.445 V, Temp 23.670 C
+PROGRESS Sample 9: Voltage 3.445 V, Temp 23.772 C
+PROGRESS Sample 10: Voltage 3.445 V, Temp 23.874 C
+OK Battery test passed.
 ```
 
 ### tamper-read
@@ -1195,6 +1316,107 @@ tropic-lock
 OK <hexadecimal string>
 ```
 
+### tropic-set-sensors
+
+Erases all ECC key slots, data slots and MAC & Destroy slots and then sets the reversible configuration of Tropic sensors to the input value.
+
+Example:
+```
+tropic-set-sensors fffffff5
+# Erasing all ECC key slots, data slots and MAC&Destroy slots
+# All cryptographic data erased successfully
+OK
+```
+
+### tropic-read-sensors
+
+Read the current sensor reversible configuration from Tropic.
+
+Example:
+```
+tropic-read-sensors
+OK 0xFFFFFFF5
+```
+
+### tropic-read-configs
+
+Read whole irreversible and reversible configurations.
+
+Example:
+```
+tropic-read-configs
+# === Reversible Configuration ===
+#   R_config.obj[0]: 0x00000009  (addr: 0x00)
+#   R_config.obj[1]: 0x00000000  (addr: 0x08)
+#   R_config.obj[2]: 0x00000000  (addr: 0x10)
+#   R_config.obj[3]: 0x00000000  (addr: 0x18)
+#   R_config.obj[4]: 0x00000001  (addr: 0x20)
+#   R_config.obj[5]: 0x04040404  (addr: 0x28)
+#   R_config.obj[6]: 0x06060606  (addr: 0x30)
+#   R_config.obj[7]: 0x06060606  (addr: 0x38)
+#   R_config.obj[8]: 0x00000004  (addr: 0x40)
+#   R_config.obj[9]: 0x00000606  (addr: 0x48)
+#   R_config.obj[10]: 0x00000606  (addr: 0x50)
+#   R_config.obj[11]: 0x00000606  (addr: 0x58)
+#   R_config.obj[12]: 0x00000006  (addr: 0x60)
+#   R_config.obj[13]: 0x06060404  (addr: 0x68)
+#   R_config.obj[14]: 0x06060406  (addr: 0x70)
+#   R_config.obj[15]: 0x06060406  (addr: 0x78)
+#   R_config.obj[16]: 0x00000006  (addr: 0x80)
+#   R_config.obj[17]: 0x06060604  (addr: 0x88)
+#   R_config.obj[18]: 0x06060604  (addr: 0x90)
+#   R_config.obj[19]: 0x06060606  (addr: 0x98)
+#   R_config.obj[20]: 0x06060606  (addr: 0xA0)
+#   R_config.obj[21]: 0x06060604  (addr: 0xA8)
+#   R_config.obj[22]: 0x06060604  (addr: 0xB0)
+#   R_config.obj[23]: 0x06060604  (addr: 0xB8)
+#   R_config.obj[24]: 0x06060606  (addr: 0xC0)
+#   R_config.obj[25]: 0x06060606  (addr: 0xC8)
+#   R_config.obj[26]: 0x06060404  (addr: 0xD0)
+#
+# === Irreversible Configuration ===
+#   I_config.obj[0]: 0xFFFFFFF9  (addr: 0x00)
+#   I_config.obj[1]: 0xFFFFFFFF  (addr: 0x08)
+#   I_config.obj[2]: 0xFFFFFFFE  (addr: 0x10)
+#   I_config.obj[3]: 0xFFFFFFFF  (addr: 0x18)
+#   I_config.obj[4]: 0xFFFFFFFF  (addr: 0x20)
+#   I_config.obj[5]: 0xFCFCFCFC  (addr: 0x28)
+#   I_config.obj[6]: 0xFEFEFEFE  (addr: 0x30)
+#   I_config.obj[7]: 0xFEFEFEFE  (addr: 0x38)
+#   I_config.obj[8]: 0xFFFFFFFC  (addr: 0x40)
+#   I_config.obj[9]: 0xFFFFFEFE  (addr: 0x48)
+#   I_config.obj[10]: 0xFFFFFEFE  (addr: 0x50)
+#   I_config.obj[11]: 0xFFFFFEFE  (addr: 0x58)
+#   I_config.obj[12]: 0xFFFFFFFE  (addr: 0x60)
+#   I_config.obj[13]: 0xFEFEFCFC  (addr: 0x68)
+#   I_config.obj[14]: 0xFEFEFCFE  (addr: 0x70)
+#   I_config.obj[15]: 0xFEFEFCFE  (addr: 0x78)
+#   I_config.obj[16]: 0xFFFFFFFE  (addr: 0x80)
+#   I_config.obj[17]: 0xFEFEFEFC  (addr: 0x88)
+#   I_config.obj[18]: 0xFEFEFEFC  (addr: 0x90)
+#   I_config.obj[19]: 0xFEFEFEFE  (addr: 0x98)
+#   I_config.obj[20]: 0xFEFEFEFE  (addr: 0xA0)
+#   I_config.obj[21]: 0xFEFEFEFC  (addr: 0xA8)
+#   I_config.obj[22]: 0xFEFEFEFC  (addr: 0xB0)
+#   I_config.obj[23]: 0xFEFEFEFC  (addr: 0xB8)
+#   I_config.obj[24]: 0xFEFEFEFE  (addr: 0xC0)
+#   I_config.obj[25]: 0xFEFEFEFE  (addr: 0xC8)
+#   I_config.obj[26]: 0xFEFEFCFC  (addr: 0xD0)
+OK
+```
+
+### tropic-erase-all-slots
+
+Erases all ECC key slots, data slots and MAC & Destroy slots.
+
+Example:
+```
+tropic-erase-all-slots
+# Erasing all ECC key slots, data slots and MAC&Destroy slots
+# All cryptographic data erased successfully
+OK
+```
+
 ### secure-channel-handshake-1
 
 Returns the first handshake message for establishing a secure channel between the device and HSM.
@@ -1214,6 +1436,10 @@ Example:
 secure-channel-handshake-2 e08e84b91413ad8f7b07853c8ce4c1b5547a12d9dd65f30e3adaa1e2398e0359bd7ba0e9fb2c64130c25d56abb811f72
 OK
 ```
+
+### tropic-stress-test
+
+Runs a Tropic stress test that repeatedly calls `lt_session_start()`, `lt_mac_and_destroy()` and `lt_ecc_key_generate()` to test that Tropic doesn't enter alarm mode.
 
 ### wpc-info
 Retrieves detailed information from the wireless power receiver, including chip identification, firmware version, configuration settings, and error status.
@@ -1353,4 +1579,32 @@ Example:
 ```
 rtc-get
 OK 2025 07 03 14 23 00 4
+```
+
+### telemetry-read
+Retrieves stored telemetry data, including minimum and maximum recorded battery temperatures, battery error flags, and battery cycle count.
+
+Response format:
+`OK <min_temp_c> <max_temp_c> <battery_errors> <battery_cycles>`
+
+- `min_temp_c`: Minimum temperature in millidegrees Celsius (°C × 1000)
+- `max_temp_c`: Maximum temperature in millidegrees Celsius (°C × 1000)
+- `battery_errors`: Battery error flags as hexadecimal
+- `battery_cycles`: Battery cycles in millicycles (cycles × 1000)
+
+If telemetry data is not available (not yet initialized), the command returns an error.
+
+Example:
+```
+telemetry-read
+OK 18500 42300 0x00 12450
+```
+
+### telemetry-reset
+Resets all telemetry data to initial state. This clears all stored telemetry values and reinitializes them to default values.
+
+Example:
+```
+telemetry-reset
+OK
 ```

@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.models("core")
 
-PIN_CANCELLED = pytest.raises(exceptions.TrezorFailure, match="PIN entry cancelled")
+PIN_CANCELLED = pytest.raises(exceptions.Cancelled)
 PIN_INVALID = pytest.raises(exceptions.TrezorFailure, match="PIN invalid")
 
 # Last PIN digit is shown for 1 second, so the delay must be grater
@@ -103,7 +103,7 @@ def prepare(
     # Setup according to the wanted situation
     if situation == Situation.PIN_INPUT:
         # Any action triggering the PIN dialogue
-        device_handler.run_with_session(lambda session: session.ping("pin_input", False))  # type: ignore
+        device_handler.run_with_session(lambda session: session.client.ping("pin_input", False))  # type: ignore
     elif situation == Situation.PIN_INPUT_CANCEL:
         # Any action triggering the PIN dialogue
         device_handler.run_with_session(device.apply_settings, auto_lock_delay_ms=300_000)  # type: ignore
@@ -176,7 +176,7 @@ def _input_code(debug: "DebugLink", pin: str, check: bool = False) -> None:
     """Input the PIN or Wipe code"""
     before = debug.read_layout().pin()
     if debug.layout_type in (LayoutType.Bolt, LayoutType.Delizia, LayoutType.Eckhart):
-        digits_order = debug.read_layout().tt_pin_digits_order()
+        digits_order = debug.read_layout().bolt_pin_digits_order()
         for idx, digit in enumerate(pin):
             digit_index = digits_order.index(digit)
             coords = debug.screen_buttons.pin_passphrase_index(digit_index)
@@ -459,7 +459,7 @@ def test_long_press_digit(device_handler: "BackgroundDeviceHandler"):
         _input_code(debug, PIN4[:-1])
 
         # Prepare last digit for long press
-        digits_order = debug.read_layout().tt_pin_digits_order()
+        digits_order = debug.read_layout().bolt_pin_digits_order()
         digit_index = digits_order.index(PIN4[-1])
         pos = debug.screen_buttons.pin_passphrase_index(digit_index)
 

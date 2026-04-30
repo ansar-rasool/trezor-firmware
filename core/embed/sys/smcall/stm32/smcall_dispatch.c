@@ -21,20 +21,20 @@
 
 #include <trezor_rtl.h>
 
+#include <sec/board_capabilities.h>
+#include <sec/fwutils.h>
 #include <sec/random_delays.h>
-#include <sec/rng.h>
+#include <sec/rng_strong.h>
 #include <sec/secret.h>
 #include <sec/secret_keys.h>
+#include <sec/unit_properties.h>
 #include <sys/bootargs.h>
 #include <sys/bootutils.h>
 #include <sys/irq.h>
 #include <sys/system.h>
-#include <util/board_capabilities.h>
-#include <util/fwutils.h>
-#include <util/unit_properties.h>
 
 #ifdef USE_BACKUP_RAM
-#include <sys/backup_ram.h>
+#include <sec/backup_ram.h>
 #endif
 
 #ifdef USE_OPTIGA
@@ -43,10 +43,10 @@
 #endif
 
 #ifdef USE_SUSPEND
-#include <sys/suspend_io.h>
+#include <sec/suspend_io.h>
 #endif
 
-#include <util/boot_image.h>
+#include <sec/boot_image.h>
 
 #include "smcall_numbers.h"
 #include "smcall_probe.h"
@@ -254,14 +254,10 @@ __attribute((no_stack_protector)) void smcall_handler(uint32_t *args,
     } break;
 
     case SMCALL_STORAGE_CHANGE_PIN: {
-      const uint8_t *oldpin = (const uint8_t *)args[0];
-      size_t oldpin_len = args[1];
-      const uint8_t *newpin = (const uint8_t *)args[2];
-      size_t newpin_len = args[3];
-      const uint8_t *old_ext_salt = (const uint8_t *)args[4];
-      const uint8_t *new_ext_salt = (const uint8_t *)args[5];
-      args[0] = storage_change_pin__verified(
-          oldpin, oldpin_len, newpin, newpin_len, old_ext_salt, new_ext_salt);
+      const uint8_t *newpin = (const uint8_t *)args[0];
+      size_t newpin_len = args[1];
+      const uint8_t *new_ext_salt = (const uint8_t *)args[2];
+      args[0] = storage_change_pin__verified(newpin, newpin_len, new_ext_salt);
     } break;
 
     case SMCALL_STORAGE_ENSURE_NOT_WIPE_CODE: {
@@ -402,6 +398,28 @@ __attribute((no_stack_protector)) void smcall_handler(uint32_t *args,
       args[0] = backup_ram_write__verified(key, type, data, data_size);
     } break;
 #endif  // USE_BACKUP_RAM
+
+#ifdef USE_TELEMETRY
+    // ------------------------------------------------------------------
+    // Telemetry
+    case SMCALL_TELEMETRY_UPDATE_BATT_TEMP: {
+      telemetry_update_battery_temp(u32_to_float(args[0]));
+    } break;
+
+    case SMCALL_TELEMETRY_UPDATE_BATT_ERRORS: {
+      telemetry_batt_errors_t errors = {.all = args[0]};
+      telemetry_update_battery_errors(errors);
+    } break;
+
+    case SMCALL_TELEMETRY_UPDATE_BATT_CYCLES: {
+      telemetry_update_battery_cycles(u32_to_float(args[0]));
+    } break;
+
+    case SMCALL_TELEMETRY_GET: {
+      telemetry_data_t *out = (telemetry_data_t *)args[0];
+      args[0] = telemetry_get__verified(out);
+    } break;
+#endif  // USE_TELEMETRY
 
     default:
       system_exit_fatal("Invalid smcall", __FILE__, __LINE__);

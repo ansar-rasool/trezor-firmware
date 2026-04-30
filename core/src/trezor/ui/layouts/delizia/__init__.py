@@ -5,7 +5,13 @@ from trezor import TR, ui, utils, workflow
 from trezor.enums import ButtonRequestType, RecoveryType
 from trezor.wire import ActionCancelled
 
-from ..common import draw_simple, interact, raise_if_not_confirmed, with_info
+from ..common import (
+    confirm_linear_flow,
+    draw_simple,
+    interact,
+    raise_if_not_confirmed,
+    with_info,
+)
 
 if TYPE_CHECKING:
     from buffer_types import AnyBytes, StrOrBytes
@@ -13,7 +19,7 @@ if TYPE_CHECKING:
 
     from trezor.messages import StellarAsset
 
-    from ..common import ExceptionType, PropertyType
+    from ..common import ExceptionType, PropertyType, StrPropertyType
     from ..menu import Details
     from ..slip24 import Refund, Trade
 
@@ -25,6 +31,7 @@ BR_CODE_OTHER = ButtonRequestType.Other  # global_import_cache
 CONFIRMED = trezorui_api.CONFIRMED
 CANCELLED = trezorui_api.CANCELLED
 INFO = trezorui_api.INFO
+BACK = trezorui_api.BACK
 
 
 def confirm_action(
@@ -490,9 +497,9 @@ async def confirm_payment_request(
     texts: Iterable[tuple[str | None, str]],
     refunds: Iterable[Refund],
     trades: list[Trade],
-    account_items: list[PropertyType] | None,
+    account_items: Iterable[StrPropertyType] | None,
     transaction_fee: str | None,
-    fee_info_items: Iterable[PropertyType] | None,
+    fee_info_items: Iterable[StrPropertyType] | None,
     extra_menu_items: list[tuple[str, str]] | None = None,
 ) -> None:
     from trezor.ui.layouts.menu import Menu, confirm_with_menu
@@ -529,7 +536,7 @@ async def confirm_payment_request(
             create_details(TR.address__title_provider_address, recipient_address)
         )
     for refund in refunds:
-        refund_account_items: list[PropertyType] = [("", refund.address, None)]
+        refund_account_items: list[StrPropertyType] = [("", refund.address, None)]
         if refund.account:
             refund_account_items.append((TR.words__account, refund.account, None))
         if refund.account_path:
@@ -592,32 +599,74 @@ async def confirm_output(
     else:
         title = TR.send__title_sending_to
 
-    await raise_if_not_confirmed(
-        trezorui_api.flow_confirm_output(
-            title=TR.words__address,
-            subtitle=title,
-            message=address,
-            extra=None,
-            amount=amount,
-            chunkify=chunkify,
-            text_mono=True,
-            account_title=TR.send__send_from,
-            account=source_account,
-            account_path=source_account_path,
-            address_item=None,
-            extra_item=None,
-            br_code=br_code,
-            br_name="confirm_output",
-            summary_items=None,
-            fee_items=None,
-            summary_title=None,
-            summary_br_name=None,
-            summary_br_code=None,
-            cancel_text=cancel_text,
-            description=description,
-        ),
-        br_name=None,
-    )
+    if amount is not None:
+        account_properties: list[StrPropertyType] = []
+        if source_account:
+            account_properties.append((TR.words__account, source_account, None))
+        if source_account_path and source_account_path != source_account:
+            # the reason for this check is account_label in bitcoin/sign_tx/layout.py
+            # which can return the derivation path instead of the account
+            account_properties.append(
+                (
+                    TR.address_details__derivation_path,
+                    source_account_path,
+                    None,
+                )
+            )
+        if account_properties:
+            info_items = [
+                (
+                    TR.address_details__account_info,
+                    account_properties,
+                    TR.send__send_from,
+                )
+            ]
+        else:
+            info_items = []
+        await confirm_linear_flow(
+            lambda: confirm_value(
+                TR.words__address,
+                address,
+                description or "",
+                "confirm_output",
+                br_code,
+                subtitle=title,
+                chunkify=chunkify,
+                cancel_text=TR.send__cancel_sign,
+                info_items=info_items,
+            ),
+            lambda: confirm_value(
+                TR.words__amount,
+                amount,
+                description="",
+                br_name="confirm_output",
+                br_code=br_code,
+                subtitle=title,
+                cancel_text=TR.send__cancel_sign,
+                info_items=info_items,
+                can_go_back=True,
+            ),
+        )
+    else:
+        await raise_if_not_confirmed(
+            trezorui_api.flow_confirm_output(
+                title=TR.words__address,
+                subtitle=title,
+                message=address,
+                extra=None,
+                chunkify=chunkify,
+                text_mono=True,
+                account_title=TR.send__send_from,
+                account=source_account,
+                account_path=source_account_path,
+                address_item=None,
+                br_code=br_code,
+                br_name="confirm_output",
+                cancel_text=cancel_text,
+                description=description,
+            ),
+            br_name=None,
+        )
 
 
 async def should_show_more(
@@ -627,6 +676,7 @@ async def should_show_more(
     br_name: str = "should_show_more",
     br_code: ButtonRequestType = BR_CODE_OTHER,
     confirm: str | None = None,
+    subtitle: str | None = None,
 ) -> bool:
     """Return True if the user wants to show more (they click a special button)
     and False when the user wants to continue without showing details.
@@ -638,8 +688,9 @@ async def should_show_more(
     result = await interact(
         trezorui_api.confirm_with_info(
             title=title,
+            subtitle=subtitle,
             items=para,
-            verb=confirm or TR.buttons__confirm,
+            verb=(TR.buttons__confirm if confirm is None else confirm),
             verb_info=button_text,
         ),
         br_name,
@@ -653,6 +704,35 @@ async def should_show_more(
     else:
         assert result is CANCELLED
         raise ActionCancelled
+
+
+async def confirm_blob_prefix(
+    title: str,
+    data: memoryview,
+    *,
+    total_len: int,
+    confirmed_len: int,
+    br_name: str,
+    br_code: ButtonRequestType = BR_CODE_OTHER,
+) -> int | None:
+    """
+    Returns the number of bytes confirmed, or `None` if confirmation should be skipped.
+    """
+    prefix = data[: 7 * 9]  # 7 rows x 18 hex digits
+    confirmed_len += len(prefix)
+
+    show_more = not await should_show_more(
+        title=title,
+        subtitle=f"{confirmed_len} / {total_len} bytes",
+        para=[(utils.hexlify_if_bytes(prefix), True)],
+        confirm="",  # will return False
+        button_text=TR.words__confirm_all,  # will return True
+        br_name=br_name,
+        br_code=br_code,
+    )
+    if show_more:
+        return len(prefix)
+    return None
 
 
 def confirm_blob(
@@ -790,14 +870,18 @@ def confirm_value(
     verb: str | None = None,
     subtitle: str | None = None,
     hold: bool = False,
+    can_go_back: bool = False,
     is_data: bool = True,
     chunkify: bool = False,
-    info_items: Iterable[PropertyType] | None = None,
+    info_items: (
+        Iterable[tuple[str, str | list[StrPropertyType], str | None]] | None
+    ) = None,
     cancel: bool = False,
+    cancel_text: str | None = None,
 ) -> Awaitable[ui.UiResult]:
     """General confirmation dialog, used by many other confirm_* functions."""
 
-    from trezor.ui.layouts.menu import Menu, interact_with_menu
+    from trezor.ui.layouts.menu import Cancel, Menu, interact_with_menu
 
     main = trezorui_api.confirm_value(
         title=title,
@@ -809,13 +893,19 @@ def confirm_value(
         hold=hold,
         chunkify=chunkify,
         cancel=cancel,
+        back_button=can_go_back,
         external_menu=True,
     )
 
-    info_items = info_items or []
+    menu_items = []
+    for name, p, page_title in info_items or []:
+        menu_items.append(create_details(name, p, page_title))
     menu = Menu.root(
-        (create_details(str(name), str(value)) for name, value, _is_data in info_items),
-        cancel=TR.buttons__cancel,
+        menu_items,
+        cancel=Cancel.from_layout(
+            name=(cancel_text or TR.buttons__cancel),
+            layout_factory=trezorui_api.confirm_cancel,
+        ),
     )
     return interact_with_menu(main, menu, br_name, br_code)
 
@@ -843,44 +933,36 @@ def confirm_properties(
 
 
 def confirm_total(
-    total_amount: str,
+    total_amount: str | None,
     fee_amount: str,
     title: str | None = None,
     total_label: str | None = None,
     fee_label: str | None = None,
     source_account: str | None = None,
     source_account_path: str | None = None,
-    fee_rate_amount: str | None = None,
+    account_title: str | None = None,
+    account_items: Iterable[StrPropertyType] | None = None,
+    fee_items: Iterable[StrPropertyType] | None = None,
+    back_button: bool = False,
     br_name: str = "confirm_total",
     br_code: ButtonRequestType = ButtonRequestType.SignTx,
-) -> Awaitable[None]:
+) -> Awaitable[ui.UiResult]:
     title = title or TR.words__title_summary  # def_arg
     total_label = total_label or TR.send__total_amount  # def_arg
     fee_label = fee_label or TR.send__incl_transaction_fee  # def_arg
 
-    fee_items: list[PropertyType] = []
-    account_items: list[PropertyType] = []
-    if source_account:
-        account_items.append(
-            (TR.confirm_total__sending_from_account, source_account, None)
-        )
-    if source_account_path:
-        account_items.append(
-            (TR.address_details__derivation_path, source_account_path, None)
-        )
-    if fee_rate_amount:
-        fee_items.append((TR.confirm_total__fee_rate, fee_rate_amount, None))
-
-    return raise_if_not_confirmed(
+    return interact(
         trezorui_api.confirm_summary(
             amount=total_amount,
             amount_label=total_label,
             fee=fee_amount,
             fee_label=fee_label,
             title=title,
-            account_items=account_items or None,
-            extra_items=fee_items or None,
+            account_title=account_title,
+            account_items=account_items,
+            extra_items=fee_items,
             extra_title=TR.confirm_total__title_fee,
+            back_button=back_button,
         ),
         br_name,
         br_code,
@@ -893,18 +975,14 @@ def _confirm_summary(
     fee: str,
     fee_label: str,
     title: str | None = None,
-    account_items: Iterable[PropertyType] | None = None,
+    account_items: Iterable[StrPropertyType] | None = None,
     account_title: str | None = None,
-    extra_items: Iterable[PropertyType] | None = None,
+    extra_items: Iterable[StrPropertyType] | None = None,
     extra_title: str | None = None,
     br_name: str = "confirm_total",
     br_code: ButtonRequestType = ButtonRequestType.SignTx,
 ) -> Awaitable[None]:
     title = title or TR.words__title_summary  # def_arg
-    account_props: list[PropertyType] | None = (
-        list(account_items) if account_items else None
-    )
-    extra_props: list[PropertyType] | None = list(extra_items) if extra_items else None
     return raise_if_not_confirmed(
         trezorui_api.confirm_summary(
             amount=amount,
@@ -912,9 +990,9 @@ def _confirm_summary(
             fee=fee,
             fee_label=fee_label,
             title=title,
-            account_items=account_props,
+            account_items=account_items,
             account_title=account_title,
-            extra_items=extra_props,
+            extra_items=extra_items,
             extra_title=extra_title or None,
         ),
         br_name,
@@ -937,7 +1015,7 @@ async def confirm_trade(
         buy_amount=trade.buy_amount,
     )
 
-    account_items: list[PropertyType] = [("", trade.address, None)]
+    account_items: list[StrPropertyType] = [("", trade.address, None)]
     if trade.account:
         account_items.append((TR.words__account, trade.account, None))
     if trade.account_path:
@@ -954,6 +1032,31 @@ async def confirm_trade(
 
 if not utils.BITCOIN_ONLY:
 
+    def _get_account_info_items(
+        account: str | None, account_path: str | None, title: str | None = None
+    ) -> list[tuple[str, list[StrPropertyType], str | None]]:
+        account_properties: list[StrPropertyType] = []
+        if account:
+            account_properties.append((TR.words__account, account, None))
+        if account_path:
+            account_properties.append(
+                (
+                    TR.address_details__derivation_path,
+                    account_path,
+                    None,
+                )
+            )
+        if account_properties:
+            return [
+                (
+                    TR.address_details__account_info,
+                    account_properties,
+                    title,
+                )
+            ]
+        else:
+            return []
+
     def confirm_ethereum_unknown_contract_warning(
         _title: str | None,
     ) -> Awaitable[None]:
@@ -969,48 +1072,39 @@ if not utils.BITCOIN_ONLY:
         account: str | None,
         account_path: str | None,
         maximum_fee: str,
-        fee_info_items: Iterable[PropertyType],
-        is_contract_interaction: bool,
+        fee_info_items: Iterable[StrPropertyType],
+        is_send: bool,
         br_name: str = "confirm_ethereum_tx",
         br_code: ButtonRequestType = ButtonRequestType.SignTx,
         chunkify: bool = False,
     ) -> None:
-        fee_items: list[PropertyType] | None = (
-            list(fee_info_items) if fee_info_items else None
-        )
-        summary_items: list[PropertyType] | None = [
-            (TR.words__amount, total_amount, None),
-            (TR.send__maximum_fee, maximum_fee, None),
-        ]
-        await raise_if_not_confirmed(
-            trezorui_api.flow_confirm_output(
-                title=TR.words__address,
+        await confirm_linear_flow(
+            lambda: confirm_value(
+                TR.words__address,
+                recipient or TR.ethereum__new_contract,
+                description="",
+                br_name="confirm_output",
+                br_code=br_code,
                 subtitle=(
                     TR.words__recipient
-                    if not is_contract_interaction
+                    if is_send
                     else TR.ethereum__interaction_contract
                 ),
-                description=None,
-                extra=None,
-                message=(recipient or TR.ethereum__new_contract),
-                amount=None,
-                chunkify=(chunkify if recipient else False),
-                text_mono=True,
-                account_title=TR.send__send_from,
-                account=account,
-                account_path=account_path,
-                address_item=None,
-                extra_item=None,
-                br_code=ButtonRequestType.SignTx,
-                br_name="confirm_output",
-                summary_items=summary_items,
-                fee_items=fee_items,
-                summary_title=TR.words__title_summary,
-                summary_br_name="confirm_total",
-                summary_br_code=ButtonRequestType.SignTx,
+                chunkify=chunkify if recipient else False,
                 cancel_text=TR.buttons__cancel,
+                info_items=_get_account_info_items(
+                    account, account_path, TR.send__send_from
+                ),
             ),
-            None,
+            lambda: confirm_total(
+                total_amount,
+                maximum_fee,
+                title=None,
+                total_label=TR.words__amount,
+                fee_label=TR.send__maximum_fee,
+                fee_items=fee_info_items,
+                back_button=True,
+            ),
         )
 
     def ethereum_address_title() -> str:
@@ -1031,7 +1125,7 @@ if not utils.BITCOIN_ONLY:
         account: str | None,
         account_path: str | None,
         maximum_fee: str,
-        fee_info_items: Iterable[PropertyType],
+        fee_info_items: Iterable[StrPropertyType],
         chunkify: bool = False,
     ) -> None:
         br_name = "confirm_ethereum_approve"
@@ -1071,10 +1165,9 @@ if not utils.BITCOIN_ONLY:
                 verb="",
                 verb_info=TR.ethereum__contract_address,
             )
-            items: list[PropertyType] = [("", recipient_addr, True)]
             info_layout = trezorui_api.show_info_with_cancel(
                 title=TR.ethereum__contract_address,
-                items=items,
+                items=[("", recipient_addr, True)],
                 chunkify=chunkify,
             )
             await with_info(main_layout, info_layout, br_name, br_code)
@@ -1125,8 +1218,8 @@ if not utils.BITCOIN_ONLY:
             False,
         )
 
-        account_items: list[PropertyType] | None = (
-            [(TR.address_details__derivation_path, account_path, None)]
+        account_items: tuple[StrPropertyType] | None = (
+            ((TR.address_details__derivation_path, account_path, None),)
             if account_path
             else None
         )
@@ -1153,46 +1246,43 @@ if not utils.BITCOIN_ONLY:
         maximum_fee: str,
         address: str,
         address_title: str,
-        info_items: Iterable[PropertyType],
+        fee_info_items: Iterable[StrPropertyType],
         chunkify: bool = False,
         br_name: str = "confirm_ethereum_staking_tx",
         br_code: ButtonRequestType = ButtonRequestType.SignTx,
     ) -> None:
-        summary_items: list[PropertyType] = []
-        if verb == TR.ethereum__staking_claim:
-            summary_items.extend([(TR.send__maximum_fee, maximum_fee, None)])
-        else:
-            summary_items.extend(
-                [
-                    (TR.words__amount, total_amount, None),
-                    (TR.send__maximum_fee, maximum_fee, None),
-                ]
-            )
-        await raise_if_not_confirmed(
-            trezorui_api.flow_confirm_output(
-                title=verb,
-                subtitle=None,
-                description=None,
-                extra=None,
-                message=intro_question,
-                amount=None,
-                chunkify=False,
-                text_mono=False,
-                account_title=TR.address_details__account_info,
-                account=account,
-                account_path=account_path,
-                br_code=br_code,
+        assert verb in (
+            TR.ethereum__staking_claim,
+            TR.ethereum__staking_stake,
+            TR.ethereum__staking_unstake,
+        )
+
+        address_info_items: list[tuple[str, list[StrPropertyType], None]] = [
+            (address_title, [(address_title, address, chunkify)], None)
+        ]
+        await confirm_linear_flow(
+            lambda: confirm_value(
+                verb,
+                intro_question,
+                description="",
                 br_name=br_name,
-                address_item=(address_title, address, None),
-                extra_item=None,
-                summary_items=summary_items,
-                fee_items=list(info_items) if info_items else None,
-                summary_title=verb,
-                summary_br_name="confirm_total",
-                summary_br_code=ButtonRequestType.SignTx,
-                cancel_text=TR.buttons__cancel,  # cancel staking
+                br_code=br_code,
+                subtitle=None,
+                is_data=False,
+                chunkify=False,
+                cancel_text=TR.buttons__cancel,
+                info_items=address_info_items
+                + _get_account_info_items(account, account_path),
             ),
-            br_name=None,
+            lambda: confirm_total(
+                total_amount if not verb == TR.ethereum__staking_claim else None,
+                maximum_fee,
+                title=verb,
+                total_label=TR.words__amount,
+                fee_label=TR.send__maximum_fee,
+                fee_items=fee_info_items,
+                back_button=True,
+            ),
         )
 
     def confirm_solana_unknown_token_warning() -> Awaitable[None]:
@@ -1205,7 +1295,7 @@ if not utils.BITCOIN_ONLY:
     def confirm_solana_recipient(
         recipient: str,
         title: str,
-        items: Iterable[PropertyType] = (),
+        items: Iterable[StrPropertyType] = (),
         br_name: str = "confirm_solana_recipient",
         br_code: ButtonRequestType = ButtonRequestType.ConfirmOutput,
     ) -> Awaitable[ui.UiResult]:
@@ -1216,13 +1306,13 @@ if not utils.BITCOIN_ONLY:
             br_name=br_name,
             br_code=br_code,
             verb=TR.buttons__continue,
-            info_items=items,
+            info_items=[(k or "", v or "", None) for k, v, _ in items],
         )
 
     def confirm_solana_tx(
         amount: str,
         fee: str,
-        items: Iterable[PropertyType],
+        items: Iterable[StrPropertyType],
         amount_title: str | None = None,
         fee_title: str | None = None,
         br_name: str = "confirm_solana_tx",
@@ -1238,7 +1328,7 @@ if not utils.BITCOIN_ONLY:
             fee,
             fee_title,
             extra_title=TR.confirm_total__title_fee,
-            extra_items=list(items) if items else None,
+            extra_items=items,
             br_name=br_name,
             br_code=br_code,
         )
@@ -1249,49 +1339,50 @@ if not utils.BITCOIN_ONLY:
         account: str,
         account_path: str,
         vote_account: str,
-        stake_item: PropertyType | None,
-        amount_item: PropertyType | None,
-        fee_item: PropertyType,
-        fee_details: Iterable[PropertyType],
-        blockhash_item: PropertyType,
+        stake_item: StrPropertyType | None,
+        amount_item: StrPropertyType | None,
+        fee_item: StrPropertyType,
+        fee_details: Iterable[StrPropertyType],
+        blockhash_item: StrPropertyType,
         br_name: str = "confirm_solana_staking_tx",
         br_code: ButtonRequestType = ButtonRequestType.SignTx,
     ) -> None:
-        summary_items: list[PropertyType] = []
-        if amount_item:
-            summary_items.append(amount_item)
-        summary_items.append(fee_item)
-        await raise_if_not_confirmed(
-            trezorui_api.flow_confirm_output(
-                title=title,
-                subtitle=None,
-                description=description,
-                extra=f"\n{TR.words__provider}:" if vote_account else None,
-                message=vote_account,
-                amount=None,
-                chunkify=True,
-                text_mono=True,
-                account_title=TR.address_details__account_info,
-                account=account,
-                account_path=account_path,
-                br_code=br_code,
+        info_items = []
+        if stake_item:
+            info_items.append((stake_item[0], [stake_item], None))
+        info_items.extend(_get_account_info_items(account, account_path))
+
+        extra = TR.words__provider if vote_account else ""
+
+        await confirm_linear_flow(
+            lambda: confirm_value(
+                title,
+                vote_account,
+                subtitle=description if extra else None,
                 br_name=br_name,
-                address_item=stake_item,
-                extra_item=blockhash_item,
-                fee_items=list(fee_details) if fee_details else None,
-                summary_title=title,
-                summary_items=summary_items,
-                summary_br_name="confirm_total",
-                summary_br_code=ButtonRequestType.SignTx,
+                br_code=br_code,
+                description=extra or description,
+                is_data=False,
+                chunkify=True,
                 cancel_text=TR.buttons__cancel,
+                info_items=info_items,
             ),
-            br_name=None,
+            lambda: confirm_total(
+                amount_item[1] if amount_item else None,
+                fee_item[1] or "",
+                title=title,
+                total_label=amount_item[0] if amount_item else None,
+                account_title=blockhash_item[0],
+                account_items=[blockhash_item],
+                fee_label=fee_item[0],
+                fee_items=fee_details,
+            ),
         )
 
     def confirm_cardano_tx(
         amount: str,
         fee: str,
-        items: Iterable[PropertyType],
+        items: Iterable[StrPropertyType],
     ) -> Awaitable[None]:
         amount_title = TR.send__total_amount
         fee_title = TR.send__incl_transaction_fee
@@ -1310,7 +1401,7 @@ if not utils.BITCOIN_ONLY:
         account_name: str,
         account_path: str,
         is_sending_from_trezor_account: bool,
-        extra_items: Iterable[PropertyType],
+        extra_items: Iterable[StrPropertyType],
     ) -> Awaitable[None]:
         return _confirm_summary(
             None,
@@ -1368,6 +1459,131 @@ if not utils.BITCOIN_ONLY:
             br_code=ButtonRequestType.ConfirmOutput,
             info_items=info_items,
             chunkify=False,
+        )
+
+    async def confirm_tron_send(amount: str | None, fee: str | None) -> None:
+        await _confirm_summary(
+            amount or "",
+            amount_label=TR.send__total_amount if amount else "",
+            fee=fee or "",
+            fee_label=TR.words__fee_limit if fee else "",
+            extra_items=None,
+            br_name="tron/send",
+            br_code=ButtonRequestType.SignTx,
+        )
+
+    # TODO: #6364 Consider simplifying with confirm_tron_send like ETH flows.
+    async def confirm_tron_transfer(
+        recipient_addr: str,
+        amount_str: str,
+        maximum_fee: str,
+        chunkify: bool = True,
+    ) -> None:
+
+        br_name = "tron/transfer"
+        title = TR.words__send
+
+        await confirm_value(
+            title,
+            recipient_addr,
+            "",
+            subtitle=TR.words__recipient,
+            chunkify=chunkify,
+            br_name=br_name,
+            verb=TR.buttons__continue,
+            cancel=True,
+        )
+
+        properties: Iterable[StrPropertyType] = (
+            (
+                TR.words__amount,
+                amount_str,
+                False,
+            ),
+            (TR.words__chain, "Tron", True),
+        )
+
+        await confirm_properties(
+            br_name,
+            title,
+            properties,
+            None,
+            False,
+            verb=TR.buttons__continue,
+        )
+
+        await _confirm_summary(
+            None,
+            None,
+            maximum_fee,
+            TR.words__fee_limit,
+            title,
+            None,
+        )
+
+    # TODO: #6359 Reword the TR strings to be ETH agnostic.
+    async def confirm_tron_approve(
+        recipient_addr: str,
+        amount_str: str,
+        is_revoke: bool,
+        maximum_fee: str,
+        chunkify: bool = False,
+    ) -> None:
+
+        br_name = "tron/approve"
+        if is_revoke:
+            title = TR.ethereum__approve_intro_title_revoke
+            action_subtitle = TR.ethereum__approve_intro_revoke
+            value_subtitle = TR.ethereum__approve_revoke_from
+            summary_view = (TR.words__token, amount_str[2:], True)
+        else:
+            title = TR.ethereum__approve_intro_title
+            action_subtitle = TR.ethereum__approve_intro
+            value_subtitle = TR.ethereum__approve_to
+            summary_view = (
+                TR.ethereum__approve_amount_allowance,
+                amount_str,
+                False,
+            )
+
+        await confirm_action(
+            br_name,
+            title,
+            action_subtitle,
+            verb=TR.buttons__continue,
+        )
+        await confirm_value(
+            title,
+            recipient_addr,
+            "",
+            subtitle=value_subtitle,
+            chunkify=chunkify,
+            br_name=br_name,
+            verb=TR.buttons__continue,
+            cancel=True,
+        )
+
+        properties: list[StrPropertyType] = [
+            summary_view,
+            (f"{TR.words__chain}:", "Tron", True),
+        ]
+
+        await confirm_properties(
+            br_name,
+            title,
+            properties,
+            None,
+            False,
+            verb=TR.buttons__continue,
+        )
+
+        await _confirm_summary(
+            None,
+            None,
+            maximum_fee,
+            TR.words__fee_limit,
+            title,
+            None,
         )
 
 
@@ -1469,7 +1685,7 @@ def confirm_modify_fee(
         total_fee_new=total_fee_new,
         fee_rate_amount=fee_rate_amount,
     )
-    items: list[PropertyType] = []
+    items: list[StrPropertyType] = []
     if fee_rate_amount:
         items.append((TR.bitcoin__new_fee_rate, fee_rate_amount, None))
     info_layout = trezorui_api.show_info_with_cancel(
@@ -1795,9 +2011,14 @@ def tutorial(br_code: ButtonRequestType = BR_CODE_OTHER) -> Awaitable[None]:
     )
 
 
-def create_details(name: str, value: list[PropertyType] | str) -> Details:
+def create_details(
+    name: str,
+    value: list[StrPropertyType] | str,
+    title: str | None = None,
+) -> Details:
     from trezor.ui.layouts.menu import Details
 
     return Details.from_layout(
-        name, lambda: trezorui_api.show_properties(title=name, value=value)
+        name,
+        lambda: trezorui_api.show_properties(title=(title or name), value=value),
     )
