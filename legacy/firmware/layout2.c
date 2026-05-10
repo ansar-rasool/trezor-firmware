@@ -331,7 +331,7 @@ void layoutHomescreen(void) {
   }
   layoutLast = layoutHomescreen;
 
-  char label[MAX_LABEL_LEN + 1] = _("Go to trezor.io/start");
+  char label[MAX_LABEL_LEN + 1] = _("Go to orinox.com");
   if (config_isInitialized()) {
     config_getLabel(label, sizeof(label));
   }
@@ -345,12 +345,14 @@ void layoutHomescreen(void) {
     oledDrawBitmap(0, 0, &b);
   } else {
     if (label[0] != '\0') {
-      oledDrawBitmap(44, 4, &bmp_logo48);
+      //oledDrawBitmap(44, 4, &bmp_logo48);
+      oledDrawBitmap(44, 4, &bmp_logo_orinox_home);
       oledDrawStringCenter(OLED_WIDTH / 2, OLED_HEIGHT - 8, label,
                            FONT_STANDARD);
     } else {
-      oledDrawBitmap(40, 0, &bmp_logo64_half);
-      oledDrawBitmapFlip(40 + 24, 0, &bmp_logo64_half);
+      //oledDrawBitmap(40, 0, &bmp_logo64_half);
+      //oledDrawBitmapFlip(40 + 24, 0, &bmp_logo64_half);
+      oledDrawBitmap(0, 0, &bmp_logo_orinox_boot);
     }
   }
 

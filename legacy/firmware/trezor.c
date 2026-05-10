@@ -203,8 +203,9 @@ int main(void) {
       "\x1b[0m\n");
 #endif
 
-  oledDrawBitmap(40, 0, &bmp_logo64_half);
-  oledDrawBitmapFlip(40 + 24, 0, &bmp_logo64_half);
+  //oledDrawBitmap(40, 0, &bmp_logo64_half);
+  //oledDrawBitmapFlip(40 + 24, 0, &bmp_logo64_half);
+  oledDrawBitmap(0, 0, &bmp_logo_orinox_boot);
   oledRefresh();
 
   config_init();
