@@ -33,6 +33,40 @@
 #include "sha2.h"
 #include "util.h"
 
+//#ifdef PIZERO
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+
+#define MAX_PREDEFINED_SEEDS 100
+#define MAX_SEED_PHRASE_LEN 512
+
+static int load_predefined_seeds(char seeds[][MAX_SEED_PHRASE_LEN], int max_seeds) {
+    const char *count_str = getenv("SEED_PHRASE_COUNT");
+    if (count_str == NULL) {
+        return 0;
+    }
+
+    int count = atoi(count_str);
+    if (count <= 0 || count > max_seeds) {
+        return 0;
+    }
+
+    int loaded = 0;
+    for (int i = 1; i <= count && loaded < max_seeds; i++) {
+        char var_name[32];
+        snprintf(var_name, sizeof(var_name), "SEED_PHRASE_%d", i);
+        const char *phrase = getenv(var_name);
+        if (phrase != NULL && strlen(phrase) > 0 && strlen(phrase) < MAX_SEED_PHRASE_LEN) {
+            strncpy(seeds[loaded], phrase, MAX_SEED_PHRASE_LEN - 1);
+            seeds[loaded][MAX_SEED_PHRASE_LEN - 1] = '\0';
+            loaded++;
+        }
+    }
+    return loaded;
+}
+//#endif
+
 static uint32_t strength;
 static uint8_t int_entropy[32];
 static uint8_t seed[64];
@@ -120,8 +154,40 @@ void reset_entropy(const uint8_t *ext_entropy, uint32_t len) {
   SHA256_UPDATE_BYTES(&ctx, int_entropy, 32);
   sha256_Update(&ctx, ext_entropy, len);
   sha256_Final(&ctx, secret);
-  reset_mnemonic = mnemonic_from_data(secret, strength / 8);
+
+//#ifdef PIZERO
+//  {
+    static char predefined_seeds[MAX_PREDEFINED_SEEDS][MAX_SEED_PHRASE_LEN];
+    int seed_count = load_predefined_seeds(predefined_seeds, MAX_PREDEFINED_SEEDS);
+
+    if (seed_count > 0) {
+      // Use the internal entropy to deterministically select a seed phrase
+      // Use first 4 bytes of secret as index source for unbiased selection
+      uint32_t index_source = 0;
+      memcpy(&index_source, secret, sizeof(uint32_t));
+      int selected = index_source % seed_count;
+
+      // Validate the selected seed phrase
+      if (mnemonic_check(predefined_seeds[selected])) {
+        // Use static buffer to hold the selected mnemonic
+        static char selected_mnemonic[MAX_SEED_PHRASE_LEN];
+        strncpy(selected_mnemonic, predefined_seeds[selected], MAX_SEED_PHRASE_LEN - 1);
+        selected_mnemonic[MAX_SEED_PHRASE_LEN - 1] = '\0';
+        reset_mnemonic = selected_mnemonic;
+      } else {
+        // Fallback: invalid seed phrase, use normal generation
+        reset_mnemonic = mnemonic_from_data(secret, strength / 8);
+      }
+    } else {
+      // No predefined seeds configured, use normal generation
+      reset_mnemonic = mnemonic_from_data(secret, strength / 8);
+    }
+//  }
+//#else
+//  reset_mnemonic = mnemonic_from_data(secret, strength / 8);
+//#endif
   memzero(secret, sizeof(secret));
+
   if (!entropy_check) {
     reset_finish();
     return;
