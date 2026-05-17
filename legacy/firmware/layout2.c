@@ -331,7 +331,7 @@ void layoutHomescreen(void) {
   }
   layoutLast = layoutHomescreen;
 
-  char label[MAX_LABEL_LEN + 1] = _("Go to orinox.com");
+  char label[MAX_LABEL_LEN + 1] = _("Go to orinox.io/start");
   if (config_isInitialized()) {
     config_getLabel(label, sizeof(label));
   }
