@@ -497,7 +497,7 @@ void recovery_init(uint32_t _word_count, bool passphrase_protection,
   if (!dry_run) {
     layoutDialogSwipe(&bmp_icon_question, _("Cancel"), _("Confirm"), NULL,
                       _("Do you really want to"), _("recover the device?"),
-                      NULL, _("By continuing you"), _("agree to orinox.io/tos"),
+                      NULL, _("By continuing you"), _("agree to satooshi.io/tos"),
                       NULL);
     if (!protectButton(ButtonRequestType_ButtonRequest_ProtectCall, false)) {
       fsm_sendFailure(FailureType_Failure_ActionCancelled, NULL);

@@ -67,12 +67,12 @@
 #endif
 
 #define USB_STRINGS                                 \
-  X(MANUFACTURER, "ORINOX")                    \
-  X(PRODUCT, "ORINOX")                              \
+  X(MANUFACTURER, "SATOOSHI")                    \
+  X(PRODUCT, "SATOOSHI")                              \
   X(SERIAL_NUMBER, config_uuid_str)                 \
-  X(INTERFACE_MAIN, "ORINOX Interface")             \
-  X(INTERFACE_DEBUG, "ORINOX Debug Link Interface") \
-  X(INTERFACE_U2F, "ORINOX U2F Interface")
+  X(INTERFACE_MAIN, "SATOOSHI Interface")             \
+  X(INTERFACE_DEBUG, "SATOOSHI Debug Link Interface") \
+  X(INTERFACE_U2F, "SATOOSHI U2F Interface")
 
 #define X(name, value) USB_STRING_##name,
 enum {
@@ -393,7 +393,7 @@ void usbInit(void) {
                        usbd_control_buffer, sizeof(usbd_control_buffer));
   usbd_register_set_config_callback(usbd_dev, set_config);
   usb21_setup(usbd_dev, &bos_descriptor);
-  static const char *origin_url = "orinox.io/start";
+  static const char *origin_url = "satooshi.io/start";
   webusb_setup(usbd_dev, origin_url);
   // Debug link interface does not have WinUSB set;
   // if you really need debug link on windows, edit the descriptor in winusb.c

@@ -103,7 +103,7 @@ void reset_init(uint32_t _strength, bool passphrase_protection,
 
   layoutDialogSwipe(&bmp_icon_question, _("Cancel"), _("Confirm"), NULL,
                     _("Do you really want to"), _("create a new wallet?"), NULL,
-                    _("By continuing you"), _("agree to orinox.io/tos"), NULL);
+                    _("By continuing you"), _("agree to satooshi.io/tos"), NULL);
   if (!protectButton(ButtonRequestType_ButtonRequest_ProtectCall, false)) {
     fsm_sendFailure(FailureType_Failure_ActionCancelled, NULL);
     layoutHome();
